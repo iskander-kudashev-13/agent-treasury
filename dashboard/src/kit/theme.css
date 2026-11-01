@@ -1,0 +1,161 @@
+/*
+ * Agent Treasury design kit — Tailwind v4 theme + motion.
+ * Port of design-kit/agent-treasury-design/design-system/tokens.css (+ tailwind.preset.ts, which is Tailwind v3 syntax).
+ *
+ * Usage (after `@import "tailwindcss";`):
+ *   @import "./kit/theme.css";
+ * Fonts are loaded with <link> tags in the HTML entry (a url @import here would land mid-file after Tailwind inlines it).
+ *
+ * Utility names: bg-bg, bg-surface, bg-surface-sunken, border-line, border-line-strong, text-ink, text-ink-muted,
+ * bg-ok, text-ok, bg-ok-tint, text-warn, text-danger-text, text-info, bg-chain-base, rounded-card, max-w-content, ...
+ */
+
+@theme {
+  --color-bg: #0b0d10;
+  --color-bg-deep: #07080a;
+  --color-surface: #13161b;
+  --color-surface-sunken: #0f1216;
+  --color-surface-raised: #1a1e25;
+  --color-surface-hover: #171b21;
+  --color-track: #1c2028;
+  --color-tile-line: #1e232b;
+  --color-line: #232832;
+  --color-line-strong: #2e3440;
+
+  --color-ink: #e6e8ec;
+  --color-ink-secondary: #a9b1bf;
+  --color-ink-muted: #8a93a3;
+  --color-ink-subtle: #6b7383;
+
+  --color-ok: #2ecc71;
+  --color-ok-tint: rgb(46 204 113 / 0.12);
+  --color-ok-on: #06210f;
+  --color-warn: #f5b544;
+  --color-warn-tint: rgb(245 181 68 / 0.12);
+  --color-warn-soft: rgb(245 181 68 / 0.07);
+  --color-warn-line: rgb(245 181 68 / 0.3);
+  --color-warn-on: #241703;
+  --color-danger: #e5484d;
+  --color-danger-text: #ff8a8e;
+  --color-danger-tint: rgb(229 72 77 / 0.08);
+  --color-info: #8ab4ff;
+  --color-info-tint: rgb(138 180 255 / 0.12);
+  --color-neutral-fill: #aeb5c1;
+
+  /* Assistant surfaces */
+  --color-ai: #141b2b;
+  --color-ai-line: #2b3550;
+  --color-ai-active: #1f2a44;
+  --color-ai-active-line: #3b4a6b;
+  --color-ai-text: #b9d1ff;
+
+  /* Chains: dots and badges only, always paired with the name */
+  --color-chain-base: #3b82f6;
+  --color-chain-ethereum: #94a3b8;
+  --color-chain-arbitrum: #38bdf8;
+  --color-chain-solana: #a78bfa;
+  --color-chain-tron: #f87171;
+  --color-chain-near: #2ecc71;
+
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --text-balance: 40px;
+  --text-balance--line-height: 1.1;
+  --text-balance--letter-spacing: -0.02em;
+  --text-sentence: 18px;
+  --text-sentence--line-height: 1.55;
+
+  --radius-input: 8px;
+  --radius-tile: 10px;
+  --radius-card: 12px;
+  --radius-modal: 14px;
+  --radius-sheet: 16px;
+
+  --container-content: 1280px;
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-sheet: cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@layer base {
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font: 14px/1.45 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--color-info); text-decoration: none; }
+  a:hover { color: var(--color-ai-text); text-decoration: underline; }
+  :focus-visible { outline: none; box-shadow: 0 0 0 3px rgb(46 204 113 / 0.18); }
+}
+
+@utility mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Interaction helpers */
+.at-btn { transition: background 0.15s, border-color 0.15s, transform 0.1s, filter 0.15s; }
+.at-btn:not(:disabled):hover { filter: brightness(1.15); }
+.at-btn:not(:disabled):active { transform: translateY(1px); }
+.at-row { transition: background 0.15s; }
+.at-row:hover { background: var(--color-surface-hover); }
+
+/* Motion — DESIGN_SYSTEM.md §5. Only for state changes. */
+.row-in { animation: at-row-in 0.15s ease-out both; }
+.row-new { animation: at-row-in 0.35s var(--ease-sheet) both, at-new-bg 1.8s ease-out both; }
+.fade-in { animation: at-fade 0.2s ease-out both; }
+.sheet-in { animation: at-sheet 0.3s var(--ease-sheet) both; }
+.drawer-in { animation: at-drawer 0.32s var(--ease-sheet) both; }
+.step-in { animation: at-step 0.32s var(--ease-sheet) both; }
+.card-in { animation: at-card 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.slide-up { animation: at-slide-up 0.3s var(--ease-sheet) both; }
+.delta { animation: at-delta 1.8s ease-out both; }
+.halo { animation: at-halo 1.2s ease-out 1 both; }
+.just-signed { box-shadow: 0 0 18px rgb(46 204 113 / 0.18); }
+.check-draw { stroke-dasharray: 60; stroke-dashoffset: 60; animation: at-draw 0.5s ease-out forwards; }
+.check-pop { animation: at-pop 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
+.spin { animation: at-spin 1s linear infinite; transform-origin: 50% 50%; }
+.fill-transition { transition: width 0.7s var(--ease-out), height 0.7s var(--ease-out), stroke-dashoffset 0.7s var(--ease-out), background 0.3s, stroke 0.3s; }
+.live { position: relative; }
+.live::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--color-ok); animation: at-ping 2.4s var(--ease-out) infinite; }
+.travel { animation: at-travel 2.8s cubic-bezier(0.45, 0.05, 0.35, 1) infinite; }
+.foil { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.foil::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; left: -50%; background: linear-gradient(105deg, transparent 30%, rgb(46 204 113 / 0.1) 50%, transparent 70%); animation: at-foil 1.6s 0.5s ease-in-out 1 both; }
+.skeleton { background: linear-gradient(90deg, #13161b 0%, #1b1f26 50%, #13161b 100%); background-size: 200% 100%; animation: at-shimmer 1.4s linear infinite; }
+.shimmer-privacy { background: linear-gradient(90deg, rgb(138 180 255 / 0.1), rgb(46 204 113 / 0.14), rgb(138 180 255 / 0.1)); background-size: 200% 100%; animation: at-shimmer 4s linear infinite; }
+.typing-dot { animation: at-typing 1.1s ease-in-out infinite; }
+.caret::after { content: ""; display: inline-block; width: 0.55em; height: 1em; margin-left: 2px; vertical-align: text-bottom; background: currentColor; animation: at-blink 1s steps(1) infinite; }
+.secret { filter: blur(4px); transition: filter 0.2s; }
+.secret:hover, .secret:focus, .secret:focus-within { filter: none; }
+.dot-grid { background-image: radial-gradient(rgb(138 147 163 / 0.1) 1px, transparent 1px); background-size: 16px 16px; mask-image: linear-gradient(90deg, transparent 30%, #000 100%); }
+
+@keyframes at-row-in { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes at-new-bg { 0% { background: rgb(46 204 113 / 0.14); } 100% { background: transparent; } }
+@keyframes at-fade { from { opacity: 0; } }
+@keyframes at-sheet { from { opacity: 0; transform: translateY(20px) scale(0.98); } }
+@keyframes at-drawer { from { opacity: 0; transform: translateX(40px); } }
+@keyframes at-step { from { opacity: 0; transform: translateX(14px); } }
+@keyframes at-card { from { opacity: 0; transform: translateY(10px) scale(0.97); } }
+@keyframes at-slide-up { from { opacity: 0; transform: translateY(12px); } }
+@keyframes at-delta { 0% { opacity: 0; transform: translateY(6px); } 15%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-4px); } }
+@keyframes at-halo { 0% { box-shadow: 0 0 0 0 rgb(46 204 113 / 0.5); } 100% { box-shadow: 0 0 0 24px rgb(46 204 113 / 0); } }
+@keyframes at-draw { to { stroke-dashoffset: 0; } }
+@keyframes at-pop { from { opacity: 0; transform: scale(0.4); } }
+@keyframes at-spin { to { transform: rotate(360deg); } }
+@keyframes at-ping { 0% { transform: scale(0.6); opacity: 0.8; } 80%, 100% { transform: scale(1.6); opacity: 0; } }
+@keyframes at-travel { 0% { left: 0%; opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
+@keyframes at-foil { to { left: 120%; } }
+@keyframes at-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes at-typing { 0%, 60%, 100% { transform: none; opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+@keyframes at-blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .row-in, .row-new, .fade-in, .sheet-in, .drawer-in, .step-in, .card-in, .slide-up, .delta, .halo, .check-pop { animation-duration: 1ms; }
+  .live::after, .travel, .foil::after, .spin, .skeleton, .shimmer-privacy, .typing-dot, .caret::after { animation: none; }
+  .check-draw { animation: none; stroke-dashoffset: 0; }
+  .fill-transition, .secret, .at-btn, .at-row { transition: none; }
+}

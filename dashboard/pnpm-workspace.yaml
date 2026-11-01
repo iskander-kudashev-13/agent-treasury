@@ -1,0 +1,7 @@
+allowBuilds:
+  secp256k1: false
+  unrs-resolver: false
+minimumReleaseAgeExclude:
+  - globals@17.14.0
+  - '@tanstack/query-core@5.105.1'
+  - '@tanstack/react-query@5.105.1'
