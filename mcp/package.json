@@ -1,0 +1,37 @@
+{
+  "name": "agent-treasury-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that lets an AI agent pay from an Agent Treasury vault within its on-chain mandate",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "agent-treasury-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "agent-treasury-sdk": "link:../sdk",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@types/node": "20.19.39",
+    "eslint": "10.14.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5"
+  }
+}

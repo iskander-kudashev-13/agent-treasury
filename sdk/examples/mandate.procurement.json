@@ -1,0 +1,11 @@
+{
+  "daily_limit": "200000000",
+  "per_tx_limit": "100000000",
+  "approval_threshold": "100000000",
+  "max_payments_per_day": 10,
+  "allowed_chains": ["base", "sol", "arb"],
+  "recipients_mode": "Open",
+  "allowlist": [],
+  "recipients": [],
+  "expires_at": null
+}
