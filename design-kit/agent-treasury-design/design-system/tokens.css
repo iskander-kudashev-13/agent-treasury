@@ -1,0 +1,63 @@
+/* Agent Treasury — design tokens + motion. Import once in /dashboard/src/index.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #0B0D10; --bg-deep: #07080A;
+  --surface: #13161B; --surface-sunken: #0F1216; --surface-raised: #1A1E25; --surface-hover: #171B21;
+  --track: #1C2028; --border: #232832; --border-strong: #2E3440;
+  --text: #E6E8EC; --text-secondary: #A9B1BF; --text-muted: #8A93A3; --text-subtle: #6B7383;
+  --green: #2ECC71; --green-tint: rgba(46,204,113,.12); --on-green: #06210F;
+  --amber: #F5B544; --amber-tint: rgba(245,181,68,.12); --on-amber: #241703;
+  --red: #E5484D; --red-text: #FF8A8E; --red-tint: rgba(229,72,77,.08);
+  --info: #8AB4FF; --info-tint: rgba(138,180,255,.12); --neutral-fill: #AEB5C1;
+  --chain-base: #3B82F6; --chain-ethereum: #94A3B8; --chain-arbitrum: #38BDF8;
+  --chain-solana: #A78BFA; --chain-tron: #F87171; --chain-near: #2ECC71;
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --ease-out: cubic-bezier(.2,.7,.2,1); --ease-sheet: cubic-bezier(.2,.9,.3,1);
+}
+
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font-sans); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(46,204,113,.18); border-color: var(--green); }
+
+/* Motion — see DESIGN_SYSTEM.md §5 */
+.row-in   { animation: at-row-in .15s ease-out both; }
+.row-new  { animation: at-row-in .35s var(--ease-sheet) both, at-new-bg 1.8s ease-out both; }
+.sheet-in { animation: at-sheet .3s var(--ease-sheet) both; }
+.drawer-in{ animation: at-drawer .32s var(--ease-sheet) both; }
+.step-in  { animation: at-step .32s var(--ease-sheet) both; }
+.card-in  { animation: at-card .4s cubic-bezier(.2,.9,.3,1.2) both; }
+.delta    { animation: at-delta 1.8s ease-out both; }
+.halo     { animation: at-halo 1.2s ease-out 1 both; }
+.check-draw { stroke-dasharray: 60; stroke-dashoffset: 60; animation: at-draw .5s ease-out forwards; }
+.spin     { animation: at-spin 1s linear infinite; transform-origin: 50% 50%; }
+.fill-transition { transition: width .7s var(--ease-out), stroke-dashoffset .7s var(--ease-out), background .3s, stroke .3s; }
+.live { position: relative; }
+.live::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--green); animation: at-ping 2.4s var(--ease-out) infinite; }
+.foil { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.foil::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; left: -50%; background: linear-gradient(105deg, transparent 30%, rgba(46,204,113,.10) 50%, transparent 70%); animation: at-foil 1.6s .5s ease-in-out 1 both; }
+.skeleton { background: linear-gradient(90deg, #13161B 0%, #1B1F26 50%, #13161B 100%); background-size: 200% 100%; animation: at-shimmer 1.4s linear infinite; }
+.secret { filter: blur(4px); transition: filter .2s; }
+.secret:hover, .secret:focus { filter: none; }
+
+@keyframes at-row-in { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes at-new-bg { 0% { background: rgba(46,204,113,.14); } 100% { background: transparent; } }
+@keyframes at-sheet  { from { opacity: 0; transform: translateY(20px) scale(.98); } }
+@keyframes at-drawer { from { opacity: 0; transform: translateX(40px); } }
+@keyframes at-step   { from { opacity: 0; transform: translateX(14px); } }
+@keyframes at-card   { from { opacity: 0; transform: translateY(10px) scale(.97); } }
+@keyframes at-delta  { 0% { opacity: 0; transform: translateY(6px); } 15%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-4px); } }
+@keyframes at-halo   { 0% { box-shadow: 0 0 0 0 rgba(46,204,113,.5); } 100% { box-shadow: 0 0 0 24px rgba(46,204,113,0); } }
+@keyframes at-draw   { to { stroke-dashoffset: 0; } }
+@keyframes at-spin   { to { transform: rotate(360deg); } }
+@keyframes at-ping   { 0% { transform: scale(.6); opacity: .8; } 80%, 100% { transform: scale(1.6); opacity: 0; } }
+@keyframes at-foil   { to { left: 120%; } }
+@keyframes at-shimmer{ from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .row-in, .row-new, .sheet-in, .drawer-in, .step-in, .card-in, .delta, .halo { animation-duration: 1ms; }
+  .live::after, .foil::after, .spin, .skeleton { animation: none; }
+  .check-draw { animation: none; stroke-dashoffset: 0; }
+  .fill-transition, .secret { transition: none; }
+}

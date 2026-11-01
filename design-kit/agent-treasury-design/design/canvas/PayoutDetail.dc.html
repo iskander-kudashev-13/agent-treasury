@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Payout detail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D10}
+a{color:#8AB4FF;text-decoration:none}a:hover{color:#B9D1FF;text-decoration:underline}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.step-in{animation:stepIn .35s cubic-bezier(.2,.9,.3,1) both}
+@keyframes stepIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+.pop{animation:pop .3s cubic-bezier(.2,.9,.3,1.4) both}
+@keyframes pop{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
+.spin{animation:spin 1s linear infinite;transform-origin:50% 50%}
+@keyframes spin{to{transform:rotate(360deg)}}
+.line{transition:height .6s cubic-bezier(.2,.7,.2,1)}
+.glow{box-shadow:0 0 0 1px #2ECC71,0 0 22px rgba(46,204,113,.35);transition:box-shadow .4s}
+.btn:hover{filter:brightness(1.12)}
+@media (prefers-reduced-motion:reduce){.step-in,.pop{animation-duration:1ms}.spin{animation:none}.line{transition:none}}
+</style>
+</helmet>
+<div style="width: 560px; height: 900px; box-sizing: border-box; background: #0B0D10; padding: 20px; font-family: Inter, system-ui, sans-serif; color: #E6E8EC; font-size: 14px">
+<div role="dialog" aria-labelledby="t-pd" class="{{cardClass}}" style="height: 100%; box-sizing: border-box; background: #13161B; border: 1px solid #232832; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden">
+
+<div style="padding: 20px 22px; border-bottom: 1px solid #232832; display: flex; flex-direction: column; gap: 10px; position: relative">
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="font-size: 12px; color: #8A93A3">Payout</span><span class="mono" style="font-size: 12px; color: #8A93A3">#0042</span>
+<div style="flex-grow: 1"></div>
+<a href="Main.dc.html" aria-label="Close" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #8A93A3"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></a>
+</div>
+<h2 id="t-pd" style="margin: 0; font-size: 20px; font-weight: 600">Maria Ivanova</h2>
+<div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap">
+<span class="mono" style="font-size: 32px; font-weight: 600; letter-spacing: -.02em">1,200.00</span><span style="color: #8A93A3">USDC</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; color: #A9B1BF">→ <span style="width: 10px; height: 10px; border-radius: 50%; background: #3B82F6"></span>Base</span>
+<div style="flex-grow: 1"></div>
+<span style="height: 26px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; font-size: 12px; font-weight: 600; background: {{badgeBg}}; color: {{badgeFg}}">{{badgeText}}</span>
+</div>
+</div>
+
+<ol style="list-style: none; margin: 0; padding: 22px 22px 8px; flex: 1; overflow: auto; position: relative">
+<div aria-hidden="true" style="position: absolute; left: 37px; top: 34px; bottom: 60px; width: 2px; background: #1C2028"></div>
+<div class="line" aria-hidden="true" style="position: absolute; left: 37px; top: 34px; width: 2px; height: {{lineH}}px; background: linear-gradient(#2ECC71, #2ECC71 85%, rgba(46,204,113,.2))"></div>
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+<li class="{{s.anim}}" style="position: relative; display: flex; gap: 14px; padding-bottom: 20px; opacity: {{s.opacity}}">
+<span style="width: 32px; height: 32px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #13161B; position: relative; z-index: 1">
+<sc-if value="{{s.done}}" hint-placeholder-val="{{ true }}"><svg class="pop" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#12301F" stroke="#2ECC71" stroke-width="1.2"></circle><path d="m7.5 12.5 3 3 6-6.5" fill="none" stroke="#2ECC71" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if>
+<sc-if value="{{s.active}}" hint-placeholder-val="{{ false }}"><svg class="spin" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#1F1A0C" stroke="rgba(245,181,68,.3)" stroke-width="2"></circle><path d="M12 2a10 10 0 0 1 10 10" fill="none" stroke="#F5B544" stroke-width="2" stroke-linecap="round"></path></svg></sc-if>
+<sc-if value="{{s.todo}}" hint-placeholder-val="{{ false }}"><svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#13161B" stroke="#2E3440" stroke-width="1.5" stroke-dasharray="3 3"></circle></svg></sc-if>
+</span>
+<div style="flex: 1; min-width: 0; padding-top: 4px">
+<div style="display: flex; gap: 8px; align-items: baseline"><span style="font-weight: 600">{{s.title}}</span><div style="flex-grow: 1"></div><span class="mono" style="font-size: 12px; color: #6B7383">{{s.time}}</span></div>
+<div style="font-size: 13px; color: #8A93A3; margin-top: 2px">{{s.body}}</div>
+<sc-if value="{{s.hasLink}}" hint-placeholder-val="{{ true }}"><a href="#" style="font-size: 12px; display: inline-block; margin-top: 4px" class="mono">{{s.link}}</a></sc-if>
+</div>
+</li>
+</sc-for>
+</ol>
+
+<div style="padding: 14px 22px; border-top: 1px solid #232832; display: flex; align-items: center; gap: 10px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2ECC71" stroke-width="2" aria-hidden="true"><path d="M12 2 20 5v6c0 5-3.4 9-8 11-4.6-2-8-6-8-11V5z"></path></svg>
+<span style="font-size: 12px; color: #8A93A3">Requested by a TEE agent with an approved code hash</span>
+<div style="flex-grow: 1"></div>
+<button class="btn" onClick="{{replay}}" style="height: 36px; padding: 0 12px; background: transparent; border: 1px solid #2E3440; border-radius: 8px; color: #E6E8EC; font: inherit; font-size: 13px; cursor: pointer">Replay</button>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":560,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { step: 0 }; }
+  componentDidMount() { this.run(); }
+  componentWillUnmount() { clearInterval(this.iv); }
+  run() {
+    clearInterval(this.iv);
+    this.setState({ step: 0 });
+    this.iv = setInterval(() => {
+      if (this.state.step >= 6) { clearInterval(this.iv); return; }
+      this.setState((s) => ({ step: s.step + 1 }));
+    }, 750);
+  }
+  renderVals() {
+    const n = this.state.step;
+    const data = [
+      { title: 'Requested by agent', time: '10:02:14', body: 'agent-01.vault.example.testnet', link: 'NEAR tx 8Hk2…x9Qa ↗' },
+      { title: 'Waiting for approval → approved', time: '10:14:40', body: 'Above threshold 1,000 · approved by iskander.testnet', link: 'NEAR tx 3Fp7…Lm2c ↗' },
+      { title: 'Reserved in vault', time: '10:14:41', body: '1,200.00 USDC held · 1,650.00 left today', link: '' },
+      { title: 'Sent to NEAR Intents', time: '10:14:43', body: 'Deposit address 0x9a4e…11fd', link: 'ft_transfer 5Qe1…Pz8r ↗' },
+      { title: 'Intents swap & bridge', time: '10:15:20', body: 'Pending → Success', link: 'Track on Intents explorer ↗' },
+      { title: 'Arrived on Base', time: '10:16:02', body: 'Received by 0x71C0…a3E9', link: 'basescan 0xa1b2…c3d4 ↗' }
+    ];
+    const done = n >= 6;
+    return {
+      steps: data.map((d, i) => ({
+        title: d.title, time: i < n ? d.time : '', body: d.body, link: d.link, hasLink: !!d.link && i < n,
+        done: i < n, active: i === n && !done, todo: i > n,
+        opacity: i <= n ? 1 : 0.45, anim: i <= n ? 'step-in' : ''
+      })),
+      lineH: Math.min(n, 5) * 84,
+      badgeText: done ? 'Money arrived' : 'In progress · step ' + (n + 1) + ' of 6',
+      badgeBg: done ? 'rgba(46,204,113,.14)' : 'rgba(245,181,68,.14)',
+      badgeFg: done ? '#2ECC71' : '#F5B544',
+      cardClass: done ? 'glow' : '',
+      replay: () => this.run()
+    };
+  }
+}
+</script>
+</body>
+</html>

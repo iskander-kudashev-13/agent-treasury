@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Treasury — Agents</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D10}
+a{color:#8AB4FF;text-decoration:none}a:hover{color:#B9D1FF;text-decoration:underline}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.btn{transition:filter .15s,transform .1s}.btn:hover{filter:brightness(1.15)}.btn:active{transform:translateY(1px)}
+.card{transition:border-color .2s,background .2s}.card:hover{border-color:#2E3440}
+.rise{animation:rise .4s cubic-bezier(.2,.9,.3,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}}
+.bar{transition:width .8s cubic-bezier(.2,.7,.2,1),background .3s}
+.live{position:relative}
+.live::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid #2ECC71;animation:ping 2.4s cubic-bezier(.2,.7,.2,1) infinite}
+@keyframes ping{0%{transform:scale(.6);opacity:.8}80%,100%{transform:scale(1.6);opacity:0}}
+.fade{animation:fade .2s ease-out both}@keyframes fade{from{opacity:0}}
+@media (prefers-reduced-motion:reduce){.rise,.fade{animation-duration:1ms}.live::after{animation:none}.bar{transition:none}}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0B0D10; color: #E6E8EC; font-family: Inter, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
+<header style="border-bottom: 1px solid #232832; background: rgba(11,13,16,.86)">
+<div style="max-width: 1280px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+<span style="font-weight: 600; font-size: 15px">Agent Treasury</span>
+<span style="height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 999px; background: rgba(245,181,68,.14); color: #F5B544; font-size: 12px">testnet</span>
+<nav style="display: flex; gap: 4px; flex-wrap: wrap" aria-label="Main">
+<a href="Main.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Treasury</a>
+<a href="Agents.dc.html" style="padding: 6px 10px; border-radius: 8px; background: #1A1E25; color: #E6E8EC; text-decoration: none">Agents</a>
+<a href="Payments.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Payments</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Payouts</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Policy</a>
+</nav>
+<div style="flex-grow: 1"></div>
+<span class="mono" style="font-size: 12px; color: #8A93A3">iskander.testnet · owner</span>
+</div>
+</header>
+
+<main style="max-width: 1280px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap">
+<div style="flex: 1 1 320px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600">Agents</h1>
+<p style="margin: 4px 0 0; color: #8A93A3">Each agent spends only inside its own mandate. The vault policy applies on top.</p>
+</div>
+<a class="btn" href="AddAgent.dc.html" style="height: 40px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; background: #2ECC71; color: #06210F; border-radius: 8px; font-weight: 600; text-decoration: none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add agent</a>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 14px 16px"><div style="font-size: 12px; color: #8A93A3">Active agents</div><div class="mono" style="font-size: 22px; font-weight: 600">{{activeCount}}</div></div>
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 14px 16px"><div style="font-size: 12px; color: #8A93A3">Spent by agents today</div><div class="mono" style="font-size: 22px; font-weight: 600">1,350.00 <span style="font-size: 13px; color: #8A93A3">USDC</span></div></div>
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 14px 16px"><div style="font-size: 12px; color: #8A93A3">Waiting for approval</div><div class="mono" style="font-size: 22px; font-weight: 600; color: #F5B544">1</div></div>
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 14px 16px"><div style="font-size: 12px; color: #8A93A3">Refused today</div><div class="mono" style="font-size: 22px; font-weight: 600; color: #A9B1BF">2</div><div style="font-size: 11px; color: #6B7383">normal operation — limits working</div></div>
+</div>
+
+<section aria-label="Agents" style="display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{agents}}" as="a" hint-placeholder-count="3">
+<article class="card rise" style="animation-delay: {{a.delay}}; background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: center; opacity: {{a.opacity}}">
+<div style="display: flex; gap: 14px; flex: 1 1 380px; min-width: 0">
+<span style="width: 44px; height: 44px; flex: none; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: {{a.iconBg}}; border: 1px solid {{a.iconBorder}}">
+<sc-if value="{{a.isTee}}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="{{a.iconColor}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="TEE agent"><path d="M12 2 20 5v6c0 5-3.4 9-8 11-4.6-2-8-6-8-11V5z"></path><path d="m9 12 2 2 4-4"></path></svg></sc-if>
+<sc-if value="{{a.isKey}}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A9B1BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Key agent"><circle cx="8" cy="15" r="4"></circle><path d="m10.8 12.2 8.2-8.2M17 6l2 2M15 8l2 2"></path></svg></sc-if>
+</span>
+<div style="min-width: 0; display: flex; flex-direction: column; gap: 3px">
+<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+<span style="font-weight: 600; font-size: 16px">{{a.name}}</span>
+<span class="mono" style="font-size: 12px; color: #8A93A3">{{a.trust}}</span>
+</div>
+<div style="color: #A9B1BF">{{a.summary}}</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px">
+<sc-if value="{{a.hasPending}}" hint-placeholder-val="{{ false }}"><span style="height: 22px; padding: 0 8px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; background: rgba(245,181,68,.12); color: #F5B544; font-size: 12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>1 payment waiting for approval</span></sc-if>
+<sc-if value="{{a.hasRefused}}" hint-placeholder-val="{{ false }}"><span style="height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 999px; border: 1px solid #2E3440; color: #A9B1BF; font-size: 12px">{{a.refusedText}}</span></sc-if>
+</div>
+</div>
+</div>
+
+<sc-if value="{{a.showBar}}" hint-placeholder-val="{{ true }}">
+<div style="flex: 1 1 260px; min-width: 220px">
+<div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px"><span style="color: #8A93A3">Today</span><span class="mono"><b style="font-weight: 600">{{a.spentText}}</b><span style="color: #8A93A3"> / {{a.limitText}} USDC</span></span></div>
+<div style="height: 8px; border-radius: 999px; background: #1C2028; overflow: hidden"><div class="bar" style="height: 100%; width: {{a.barW}}%; background: {{a.barColor}}; border-radius: 999px"></div></div>
+<div style="font-size: 12px; color: #6B7383; margin-top: 6px">{{a.last}}</div>
+</div>
+</sc-if>
+
+<div style="display: flex; align-items: center; gap: 12px; flex: 0 0 auto; margin-left: auto">
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: {{a.statusColor}}; min-width: 84px">
+<sc-if value="{{a.isActive}}" hint-placeholder-val="{{ true }}"><span class="live" style="width: 8px; height: 8px; border-radius: 50%; background: #2ECC71"></span></sc-if>
+<sc-if value="{{a.isPaused}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F5B544"></span></sc-if>
+<sc-if value="{{a.isRevoked}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #6B7383; box-sizing: border-box"></span></sc-if>
+{{a.statusText}}</span>
+<sc-if value="{{a.canPause}}" hint-placeholder-val="{{ true }}"><button class="btn" onClick="{{a.toggle}}" style="height: 36px; padding: 0 14px; background: transparent; color: #E6E8EC; border: 1px solid #2E3440; border-radius: 8px; font: inherit; cursor: pointer">{{a.toggleLabel}}</button></sc-if>
+<a class="btn" href="{{a.href}}" style="height: 36px; padding: 0 14px; display: inline-flex; align-items: center; background: #1A1E25; color: #E6E8EC; border: 1px solid #2E3440; border-radius: 8px; text-decoration: none">Open →</a>
+</div>
+</article>
+</sc-for>
+</section>
+</main>
+
+<sc-if value="{{hasToast}}" hint-placeholder-val="{{ false }}">
+<div class="fade" role="status" style="position: fixed; right: 24px; bottom: 24px; padding: 12px 14px; background: #1A1E25; border: 1px solid #2E3440; border-radius: 10px; display: flex; gap: 10px; align-items: center; max-width: 380px"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{toastColor}}; flex: none"></span><span>{{toastText}}</span></div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.state = {
+      mounted: false, toast: null,
+      agents: [
+        { id: 'payroll', name: 'payroll', kind: 'tee', trust: 'TEE · verified 7f3a…c21', summary: 'Pays 5 fixed recipients monthly', spent: 1200, limit: 2000, status: 'active', pending: false, refused: 0, last: 'last request 12m ago' },
+        { id: 'procurement', name: 'procurement', kind: 'key', trust: 'Key · ed25519:9Hk2…pQ', summary: 'Any address on Base, Solana · up to 50 per payment', spent: 150, limit: 200, status: 'active', pending: true, refused: 2, last: 'last request 2m ago' },
+        { id: 'old-bot', name: 'old-bot', kind: 'key', trust: 'Key · ed25519:3Fa1…Lm', summary: 'Revoked 3 days ago', spent: 0, limit: 0, status: 'revoked', pending: false, refused: 0, last: '' }
+      ]
+    };
+  }
+  componentDidMount() { this.m = setTimeout(() => this.setState({ mounted: true }), 60); }
+  componentWillUnmount() { clearTimeout(this.m); clearTimeout(this.t); }
+  fmt(n) { return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  toggle(a) {
+    const next = a.status === 'active' ? 'paused' : 'active';
+    this.setState((s) => ({ agents: s.agents.map((x) => x.id === a.id ? Object.assign({}, x, { status: next }) : x) }));
+    clearTimeout(this.t);
+    this.setState({ toast: { text: next === 'paused' ? a.name + ' paused. Other agents keep working.' : a.name + ' resumed.', color: next === 'paused' ? '#F5B544' : '#2ECC71' } });
+    this.t = setTimeout(() => this.setState({ toast: null }), 2800);
+  }
+  renderVals() {
+    const s = this.state;
+    return {
+      activeCount: s.agents.filter((a) => a.status === 'active').length + ' of ' + s.agents.length,
+      agents: s.agents.map((a, i) => {
+        const pct = a.limit ? a.spent / a.limit : 0;
+        const revoked = a.status === 'revoked';
+        return {
+          name: a.name, trust: a.trust, summary: a.summary, last: a.last,
+          isTee: a.kind === 'tee', isKey: a.kind === 'key',
+          iconBg: a.kind === 'tee' ? 'rgba(46,204,113,.10)' : '#1A1E25',
+          iconBorder: a.kind === 'tee' ? 'rgba(46,204,113,.35)' : '#2E3440',
+          iconColor: '#2ECC71',
+          hasPending: a.pending && !revoked, hasRefused: a.refused > 0, refusedText: a.refused + ' refused today',
+          showBar: !revoked,
+          spentText: this.fmt(a.spent), limitText: this.fmt(a.limit),
+          barW: s.mounted ? (pct * 100).toFixed(1) : 0,
+          barColor: pct >= 1 ? '#E5484D' : pct >= 0.8 ? '#F5B544' : '#AEB5C1',
+          isActive: a.status === 'active', isPaused: a.status === 'paused', isRevoked: revoked,
+          statusText: a.status === 'active' ? 'Active' : a.status === 'paused' ? 'Paused' : 'Revoked',
+          statusColor: a.status === 'active' ? '#2ECC71' : a.status === 'paused' ? '#F5B544' : '#8A93A3',
+          canPause: !revoked, toggleLabel: a.status === 'active' ? 'Pause' : 'Resume',
+          toggle: () => this.toggle(a),
+          href: a.id === 'procurement' ? 'AgentDetail.dc.html' : '#',
+          opacity: revoked ? 0.55 : 1, delay: (i * 0.06) + 's'
+        };
+      }),
+      hasToast: !!s.toast, toastText: s.toast ? s.toast.text : '', toastColor: s.toast ? s.toast.color : '#2ECC71'
+    };
+  }
+}
+</script>
+</body>
+</html>

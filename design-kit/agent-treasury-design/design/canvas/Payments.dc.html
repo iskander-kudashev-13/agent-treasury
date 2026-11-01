@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Treasury — Payments</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D10}
+a{color:#8AB4FF;text-decoration:none}a:hover{color:#B9D1FF;text-decoration:underline}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.btn{transition:filter .15s,transform .1s}.btn:hover{filter:brightness(1.15)}.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.inp{height:40px;box-sizing:border-box;padding:0 12px;background:#0F1216;border:1px solid #2E3440;border-radius:8px;color:#E6E8EC;font:inherit;transition:border-color .15s,box-shadow .15s}
+.inp:focus{outline:none;border-color:#2ECC71;box-shadow:0 0 0 3px rgba(46,204,113,.18)}
+.inp.err{border-color:#E5484D}.inp.ok{border-color:rgba(46,204,113,.6)}
+.inp:disabled{opacity:.45}
+.trow{transition:background .15s}.trow:hover{background:#171B21}
+.row-in{animation:rowIn .35s cubic-bezier(.2,.9,.3,1) both,newbg 1.8s ease-out both}
+@keyframes rowIn{from{opacity:0;transform:translateY(-8px)}}
+@keyframes newbg{0%{background:rgba(46,204,113,.14)}100%{background:transparent}}
+.drawer{animation:drawer .32s cubic-bezier(.2,.9,.3,1) both}@keyframes drawer{from{transform:translateX(40px);opacity:0}}
+.fade{animation:fade .2s ease-out both}@keyframes fade{from{opacity:0}}
+.pop{animation:pop .25s cubic-bezier(.2,.9,.3,1.3) both}@keyframes pop{from{opacity:0;transform:scale(.9)}}
+.uline{transition:left .25s cubic-bezier(.2,.7,.2,1),width .25s cubic-bezier(.2,.7,.2,1)}
+.date-chip{transition:transform .2s}.date-chip:hover{transform:translateY(-2px)}
+@media (prefers-reduced-motion:reduce){.row-in,.drawer,.fade,.pop{animation-duration:1ms}.uline{transition:none}}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0B0D10; color: #E6E8EC; font-family: Inter, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
+<header style="border-bottom: 1px solid #232832">
+<div style="max-width: 1280px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+<span style="font-weight: 600; font-size: 15px">Agent Treasury</span>
+<span style="height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 999px; background: rgba(245,181,68,.14); color: #F5B544; font-size: 12px">testnet</span>
+<nav style="display: flex; gap: 4px; flex-wrap: wrap" aria-label="Main">
+<a href="Main.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Treasury</a>
+<a href="Agents.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Agents</a>
+<a href="Payments.dc.html" style="padding: 6px 10px; border-radius: 8px; background: #1A1E25; color: #E6E8EC; text-decoration: none">Payments</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Payouts</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Policy</a>
+</nav>
+<div style="flex-grow: 1"></div>
+<a class="btn" href="Assistant.dc.html" style="height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid #2B3550; background: #141B2B; color: #B9D1FF; text-decoration: none; font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>Assistant</a>
+</div>
+</header>
+
+<main style="max-width: 1280px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap">
+<div style="flex: 1 1 420px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600">Payments</h1>
+<p style="margin: 4px 0 0; color: #8A93A3; max-width: 720px">Scheduled payments are paid by the agent you assign, on the dates you set. Agents can also pay on demand within their mandate — see <a href="Agents.dc.html">Agents</a>.</p>
+</div>
+<a class="btn" href="Assistant.dc.html" style="height: 40px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid #2E3440; color: #E6E8EC; text-decoration: none">Ask assistant</a>
+<button class="btn" onClick="{{primaryAction}}" style="height: 40px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; background: #2ECC71; color: #06210F; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>{{primaryLabel}}</button>
+</div>
+
+<div role="tablist" aria-label="Payments" style="position: relative; display: flex; gap: 4px; border-bottom: 1px solid #232832">
+<button role="tab" aria-selected="{{tabSched}}" onClick="{{goSched}}" style="height: 44px; padding: 0 16px; background: none; border: 0; font: inherit; font-weight: 500; cursor: pointer; color: {{schedTabFg}}">Scheduled <span class="mono" style="margin-left: 6px; font-size: 12px; color: #8A93A3">{{schedCount}}</span></button>
+<button role="tab" aria-selected="{{tabRec}}" onClick="{{goRec}}" style="height: 44px; padding: 0 16px; background: none; border: 0; font: inherit; font-weight: 500; cursor: pointer; color: {{recTabFg}}">Recipients <span class="mono" style="margin-left: 6px; font-size: 12px; color: #8A93A3">{{recCount}}</span></button>
+<span class="uline" aria-hidden="true" style="position: absolute; bottom: -1px; height: 2px; background: #2ECC71; left: {{ulLeft}}px; width: {{ulW}}px"></span>
+</div>
+
+<sc-if value="{{tabSched}}" hint-placeholder-val="{{ true }}">
+<div class="fade" style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+<span style="font-size: 12px; color: #8A93A3">Paid by</span>
+<sc-for list="{{agentFilters}}" as="af" hint-placeholder-count="3">
+<button onClick="{{af.pick}}" aria-pressed="{{af.on}}" style="height: 32px; padding: 0 12px; border-radius: 999px; font: inherit; font-size: 13px; cursor: pointer; background: {{af.bg}}; border: 1px solid {{af.border}}; color: {{af.fg}}">{{af.label}}</button>
+</sc-for>
+<div style="flex-grow: 1"></div>
+<span style="font-size: 12px; color: #6B7383">Sorted by next payment</span>
+</div>
+<section style="background: #13161B; border: 1px solid #232832; border-radius: 12px; overflow: hidden">
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 1060px; border-collapse: collapse">
+<thead><tr style="text-align: left; font-size: 12px; color: #8A93A3">
+<th style="padding: 12px 20px; font-weight: 500; border-bottom: 1px solid #232832">Recipient</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832; text-align: right">Amount</th>
+<th style="padding: 12px 8px 12px 20px; font-weight: 500; border-bottom: 1px solid #232832">Frequency</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Next payment</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Paid by</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Progress</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Status</th>
+<th style="padding: 12px 20px; font-weight: 500; border-bottom: 1px solid #232832; text-align: right">Actions</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{schedRows}}" as="r" hint-placeholder-count="8">
+<tr class="trow {{r.cls}}" style="opacity: {{r.opacity}}">
+<td style="padding: 12px 20px; border-bottom: 1px solid #1C2028"><div style="display: flex; align-items: center; gap: 10px"><span style="width: 30px; height: 30px; border-radius: 50%; background: {{r.avatar}}; color: #0B0D10; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: none">{{r.initials}}</span><div><div style="font-weight: 500">{{r.name}}</div><div style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #8A93A3"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.chainColor}}"></span>{{r.chain}}</div></div></div></td>
+<td class="mono" style="padding: 12px 8px; border-bottom: 1px solid #1C2028; text-align: right; font-weight: 600">{{r.amount}}</td>
+<td style="padding: 12px 8px 12px 20px; border-bottom: 1px solid #1C2028; color: #C9CED6">{{r.freq}}</td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028"><div style="color: {{r.nextColor}}; font-weight: {{r.nextWeight}}">{{r.next}}</div><div style="font-size: 12px; color: {{r.nextSubColor}}">{{r.nextSub}}</div></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028"><span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px">
+<sc-if value="{{r.isTee}}" hint-placeholder-val="{{ true }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2ECC71" stroke-width="2" aria-hidden="true"><path d="M12 2 20 5v6c0 5-3.4 9-8 11-4.6-2-8-6-8-11V5z"></path></svg></sc-if>
+<sc-if value="{{r.isKey}}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A9B1BF" stroke-width="2" aria-hidden="true"><circle cx="8" cy="15" r="4"></circle><path d="m10.8 12.2 8.2-8.2M17 6l2 2"></path></svg></sc-if>
+{{r.agent}}</span></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028; font-size: 13px; color: #A9B1BF">{{r.progress}}<sc-if value="{{r.hasBar}}" hint-placeholder-val="{{ false }}"><div style="width: 90px; height: 4px; border-radius: 4px; background: #232832; margin-top: 4px; overflow: hidden"><div style="height: 100%; width: {{r.barW}}%; background: #AEB5C1"></div></div></sc-if></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028"><span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: {{r.statusColor}}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.statusDot}}; border: 1.5px solid {{r.statusColor}}; box-sizing: border-box"></span>{{r.status}}</span></td>
+<td style="padding: 12px 20px; border-bottom: 1px solid #1C2028; text-align: right; white-space: nowrap">
+<sc-if value="{{r.isOverdue}}" hint-placeholder-val="{{ false }}"><button class="btn" onClick="{{r.approve}}" style="height: 32px; padding: 0 10px; margin-right: 6px; background: #F5B544; border: 0; border-radius: 8px; color: #241703; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">Approve</button></sc-if>
+<button aria-label="Edit {{r.name}}" style="height: 32px; padding: 0 8px; background: none; border: 0; color: #8AB4FF; font: inherit; font-size: 13px; cursor: pointer">Edit</button>
+<sc-if value="{{r.canToggle}}" hint-placeholder-val="{{ true }}"><button onClick="{{r.toggle}}" style="height: 32px; padding: 0 8px; background: none; border: 0; color: #8AB4FF; font: inherit; font-size: 13px; cursor: pointer">{{r.toggleLabel}}</button></sc-if>
+<sc-if value="{{r.canToggle}}" hint-placeholder-val="{{ true }}"><button onClick="{{r.end}}" style="height: 32px; padding: 0 8px; background: none; border: 0; color: #8A93A3; font: inherit; font-size: 13px; cursor: pointer">End</button></sc-if>
+</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{tabRec}}" hint-placeholder-val="{{ false }}">
+<section class="fade" style="background: #13161B; border: 1px solid #232832; border-radius: 12px; overflow: hidden">
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 820px; border-collapse: collapse">
+<thead><tr style="text-align: left; font-size: 12px; color: #8A93A3">
+<th style="padding: 12px 20px; font-weight: 500; border-bottom: 1px solid #232832">Name</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Chain</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Address</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Schedules</th>
+<th style="padding: 12px 8px; font-weight: 500; border-bottom: 1px solid #232832">Last paid</th>
+<th style="padding: 12px 20px; font-weight: 500; border-bottom: 1px solid #232832; text-align: right">Actions</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{recRows}}" as="r" hint-placeholder-count="8">
+<tr class="trow {{r.cls}}">
+<td style="padding: 12px 20px; border-bottom: 1px solid #1C2028"><div style="display: flex; align-items: center; gap: 10px"><span style="width: 30px; height: 30px; border-radius: 50%; background: {{r.avatar}}; color: #0B0D10; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">{{r.initials}}</span><span style="font-weight: 500">{{r.name}}</span></div></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028"><span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid #2E3440; font-size: 12px"><span style="width: 9px; height: 9px; border-radius: 50%; background: {{r.chainColor}}"></span>{{r.chain}}</span></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028"><span class="mono" style="font-size: 12px; color: #A9B1BF">{{r.addr}}</span><button aria-label="Copy address" style="width: 28px; height: 28px; background: none; border: 0; color: #6B7383; cursor: pointer; vertical-align: middle"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg></button></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028"><button onClick="{{r.showSched}}" style="background: none; border: 0; padding: 0; color: #8AB4FF; font: inherit; font-size: 13px; cursor: pointer">{{r.schedText}}</button></td>
+<td style="padding: 12px 8px; border-bottom: 1px solid #1C2028; color: #A9B1BF; font-size: 13px">{{r.lastPaid}}</td>
+<td style="padding: 12px 20px; border-bottom: 1px solid #1C2028; text-align: right; white-space: nowrap"><button style="height: 32px; padding: 0 8px; background: none; border: 0; color: #8AB4FF; font: inherit; font-size: 13px; cursor: pointer">Edit</button><button disabled="{{r.removeBlocked}}" title="{{r.removeTitle}}" style="height: 32px; padding: 0 8px; background: none; border: 0; color: {{r.removeColor}}; font: inherit; font-size: 13px; cursor: pointer">Remove</button></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="padding: 10px 20px; font-size: 12px; color: #6B7383">Remove is blocked while active schedules use a recipient — end its schedules first.</div>
+</section>
+</sc-if>
+</main>
+
+<sc-if value="{{drawer}}" hint-placeholder-val="{{ false }}">
+<div class="fade" style="position: fixed; inset: 0; background: rgba(5,6,8,.6); z-index: 20; display: flex; justify-content: flex-end">
+<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="t-new" style="width: 100%; max-width: 520px; height: 100%; background: #13161B; border-left: 1px solid #2E3440; display: flex; flex-direction: column">
+<div style="padding: 18px 22px; border-bottom: 1px solid #232832; display: flex; align-items: center"><h2 id="t-new" style="margin: 0; font-size: 18px; font-weight: 600">New scheduled payment</h2><div style="flex-grow: 1"></div><button onClick="{{close}}" aria-label="Close" style="width: 36px; height: 36px; background: none; border: 0; color: #8A93A3; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button></div>
+<div style="flex: 1; overflow: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 18px">
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="f-rec" style="font-size: 13px; color: #A9B1BF">Recipient</label>
+<div style="display: flex; gap: 8px">
+<select id="f-rec" class="inp" style="flex: 1; min-width: 0" value="{{fRec}}" onChange="{{onRec}}">
+<option value="">Choose recipient…</option>
+<sc-for list="{{recOptions}}" as="o" hint-placeholder-count="6"><option value="{{o.id}}">{{o.label}}</option></sc-for>
+</select>
+<button class="btn" onClick="{{toggleNewRec}}" aria-label="New recipient" aria-expanded="{{newRecOpen}}" style="width: 40px; height: 40px; flex: none; border-radius: 8px; background: {{plusBg}}; border: 1px solid #2E3440; color: #E6E8EC; cursor: pointer; font-size: 18px">+</button>
+</div>
+<sc-if value="{{newRecOpen}}" hint-placeholder-val="{{ false }}">
+<div class="pop" style="padding: 12px; border-radius: 10px; background: #0F1216; border: 1px solid #2E3440; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8A93A3">New recipient — created in the same signed batch</span>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 130px; gap: 8px">
+<input class="inp" aria-label="Recipient name" placeholder="Name" value="{{nrName}}" onChange="{{onNrName}}">
+<select class="inp" aria-label="Chain" value="{{nrChain}}" onChange="{{onNrChain}}"><option>Base</option><option>Ethereum</option><option>Arbitrum</option><option>Solana</option><option>Tron</option><option>NEAR</option></select>
+</div>
+<input class="inp mono {{nrAddrCls}}" aria-label="Address" placeholder="{{nrPh}}" value="{{nrAddr}}" onChange="{{onNrAddr}}">
+<sc-if value="{{nrAddrBad}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; color: #FF8A8E">This doesn’t look like a {{nrChain}} address.</span></sc-if>
+</div>
+</sc-if>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="f-amt" style="font-size: 13px; color: #A9B1BF">Amount</label>
+<div style="display: flex; align-items: center; gap: 8px"><input id="f-amt" class="inp mono" style="width: 160px" inputmode="decimal" value="{{fAmt}}" onChange="{{onAmt}}"><span style="color: #8A93A3">USDC</span><span style="margin-left: auto; font-size: 12px; color: #8A93A3">{{monthlyHint}}</span></div>
+</div>
+
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+<legend style="font-size: 13px; color: #A9B1BF; margin-bottom: 8px">Frequency</legend>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer"><input type="radio" name="freq" checked="{{fqOnce}}" onChange="{{setOnce}}" style="width: 16px; height: 16px; accent-color: #2ECC71"><span style="width: 92px">Once on</span><input type="date" class="inp" value="{{onceDate}}" onChange="{{onOnceDate}}" disabled="{{onceDis}}" aria-label="Payment date"></label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer"><input type="radio" name="freq" checked="{{fqMonthly}}" onChange="{{setMonthly}}" style="width: 16px; height: 16px; accent-color: #2ECC71"><span style="width: 92px">Monthly on day</span><input class="inp mono" style="width: 72px" value="{{mDay}}" onChange="{{onMDay}}" disabled="{{monthlyDis}}" aria-label="Day of month"><span style="font-size: 12px; color: #6B7383">1–28 · use 28 for end-of-month</span></label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer"><input type="radio" name="freq" checked="{{fqWeekly}}" onChange="{{setWeekly}}" style="width: 16px; height: 16px; accent-color: #2ECC71"><span style="width: 92px">Weekly on</span><select class="inp" value="{{wDay}}" onChange="{{onWDay}}" disabled="{{weeklyDis}}" aria-label="Weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer"><input type="radio" name="freq" checked="{{fqN}}" onChange="{{setN}}" style="width: 16px; height: 16px; accent-color: #2ECC71"><span style="width: 92px">Every</span><input class="inp mono" style="width: 72px" value="{{nDays}}" onChange="{{onNDays}}" disabled="{{nDis}}" aria-label="Number of days"><span>days</span></label>
+</fieldset>
+
+<sc-if value="{{notOnce}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<label style="display: flex; align-items: center; gap: 10px"><span style="width: 118px; font-size: 13px; color: #A9B1BF">Starts</span><input type="date" class="inp" value="{{startDate}}" onChange="{{onStart}}"></label>
+<div style="display: flex; gap: 10px; align-items: flex-start"><span style="width: 118px; font-size: 13px; color: #A9B1BF; padding-top: 10px">Ends</span>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label style="display: flex; align-items: center; gap: 8px; min-height: 36px; cursor: pointer"><input type="radio" name="end" checked="{{endNever}}" onChange="{{setNever}}" style="accent-color: #2ECC71">Never</label>
+<label style="display: flex; align-items: center; gap: 8px; min-height: 36px; cursor: pointer"><input type="radio" name="end" checked="{{endCount}}" onChange="{{setCount}}" style="accent-color: #2ECC71">After <input class="inp mono" style="width: 64px; height: 34px" value="{{count}}" onChange="{{onCount}}" aria-label="Number of payments"> payments</label>
+<label style="display: flex; align-items: center; gap: 8px; min-height: 36px; cursor: pointer"><input type="radio" name="end" checked="{{endOn}}" onChange="{{setOn}}" style="accent-color: #2ECC71">On <input type="date" class="inp" style="height: 34px" value="{{endDate}}" onChange="{{onEndDate}}" aria-label="End date"></label>
+</div></div>
+</div>
+</sc-if>
+
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #A9B1BF">Paid by</span>
+<select class="inp" value="{{fAgent}}" onChange="{{onAgent}}"><option value="payroll">payroll (TEE) — fixed recipients, up to 2,000</option><option value="procurement">procurement (key) — Base, Solana, up to 50</option></select></label>
+
+<div style="padding: 14px; border-radius: 12px; background: #0F1216; border: 1px solid #232832; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; color: #8A93A3">Next payments</span>
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<sc-for list="{{nextDates}}" as="d" hint-placeholder-count="3">
+<span class="date-chip pop" style="animation-delay: {{d.delay}}; display: flex; flex-direction: column; align-items: center; min-width: 64px; padding: 8px 10px; border-radius: 10px; background: #13161B; border: 1px solid #2E3440"><span style="font-size: 11px; color: #8A93A3; text-transform: uppercase">{{d.wd}}</span><span class="mono" style="font-size: 18px; font-weight: 600">{{d.day}}</span><span style="font-size: 11px; color: #8A93A3">{{d.mon}}</span></span>
+</sc-for>
+<sc-if value="{{noDates}}" hint-placeholder-val="{{ false }}"><span style="color: #6B7383">No payments in this range.</span></sc-if>
+</div>
+</div>
+
+<sc-for list="{{checks}}" as="c" hint-placeholder-count="1">
+<div class="fade" style="display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 10px; background: {{c.bg}}; border: 1px solid {{c.border}}; color: {{c.fg}}; font-size: 13px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M12 8v5M12 16.5h.01"></path><circle cx="12" cy="12" r="9"></circle></svg>
+<div style="display: flex; flex-direction: column; gap: 6px"><span>{{c.text}}</span>
+<sc-if value="{{c.hasLink}}" hint-placeholder-val="{{ false }}"><span style="display: flex; gap: 14px; flex-wrap: wrap"><a href="AgentDetail.dc.html">Edit {{c.agent}}’s mandate</a><sc-if value="{{c.canFix}}" hint-placeholder-val="{{ false }}"><button onClick="{{c.fix}}" style="background: none; border: 0; padding: 0; color: #8AB4FF; font: inherit; cursor: pointer">Also add this recipient to {{c.agent}}’s mandate</button></sc-if></span></sc-if>
+</div>
+</div>
+</sc-for>
+<sc-if value="{{allGood}}" hint-placeholder-val="{{ false }}"><div class="fade" style="display: flex; gap: 8px; align-items: center; font-size: 13px; color: #2ECC71"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>Within {{fAgent}}’s mandate — pays automatically.</div></sc-if>
+</div>
+<div style="padding: 14px 22px; border-top: 1px solid #232832; display: flex; gap: 8px; justify-content: flex-end; align-items: center">
+<sc-if value="{{signing}}" hint-placeholder-val="{{ false }}"><span class="fade" style="font-size: 13px; color: #F5B544; margin-right: auto">Confirm in wallet…</span></sc-if>
+<sc-if value="{{batchNote}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; color: #8A93A3; margin-right: auto">{{batchNoteText}}</span></sc-if>
+<button class="btn" onClick="{{close}}" style="height: 40px; padding: 0 16px; background: transparent; border: 1px solid #2E3440; border-radius: 8px; color: #E6E8EC; font: inherit; cursor: pointer">Cancel</button>
+<button class="btn" onClick="{{save}}" disabled="{{saveDisabled}}" style="height: 40px; padding: 0 18px; background: #2ECC71; border: 0; border-radius: 8px; color: #06210F; font: inherit; font-weight: 600; cursor: pointer">Save &amp; sign</button>
+</div>
+</aside>
+</div>
+</sc-if>
+
+<sc-if value="{{hasToast}}" hint-placeholder-val="{{ false }}">
+<div class="fade" role="status" style="position: fixed; right: 24px; bottom: 24px; padding: 12px 14px; background: #1A1E25; border: 1px solid #2E3440; border-radius: 10px; display: flex; gap: 10px; align-items: center; max-width: 400px; z-index: 30"><span style="width: 8px; height: 8px; border-radius: 50%; background: #2ECC71; flex: none"></span><span>{{toastText}} <a href="#">View tx ↗</a></span></div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.today = new Date(2026, 10, 1);
+    this.chains = { Base: '#3B82F6', Ethereum: '#94A3B8', Arbitrum: '#38BDF8', Solana: '#A78BFA', Tron: '#F87171', NEAR: '#2ECC71' };
+    this.re = { Base: /^0x[0-9a-fA-F]{40}$/, Ethereum: /^0x[0-9a-fA-F]{40}$/, Arbitrum: /^0x[0-9a-fA-F]{40}$/, Solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, Tron: /^T[1-9A-HJ-NP-Za-km-z]{33}$/, NEAR: /^(?=.{2,64}$)[a-z0-9_-]+(\.[a-z0-9_-]+)*$/ };
+    this.ph = { Base: '0x + 40 hex', Ethereum: '0x + 40 hex', Arbitrum: '0x + 40 hex', Solana: 'base58, 32–44 chars', Tron: 'T + 33 base58', NEAR: 'name.near' };
+    this.palette = ['#7DD3A8', '#8AB4FF', '#F5C37A', '#C4B5FD', '#F0A3A3', '#7DD3D3', '#E9B8F5', '#B5E08A'];
+    this.state = {
+      tab: 'sched', filter: 'all', drawer: false, signing: false, toast: null,
+      mandates: {
+        payroll: { mode: 'fixed', recipients: ['maria', 'alex', 'lena', 'northwind', 'kenji', 'ana', 'office', 'tron', 'crew'], chains: null, per: 2000, thr: 1000, kind: 'tee' },
+        procurement: { mode: 'open', recipients: [], chains: ['Base', 'Solana'], per: 50, thr: 30, kind: 'key' }
+      },
+      recipients: [
+        { id: 'maria', name: 'Maria Ivanova', chain: 'Base', addr: '0x71C0…a3E9', last: '2 Oct' },
+        { id: 'alex', name: 'Alex Chen', chain: 'Solana', addr: '7xKX…gAsU', last: '2 Oct' },
+        { id: 'lena', name: 'Lena Design', chain: 'Base', addr: '0x3b2A…c1D4', last: 'Mon 26 Oct' },
+        { id: 'northwind', name: 'Northwind Ops', chain: 'Arbitrum', addr: '0x9fE1…77b0', last: 'Fri 30 Oct' },
+        { id: 'kenji', name: 'Kenji Mori', chain: 'Solana', addr: '4kPq…Zt1M', last: 'Thu 29 Oct' },
+        { id: 'ana', name: 'Ana Ruiz', chain: 'Base', addr: '0x5aD3…E902', last: '15 Oct' },
+        { id: 'office', name: 'Office lease', chain: 'Ethereum', addr: '0xc0FF…ee01', last: '20 Oct' },
+        { id: 'hosting', name: 'Hosting', chain: 'Base', addr: '0xA11c…e0F5', last: '27 Sep' },
+        { id: 'tron', name: 'Tron supplier', chain: 'Tron', addr: 'TLyq…ZYH', last: '25 Sep' },
+        { id: 'crew', name: 'Event crew', chain: 'Arbitrum', addr: '0x77aa…31Bc', last: '10 Oct' }
+      ],
+      schedules: [
+        { id: 1, rec: 'maria', amount: 1200, f: { t: 'monthly', day: 2 }, start: '2026-01-02', end: { t: 'never' }, agent: 'payroll', status: 'active', paid: 10 },
+        { id: 2, rec: 'alex', amount: 2000, f: { t: 'monthly', day: 2 }, start: '2026-06-02', end: { t: 'count', count: 12 }, agent: 'payroll', status: 'active', paid: 5 },
+        { id: 3, rec: 'lena', amount: 600, f: { t: 'weekly', wd: 1 }, start: '2026-07-20', end: { t: 'never' }, agent: 'payroll', status: 'active', paid: 15 },
+        { id: 4, rec: 'northwind', amount: 450, f: { t: 'weekly', wd: 5 }, start: '2026-08-07', end: { t: 'never' }, agent: 'payroll', status: 'active', paid: 13 },
+        { id: 5, rec: 'kenji', amount: 300, f: { t: 'n', n: 14 }, start: '2026-10-29', end: { t: 'never' }, agent: 'payroll', status: 'active', paid: 7 },
+        { id: 6, rec: 'ana', amount: 2000, f: { t: 'monthly', day: 15 }, start: '2026-10-15', end: { t: 'count', count: 6 }, agent: 'payroll', status: 'active', paid: 1 },
+        { id: 7, rec: 'office', amount: 2000, f: { t: 'monthly', day: 20 }, start: '2026-03-20', end: { t: 'never' }, agent: 'payroll', status: 'active', paid: 8 },
+        { id: 8, rec: 'hosting', amount: 40, f: { t: 'monthly', day: 27 }, start: '2026-05-27', end: { t: 'never' }, agent: 'procurement', status: 'active', paid: 5, overdueDays: 5 },
+        { id: 9, rec: 'tron', amount: 250, f: { t: 'monthly', day: 25 }, start: '2026-04-25', end: { t: 'never' }, agent: 'payroll', status: 'paused', paid: 6 },
+        { id: 10, rec: 'crew', amount: 900, f: { t: 'once', date: '2026-10-10' }, start: '2026-10-10', end: { t: 'never' }, agent: 'payroll', status: 'ended', paid: 1 }
+      ],
+      form: this.blank()
+    };
+  }
+  blank() { return { rec: '', amount: '1500', ft: 'monthly', day: '1', wd: '1', n: '14', once: '2026-11-20', start: '2026-12-01', end: 'never', count: '6', endDate: '2027-06-01', agent: 'payroll', newRec: false, nrName: '', nrChain: 'Base', nrAddr: '', addToMandate: false }; }
+  componentWillUnmount() { clearTimeout(this.t); clearTimeout(this.s); }
+  pd(s) { const p = String(s || '').split('-').map(Number); return p.length === 3 && p[0] ? new Date(p[0], p[1] - 1, p[2]) : null; }
+  ord(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+  fmtD(d) { return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); }
+  describe(f) {
+    const wd = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    if (f.t === 'once') { const d = this.pd(f.date); return 'Once on ' + (d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'); }
+    if (f.t === 'monthly') return 'Monthly on the ' + this.ord(f.day);
+    if (f.t === 'weekly') return 'Every ' + wd[f.wd];
+    return 'Every ' + f.n + ' days';
+  }
+  nextOcc(f, startStr, from, n, end, paid) {
+    const out = []; let start = this.pd(startStr) || from; if (start < from) start = from;
+    const endD = end && end.t === 'on' ? this.pd(end.date) : null;
+    const left = end && end.t === 'count' ? Math.max(0, end.count - (paid || 0)) : 99;
+    const push = (d) => { if ((!endD || d <= endD) && out.length < Math.min(n, left)) out.push(d); };
+    if (f.t === 'once') { const d = this.pd(f.date); if (d && d >= from) push(d); return out; }
+    if (f.t === 'monthly') { let d = new Date(start.getFullYear(), start.getMonth(), f.day); if (d < start) d = new Date(start.getFullYear(), start.getMonth() + 1, f.day); for (let i = 0; i < 24 && out.length < n; i++) push(new Date(d.getFullYear(), d.getMonth() + i, f.day)); return out; }
+    if (f.t === 'weekly') { const d = new Date(start); while (d.getDay() !== f.wd) d.setDate(d.getDate() + 1); for (let i = 0; i < 60 && out.length < n; i++) push(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7 * i)); return out; }
+    const base = this.pd(startStr) || from; const d = new Date(base);
+    while (d < from) d.setDate(d.getDate() + f.n);
+    for (let i = 0; i < 60 && out.length < n; i++) push(new Date(d.getFullYear(), d.getMonth(), d.getDate() + f.n * i));
+    return out;
+  }
+  rel(d) { const days = Math.round((d - this.today) / 86400000); return days <= 0 ? 'today' : days === 1 ? 'tomorrow' : 'in ' + days + ' days'; }
+  initials(n) { return n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join(''); }
+  setF(patch) { this.setState((s) => ({ form: Object.assign({}, s.form, patch) })); }
+  formFreq(F) {
+    if (F.ft === 'once') return { t: 'once', date: F.once };
+    if (F.ft === 'monthly') return { t: 'monthly', day: Math.min(28, Math.max(1, parseInt(F.day, 10) || 1)) };
+    if (F.ft === 'weekly') return { t: 'weekly', wd: parseInt(F.wd, 10) };
+    return { t: 'n', n: Math.min(365, Math.max(1, parseInt(F.n, 10) || 1)) };
+  }
+  renderVals() {
+    const s = this.state, F = s.form;
+    const recById = {}; s.recipients.forEach((r) => { recById[r.id] = r; });
+    const rank = { active: 0, paused: 1, ended: 2 };
+    const sorted = s.schedules.filter((x) => s.filter === 'all' || x.agent === s.filter).map((x) => {
+      const nx = x.status === 'active' ? this.nextOcc(x.f, x.start, this.today, 1, x.end, x.paid)[0] : null;
+      return { x, nx };
+    }).sort((a, b) => (rank[a.x.status] - rank[b.x.status]) || ((a.x.overdueDays ? -1 : 0) - (b.x.overdueDays ? -1 : 0)) || ((a.nx ? a.nx.getTime() : 9e15) - (b.nx ? b.nx.getTime() : 9e15)));
+    const schedRows = sorted.map(({ x, nx }, i) => {
+      const r = recById[x.rec]; const m = s.mandates[x.agent];
+      const overdue = x.status === 'active' && x.overdueDays;
+      let next = '—', nextSub = '', nextColor = '#8A93A3', nextSubColor = '#6B7383', nextWeight = 400;
+      if (overdue) { next = 'Overdue ' + x.overdueDays + ' days'; nextSub = 'needs approval'; nextColor = '#F5B544'; nextSubColor = '#F5B544'; nextWeight = 600; }
+      else if (x.status === 'active' && nx) { next = this.fmtD(nx); nextSub = this.rel(nx) + (x.amount > m.thr ? ' · ⏳ approval' : ''); nextColor = '#E6E8EC'; nextSubColor = x.amount > m.thr ? '#F5B544' : '#8A93A3'; }
+      else if (x.status === 'paused') next = 'Paused';
+      else if (x.status === 'ended') next = 'Ended';
+      const counted = x.end.t === 'count';
+      return {
+        name: r.name, initials: this.initials(r.name), avatar: this.palette[s.recipients.indexOf(r) % this.palette.length],
+        chain: r.chain, chainColor: this.chains[r.chain], amount: x.amount.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        freq: this.describe(x.f), next, nextSub, nextColor, nextSubColor, nextWeight,
+        agent: x.agent, isTee: m.kind === 'tee', isKey: m.kind === 'key',
+        progress: counted ? x.paid + ' of ' + x.end.count + ' paid' : x.status === 'ended' ? 'Paid once' : 'Paid ' + x.paid + ' times',
+        hasBar: counted, barW: counted ? Math.round(100 * x.paid / x.end.count) : 0,
+        status: x.status[0].toUpperCase() + x.status.slice(1),
+        statusColor: x.status === 'active' ? '#2ECC71' : x.status === 'paused' ? '#F5B544' : '#8A93A3',
+        statusDot: x.status === 'active' ? '#2ECC71' : 'transparent',
+        opacity: x.status === 'ended' ? 0.55 : 1, cls: x.fresh ? 'row-in' : '',
+        isOverdue: !!overdue,
+        approve: () => { this.setState((st) => ({ schedules: st.schedules.map((y) => y.id === x.id ? Object.assign({}, y, { overdueDays: 0, paid: y.paid + 1, start: '2026-11-02', fresh: true }) : y), toast: 'Approved · ' + r.name + ' paid now' })); clearTimeout(this.t); this.t = setTimeout(() => this.setState({ toast: null }), 3000); },
+        canToggle: x.status !== 'ended', toggleLabel: x.status === 'active' ? 'Pause' : 'Resume',
+        toggle: () => this.setState((st) => ({ schedules: st.schedules.map((y) => y.id === x.id ? Object.assign({}, y, { status: y.status === 'active' ? 'paused' : 'active', fresh: false }) : y) })),
+        end: () => this.setState((st) => ({ schedules: st.schedules.map((y) => y.id === x.id ? Object.assign({}, y, { status: 'ended', fresh: false }) : y) }))
+      };
+    });
+    const recRows = s.recipients.map((r, i) => {
+      const n = s.schedules.filter((x) => x.rec === r.id).length;
+      const act = s.schedules.filter((x) => x.rec === r.id && x.status === 'active').length;
+      return {
+        name: r.name, initials: this.initials(r.name), avatar: this.palette[i % this.palette.length], chain: r.chain, chainColor: this.chains[r.chain], addr: r.addr,
+        schedText: n === 1 ? '1 schedule' : n + ' schedules', lastPaid: r.last, cls: r.fresh ? 'row-in' : '',
+        showSched: () => this.setState({ tab: 'sched' }),
+        removeBlocked: act > 0, removeTitle: act > 0 ? 'End its ' + act + (act === 1 ? ' schedule' : ' schedules') + ' first' : 'Remove recipient', removeColor: act > 0 ? '#4B5260' : '#8A93A3'
+      };
+    });
+    // form
+    const amt = parseFloat(F.amount) || 0;
+    const freq = this.formFreq(F);
+    const end = F.end === 'count' ? { t: 'count', count: parseInt(F.count, 10) || 1 } : F.end === 'on' ? { t: 'on', date: F.endDate } : { t: 'never' };
+    const dates = this.nextOcc(freq, F.ft === 'once' ? F.once : F.start, this.today, 3, F.ft === 'once' ? { t: 'never' } : end, 0);
+    const m = s.mandates[F.agent];
+    const nrOk = F.newRec && F.nrName.trim().length >= 2 && this.re[F.nrChain].test(F.nrAddr.trim());
+    const recChain = F.newRec ? F.nrChain : (recById[F.rec] ? recById[F.rec].chain : null);
+    const hasRec = F.newRec ? nrOk : !!F.rec;
+    const checks = [];
+    if (hasRec && m.mode === 'fixed' && (F.newRec || m.recipients.indexOf(F.rec) < 0) && !(F.newRec && F.addToMandate))
+      checks.push({ kind: 'err', text: F.agent + ' can’t pay this recipient (not in its mandate).', hasLink: true, canFix: true, fix: () => this.setF({ addToMandate: true }) });
+    if (hasRec && m.chains && recChain && m.chains.indexOf(recChain) < 0)
+      checks.push({ kind: 'err', text: F.agent + ' can’t pay on ' + recChain + ' (its chains: ' + m.chains.join(', ') + ').', hasLink: true, canFix: false });
+    if (amt > m.per) checks.push({ kind: 'err', text: 'Amount exceeds ' + F.agent + '’s per-payment limit (' + m.per.toLocaleString('en-US') + ').', hasLink: true, canFix: false });
+    else if (amt > m.thr) checks.push({ kind: 'warn', text: 'Above ' + F.agent + '’s approval threshold (' + m.thr.toLocaleString('en-US') + '): each payment will wait for your approval.', hasLink: false, canFix: false });
+    const hasErr = checks.some((c) => c.kind === 'err');
+    const valid = hasRec && amt > 0 && !hasErr && dates.length > 0 && !s.signing;
+    const monthly = freq.t === 'monthly' ? amt : freq.t === 'weekly' ? amt * 4.33 : freq.t === 'n' ? amt * 30 / freq.n : 0;
+    const batch = [F.newRec ? 'add recipient' : null, F.newRec && F.addToMandate ? 'update mandate' : null, 'add schedule'].filter(Boolean);
+    return {
+      tabSched: s.tab === 'sched', tabRec: s.tab === 'rec',
+      schedTabFg: s.tab === 'sched' ? '#E6E8EC' : '#8A93A3', recTabFg: s.tab === 'rec' ? '#E6E8EC' : '#8A93A3',
+      ulLeft: s.tab === 'sched' ? 0 : 128, ulW: s.tab === 'sched' ? 124 : 128,
+      goSched: () => this.setState({ tab: 'sched' }), goRec: () => this.setState({ tab: 'rec' }),
+      schedCount: s.schedules.filter((x) => x.status !== 'ended').length, recCount: s.recipients.length,
+      primaryLabel: s.tab === 'sched' ? 'Scheduled payment' : 'Recipient',
+      primaryAction: () => this.setState({ drawer: true, form: Object.assign(this.blank(), s.tab === 'rec' ? { newRec: true } : {}) }),
+      agentFilters: [['all', 'All'], ['payroll', 'payroll'], ['procurement', 'procurement']].map((a) => ({ label: a[1], on: s.filter === a[0], pick: () => this.setState({ filter: a[0] }), bg: s.filter === a[0] ? 'rgba(46,204,113,.12)' : 'transparent', border: s.filter === a[0] ? '#2ECC71' : '#2E3440', fg: s.filter === a[0] ? '#E6E8EC' : '#A9B1BF' })),
+      schedRows, recRows,
+      drawer: s.drawer, close: () => this.setState({ drawer: false, signing: false }),
+      recOptions: s.recipients.map((r) => ({ id: r.id, label: r.name + ' — ' + r.chain + ', ' + r.addr })),
+      fRec: F.rec, onRec: (e) => this.setF({ rec: e.target.value, newRec: false }),
+      newRecOpen: F.newRec, toggleNewRec: () => this.setF({ newRec: !F.newRec, rec: '' }), plusBg: F.newRec ? '#232832' : '#0F1216',
+      nrName: F.nrName, nrChain: F.nrChain, nrAddr: F.nrAddr, nrPh: this.ph[F.nrChain],
+      onNrName: (e) => this.setF({ nrName: e.target.value }), onNrChain: (e) => this.setF({ nrChain: e.target.value }), onNrAddr: (e) => this.setF({ nrAddr: e.target.value }),
+      nrAddrBad: !!F.nrAddr && !this.re[F.nrChain].test(F.nrAddr.trim()), nrAddrCls: F.nrAddr ? (this.re[F.nrChain].test(F.nrAddr.trim()) ? 'ok' : 'err') : '',
+      fAmt: F.amount, onAmt: (e) => this.setF({ amount: e.target.value }),
+      monthlyHint: freq.t === 'once' ? 'one payment' : '≈ ' + Math.round(monthly).toLocaleString('en-US') + ' USDC / month',
+      fqOnce: F.ft === 'once', fqMonthly: F.ft === 'monthly', fqWeekly: F.ft === 'weekly', fqN: F.ft === 'n',
+      setOnce: () => this.setF({ ft: 'once' }), setMonthly: () => this.setF({ ft: 'monthly' }), setWeekly: () => this.setF({ ft: 'weekly' }), setN: () => this.setF({ ft: 'n' }),
+      onceDis: F.ft !== 'once', monthlyDis: F.ft !== 'monthly', weeklyDis: F.ft !== 'weekly', nDis: F.ft !== 'n',
+      onceDate: F.once, onOnceDate: (e) => this.setF({ once: e.target.value }),
+      mDay: F.day, onMDay: (e) => this.setF({ day: e.target.value.replace(/\D/g, '').slice(0, 2) }),
+      wDay: F.wd, onWDay: (e) => this.setF({ wd: e.target.value }),
+      nDays: F.n, onNDays: (e) => this.setF({ n: e.target.value.replace(/\D/g, '').slice(0, 3) }),
+      notOnce: F.ft !== 'once',
+      startDate: F.start, onStart: (e) => this.setF({ start: e.target.value }),
+      endNever: F.end === 'never', endCount: F.end === 'count', endOn: F.end === 'on',
+      setNever: () => this.setF({ end: 'never' }), setCount: () => this.setF({ end: 'count' }), setOn: () => this.setF({ end: 'on' }),
+      count: F.count, onCount: (e) => this.setF({ count: e.target.value.replace(/\D/g, '') }),
+      endDate: F.endDate, onEndDate: (e) => this.setF({ endDate: e.target.value }),
+      fAgent: F.agent, onAgent: (e) => this.setF({ agent: e.target.value }),
+      nextDates: dates.map((d, i) => ({ wd: d.toLocaleDateString('en-GB', { weekday: 'short' }), day: d.getDate(), mon: d.toLocaleDateString('en-GB', { month: 'short' }) + (d.getFullYear() !== 2026 ? ' ' + d.getFullYear() : ''), delay: (i * 0.05) + 's' })),
+      noDates: dates.length === 0,
+      checks: checks.map((c) => ({ text: c.text, hasLink: c.hasLink, canFix: c.canFix, fix: c.fix, agent: F.agent, bg: c.kind === 'err' ? 'rgba(229,72,77,.08)' : 'rgba(245,181,68,.08)', border: c.kind === 'err' ? 'rgba(229,72,77,.4)' : 'rgba(245,181,68,.35)', fg: c.kind === 'err' ? '#FF8A8E' : '#F5B544' })),
+      allGood: hasRec && amt > 0 && checks.length === 0,
+      batchNote: batch.length > 1 && !s.signing, batchNoteText: 'One signature: ' + batch.join(' + '),
+      signing: s.signing, saveDisabled: !valid,
+      save: () => {
+        if (!valid) return;
+        this.setState({ signing: true });
+        this.s = setTimeout(() => {
+          this.setState((st) => {
+            let recs = st.recipients.map((r) => Object.assign({}, r, { fresh: false }));
+            let recId = F.rec; let mandates = st.mandates;
+            if (F.newRec) {
+              recId = 'r' + Date.now();
+              const a = F.nrAddr.trim();
+              recs = recs.concat([{ id: recId, name: F.nrName.trim(), chain: F.nrChain, addr: a.length > 14 ? a.slice(0, 6) + '…' + a.slice(-4) : a, last: '—', fresh: true }]);
+              if (F.addToMandate) mandates = Object.assign({}, mandates, { [F.agent]: Object.assign({}, mandates[F.agent], { recipients: mandates[F.agent].recipients.concat([recId]) }) });
+            }
+            const sch = { id: Date.now(), rec: recId, amount: amt, f: freq, start: F.ft === 'once' ? F.once : F.start, end, agent: F.agent, status: 'active', paid: 0, fresh: true };
+            return { recipients: recs, mandates, schedules: [sch].concat(st.schedules.map((x) => Object.assign({}, x, { fresh: false }))), drawer: false, signing: false, tab: 'sched', toast: 'Scheduled · ' + (F.newRec ? F.nrName.trim() : recById[F.rec].name) + ' · ' + this.describe(freq).toLowerCase() };
+          });
+          clearTimeout(this.t); this.t = setTimeout(() => this.setState({ toast: null }), 3200);
+        }, 1100);
+      },
+      hasToast: !!s.toast, toastText: s.toast || ''
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Treasury — Assistant</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D10}
+a{color:#8AB4FF;text-decoration:none}a:hover{color:#B9D1FF;text-decoration:underline}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.btn{transition:filter .15s,transform .1s}.btn:hover{filter:brightness(1.15)}.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.msg-in{animation:msgIn .28s cubic-bezier(.2,.9,.3,1) both}
+@keyframes msgIn{from{opacity:0;transform:translateY(8px)}}
+.card-in{animation:cardIn .4s cubic-bezier(.2,.9,.3,1.2) both}
+@keyframes cardIn{from{opacity:0;transform:translateY(10px) scale(.97)}}
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#8A93A3;animation:bounce 1.1s infinite ease-in-out}
+.dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-4px);opacity:1}}
+.caret::after{content:"";display:inline-block;width:7px;height:14px;margin-left:2px;vertical-align:-2px;background:#8AB4FF;animation:blink .9s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.chip{transition:background .15s,border-color .15s,transform .15s}.chip:hover{transform:translateY(-1px);border-color:#3A4458}
+.cardbox{transition:border-color .3s,box-shadow .3s}
+.bar-in{animation:barIn .3s cubic-bezier(.2,.9,.3,1) both}@keyframes barIn{from{transform:translateY(100%);opacity:0}}
+.sheet{animation:sheet .3s cubic-bezier(.2,.9,.3,1) both}@keyframes sheet{from{opacity:0;transform:translateY(20px) scale(.98)}}
+.fade{animation:fade .2s ease-out both}@keyframes fade{from{opacity:0}}
+.row-in{animation:rowIn .4s cubic-bezier(.2,.9,.3,1) both,newbg 2s ease-out both}
+@keyframes rowIn{from{opacity:0;transform:translateY(-8px)}}
+@keyframes newbg{0%{background:rgba(46,204,113,.16)}100%{background:transparent}}
+.spin{animation:spin 1s linear infinite;transform-origin:50% 50%}@keyframes spin{to{transform:rotate(360deg)}}
+.glowtee{background:linear-gradient(90deg,rgba(138,180,255,.10),rgba(46,204,113,.10),rgba(138,180,255,.10));background-size:200% 100%;animation:tee 8s linear infinite}
+@keyframes tee{to{background-position:-200% 0}}
+.draw{stroke-dasharray:30;stroke-dashoffset:30;animation:draw .4s ease-out forwards}@keyframes draw{to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion:reduce){.msg-in,.card-in,.bar-in,.sheet,.fade,.row-in{animation-duration:1ms}.dot,.caret::after,.spin,.glowtee{animation:none}.draw{animation:none;stroke-dashoffset:0}}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0B0D10; color: #E6E8EC; font-family: Inter, system-ui, sans-serif; font-size: 14px; line-height: 1.45; display: flex; flex-direction: column">
+<header style="border-bottom: 1px solid #232832; flex: none">
+<div style="padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+<span style="font-weight: 600; font-size: 15px">Agent Treasury</span>
+<span style="height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 999px; background: rgba(245,181,68,.14); color: #F5B544; font-size: 12px">testnet</span>
+<nav style="display: flex; gap: 4px; flex-wrap: wrap" aria-label="Main">
+<a href="Main.dc.html" style="padding: 6px 10px; border-radius: 8px; background: #1A1E25; color: #E6E8EC; text-decoration: none">Treasury</a>
+<a href="Agents.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Agents</a>
+<a href="Payments.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Payments</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Payouts</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Policy</a>
+</nav>
+<div style="flex-grow: 1"></div>
+<a href="Main.dc.html" aria-pressed="true" style="height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid #3B4A6B; background: #1F2A44; color: #DCE7FF; text-decoration: none; font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>Assistant</a>
+</div>
+</header>
+
+<div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+<main style="flex: 999 1 560px; min-width: 0; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 14px 16px"><div style="font-size: 12px; color: #8A93A3">Vault balance</div><div class="mono" style="font-size: 22px; font-weight: 600">12,480.50 <span style="font-size: 13px; color: #8A93A3">USDC</span></div></div>
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 14px 16px"><div style="font-size: 12px; color: #8A93A3">Upcoming · 30 days</div><div class="mono" style="font-size: 22px; font-weight: 600">{{upTotal}} <span style="font-size: 13px; color: #8A93A3">USDC</span></div></div>
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 14px 16px"><div style="font-size: 12px; color: #8A93A3">procurement</div><div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: {{procColor}}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{procColor}}"></span>{{procStatus}}</div><div class="mono" style="font-size: 12px; color: #8A93A3">daily limit {{procLimit}} USDC</div></div>
+</div>
+
+<section style="background: #13161B; border: 1px solid #232832; border-radius: 12px; overflow: hidden">
+<div style="display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid #232832"><h2 style="margin: 0; font-size: 15px; font-weight: 600">Scheduled payments</h2><div style="flex-grow: 1"></div><a href="Payments.dc.html" style="font-size: 13px">Open Payments →</a></div>
+<sc-for list="{{sched}}" as="r" hint-placeholder-count="5">
+<div class="{{r.cls}}" style="display: grid; grid-template-columns: minmax(0, 1.4fr) 110px minmax(0, 1.3fr) 120px 110px; gap: 12px; align-items: center; padding: 11px 20px; border-bottom: 1px solid #1C2028; font-size: 13px">
+<span style="display: flex; align-items: center; gap: 8px; min-width: 0"><span style="width: 9px; height: 9px; border-radius: 50%; background: {{r.chainColor}}; flex: none"></span><span style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.name}}</span></span>
+<span class="mono" style="text-align: right; font-weight: 600">{{r.amount}}</span>
+<span style="color: #A9B1BF">{{r.freq}}</span>
+<span style="color: #E6E8EC">{{r.next}}</span>
+<span style="font-size: 12px; color: {{r.tagColor}}">{{r.tag}}</span>
+</div>
+</sc-for>
+</section>
+<p style="margin: 0; font-size: 12px; color: #6B7383">This screen shows the demo flow from UI_UPDATES §9: ask in chat → proposal cards → one review &amp; sign → the schedule appears on the left.</p>
+</main>
+
+<aside aria-label="Assistant" style="flex: 1 1 400px; max-width: 440px; min-width: 340px; border-left: 1px solid #232832; background: #0F1216; display: flex; flex-direction: column; height: calc(100vh - 61px); position: sticky; top: 0">
+<div style="padding: 12px 16px; border-bottom: 1px solid #232832; display: flex; align-items: center; gap: 10px">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8AB4FF" stroke-width="2" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>
+<span style="font-weight: 600">Assistant</span>
+<button class="glowtee" title="Your prompts and vault data are processed inside a secure enclave; the model provider and NEAR can’t read them." style="height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid #2B3550; color: #B9D1FF; font: inherit; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>Private · NEAR AI Cloud (TEE)</button>
+<div style="flex-grow: 1"></div>
+<button onClick="{{reset}}" aria-label="New conversation" style="width: 32px; height: 32px; background: none; border: 0; color: #8A93A3; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"></path></svg></button>
+<a href="Main.dc.html" aria-label="Close assistant" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: #8A93A3"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></a>
+</div>
+
+<div style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px" aria-live="polite">
+<sc-if value="{{empty}}" hint-placeholder-val="{{ true }}">
+<div class="msg-in" style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px">
+<div style="font-size: 16px; font-weight: 600">What should we set up?</div>
+<div style="color: #8A93A3; font-size: 13px">I can read your vault and prepare changes. You sign them — I never change anything myself.</div>
+<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px">
+<sc-for list="{{suggestions}}" as="sg" hint-placeholder-count="4">
+<button class="chip" onClick="{{sg.go}}" style="text-align: left; padding: 10px 12px; border-radius: 10px; background: #13161B; border: 1px solid #2E3440; color: #E6E8EC; font: inherit; font-size: 13px; cursor: pointer">{{sg.label}}</button>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-for list="{{messages}}" as="m" hint-placeholder-count="3">
+<div class="msg-in" style="display: flex; flex-direction: column; align-items: {{m.align}}">
+<sc-if value="{{m.isUser}}" hint-placeholder-val="{{ true }}"><div style="max-width: 86%; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: #1F2A44; color: #E6ECFA">{{m.text}}</div></sc-if>
+<sc-if value="{{m.isAi}}" hint-placeholder-val="{{ false }}"><div class="{{m.caret}}" style="max-width: 94%; color: #D3D8E0; white-space: pre-line">{{m.text}}</div></sc-if>
+<sc-if value="{{m.isTyping}}" hint-placeholder-val="{{ false }}"><div style="display: inline-flex; gap: 4px; padding: 10px 12px; border-radius: 12px; background: #13161B; border: 1px solid #232832" aria-label="Assistant is typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></sc-if>
+<sc-if value="{{m.isQuestion}}" hint-placeholder-val="{{ false }}"><div style="display: flex; gap: 8px; flex-wrap: wrap">
+<sc-for list="{{m.options}}" as="op" hint-placeholder-count="2"><button class="chip" onClick="{{op.go}}" disabled="{{op.disabled}}" style="height: 34px; padding: 0 12px; border-radius: 999px; background: {{op.bg}}; border: 1px solid {{op.border}}; color: #E6E8EC; font: inherit; font-size: 13px; cursor: pointer">{{op.label}}</button></sc-for>
+</div></sc-if>
+<sc-if value="{{m.isData}}" hint-placeholder-val="{{ false }}"><div style="width: 100%; border: 1px solid #232832; border-radius: 10px; overflow: hidden; background: #13161B">
+<div style="display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #232832"><a href="Main.dc.html" class="mono" style="font-size: 18px; font-weight: 600; color: #E6E8EC">4,250.00</a><span style="font-size: 12px; color: #8A93A3">USDC · next 7 days</span><div style="flex-grow: 1"></div><span style="font-size: 12px; color: #2ECC71">covered ✓</span></div>
+<sc-for list="{{weekRows}}" as="w" hint-placeholder-count="4"><div style="display: grid; grid-template-columns: 74px minmax(0, 1fr) 70px; gap: 8px; padding: 7px 12px; font-size: 12px; border-bottom: 1px solid #1C2028"><span style="color: #8A93A3">{{w.date}}</span><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{w.name}} <span style="color: {{w.tagColor}}">{{w.tag}}</span></span><span class="mono" style="text-align: right">{{w.amount}}</span></div></sc-for>
+</div></sc-if>
+<sc-if value="{{m.isCard}}" hint-placeholder-val="{{ false }}">
+<div class="card-in cardbox" style="width: 100%; box-sizing: border-box; border-radius: 12px; background: #13161B; border: 1.5px solid {{m.c.border}}; box-shadow: {{m.c.shadow}}; overflow: hidden">
+<div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #232832">
+<span style="font-weight: 600; font-size: 13px">{{m.c.title}}</span>
+<div style="flex-grow: 1"></div>
+<span style="display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 500; background: {{m.c.badgeBg}}; color: {{m.c.badgeFg}}"><sc-if value="{{m.c.isSigned}}" hint-placeholder-val="{{ false }}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true"><path class="draw" d="M20 6 9 17l-5-5"></path></svg></sc-if>{{m.c.badge}}</span>
+</div>
+<div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px">
+<sc-for list="{{m.c.lines}}" as="ln" hint-placeholder-count="2"><div style="color: {{ln.color}}; font-weight: {{ln.weight}}">{{ln.t}}</div></sc-for>
+<sc-for list="{{m.c.diff}}" as="df" hint-placeholder-count="1"><div style="display: flex; gap: 8px; align-items: center"><span style="color: #8A93A3">{{df.label}}</span><span class="mono" style="color: #8A93A3; text-decoration: line-through">{{df.from}}</span><span style="color: #8A93A3">→</span><span class="mono" style="font-weight: 600; color: #E6E8EC; padding: 1px 6px; border-radius: 6px; background: rgba(46,204,113,.12)">{{df.to}}</span></div></sc-for>
+<sc-if value="{{m.c.hasWarn}}" hint-placeholder-val="{{ false }}"><div class="fade" style="margin-top: 4px; display: flex; gap: 6px; color: #F5B544; font-size: 12px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="M12 8v5M12 16.5h.01"></path><circle cx="12" cy="12" r="9"></circle></svg>{{m.c.warn}}</div></sc-if>
+<sc-if value="{{m.c.hasOk}}" hint-placeholder-val="{{ false }}"><div class="fade" style="margin-top: 4px; display: flex; gap: 6px; color: #2ECC71; font-size: 12px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="M20 6 9 17l-5-5"></path></svg>{{m.c.ok}}</div></sc-if>
+<sc-if value="{{m.c.isSigned}}" hint-placeholder-val="{{ false }}"><a href="#" style="font-size: 12px; margin-top: 2px">NEAR tx 9Qe2…Lm4c ↗</a></sc-if>
+</div>
+<sc-if value="{{m.c.isDraft}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; gap: 6px; justify-content: flex-end; padding: 0 12px 12px">
+<sc-if value="{{m.c.notDanger}}" hint-placeholder-val="{{ true }}"><a href="Payments.dc.html" style="height: 32px; padding: 0 10px; display: inline-flex; align-items: center; font-size: 12px; color: #8AB4FF">Edit in form</a></sc-if>
+<button class="btn" onClick="{{m.c.discard}}" style="height: 32px; padding: 0 10px; background: transparent; border: 1px solid #2E3440; border-radius: 8px; color: #A9B1BF; font: inherit; font-size: 12px; cursor: pointer">Discard</button>
+<sc-if value="{{m.c.notDanger}}" hint-placeholder-val="{{ true }}"><button class="btn" onClick="{{m.c.add}}" style="height: 32px; padding: 0 12px; background: #2ECC71; border: 0; border-radius: 8px; color: #06210F; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">✓ Add to batch</button></sc-if>
+<sc-if value="{{m.c.isDanger}}" hint-placeholder-val="{{ false }}"><button class="btn" onClick="{{m.c.pauseNow}}" style="height: 32px; padding: 0 12px; background: #E5484D; border: 0; border-radius: 8px; color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">Pause now</button></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{m.c.isSigning}}" hint-placeholder-val="{{ false }}"><div style="display: flex; gap: 8px; align-items: center; padding: 0 12px 12px; font-size: 12px; color: #F5B544"><svg class="spin" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(245,181,68,.3)" stroke-width="3"></circle><path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="#F5B544" stroke-width="3"></path></svg>Confirm in wallet…</div></sc-if>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+
+<sc-if value="{{hasBatch}}" hint-placeholder-val="{{ false }}">
+<div class="bar-in" style="padding: 10px 16px; border-top: 1px solid #232832; background: #13161B; display: flex; align-items: center; gap: 10px">
+<span style="width: 22px; height: 22px; border-radius: 50%; background: #2ECC71; color: #06210F; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700" class="mono">{{batchCount}}</span>
+<span style="font-size: 13px">{{batchText}}</span>
+<div style="flex-grow: 1"></div>
+<button class="btn" onClick="{{openReview}}" style="height: 34px; padding: 0 12px; background: #2ECC71; border: 0; border-radius: 8px; color: #06210F; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">Review &amp; sign ▸</button>
+</div>
+</sc-if>
+
+<div style="padding: 12px 16px 14px; border-top: 1px solid #232832; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; gap: 8px; align-items: center; background: #13161B; border: 1px solid #2E3440; border-radius: 12px; padding: 4px 4px 4px 12px">
+<input aria-label="Ask or describe a change" value="{{input}}" onChange="{{onInput}}" onKeyDown="{{onKey}}" placeholder="Ask or describe a change…" style="flex: 1; min-width: 0; height: 36px; background: transparent; border: 0; outline: none; color: #E6E8EC; font: inherit">
+<button class="btn" onClick="{{send}}" disabled="{{sendDisabled}}" aria-label="Send" style="width: 36px; height: 36px; border-radius: 9px; border: 0; background: #2ECC71; color: #06210F; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+</div>
+<span style="font-size: 11px; color: #6B7383">The assistant only prepares changes. Nothing happens until you sign.</span>
+</div>
+</aside>
+</div>
+
+<sc-if value="{{reviewOpen}}" hint-placeholder-val="{{ false }}">
+<div class="fade" style="position: fixed; inset: 0; background: rgba(5,6,8,.72); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 30">
+<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="t-rv" style="width: 100%; max-width: 520px; background: #13161B; border: 1px solid #2E3440; border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 id="t-rv" style="margin: 0; font-size: 18px; font-weight: 600">Review &amp; sign</h2>
+<p style="margin: 0; color: #A9B1BF; font-size: 13px">One wallet request. Actions run in this order:</p>
+<ol style="margin: 0; padding: 0; list-style: none; border: 1px solid #232832; border-radius: 10px; overflow: hidden">
+<sc-for list="{{reviewItems}}" as="ri" hint-placeholder-count="3">
+<li style="display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #1C2028">
+<span style="width: 24px; height: 24px; flex: none; display: flex; align-items: center; justify-content: center">
+<sc-if value="{{ri.done}}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#12301F" stroke="#2ECC71" stroke-width="1.2"></circle><path class="draw" d="m7.5 12.5 3 3 6-6.5" fill="none" stroke="#2ECC71" stroke-width="2.2" stroke-linecap="round"></path></svg></sc-if>
+<sc-if value="{{ri.active}}" hint-placeholder-val="{{ false }}"><svg class="spin" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(245,181,68,.25)" stroke-width="2.4"></circle><path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="#F5B544" stroke-width="2.4" stroke-linecap="round"></path></svg></sc-if>
+<sc-if value="{{ri.todo}}" hint-placeholder-val="{{ true }}"><span class="mono" style="width: 22px; height: 22px; border-radius: 50%; border: 1px solid #2E3440; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #8A93A3">{{ri.n}}</span></sc-if>
+</span>
+<span style="font-size: 13px">{{ri.text}}</span>
+</li>
+</sc-for>
+</ol>
+<div style="display: flex; gap: 8px; justify-content: flex-end">
+<button class="btn" onClick="{{closeReview}}" disabled="{{signingAll}}" style="height: 40px; padding: 0 16px; background: transparent; border: 1px solid #2E3440; border-radius: 8px; color: #E6E8EC; font: inherit; cursor: pointer">Cancel</button>
+<button class="btn" onClick="{{signAll}}" disabled="{{signingAll}}" style="height: 40px; padding: 0 18px; background: #2ECC71; border: 0; border-radius: 8px; color: #06210F; font: inherit; font-weight: 600; cursor: pointer">{{signLabel}}</button>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.timers = [];
+    this.state = this.initial();
+  }
+  initial() {
+    return {
+      messages: [], cards: {}, input: '', busy: false, stream: null,
+      reviewOpen: false, signingAll: false, signIdx: -1, procPaused: false, procLimit: 200, mariaAdded: false, thrRaised: false, seq: 0
+    };
+  }
+  componentWillUnmount() { this.clearAll(); }
+  clearAll() { this.timers.forEach(clearTimeout); this.timers = []; clearInterval(this.iv); }
+  wait(ms) { return new Promise((r) => this.timers.push(setTimeout(r, ms))); }
+  nid() { this.n = (this.n || 0) + 1; return 'm' + this.n; }
+  push(m) { this.setState((s) => ({ messages: s.messages.filter((x) => x.role !== 'typing').concat([Object.assign({ id: this.nid() }, m)]) })); }
+  async typing(ms) { this.setState((s) => ({ messages: s.messages.concat([{ id: this.nid(), role: 'typing' }]) })); await this.wait(ms); this.setState((s) => ({ messages: s.messages.filter((x) => x.role !== 'typing') })); }
+  async say(text) {
+    const id = this.nid();
+    this.setState((s) => ({ messages: s.messages.concat([{ id, role: 'ai', text }]), stream: { id, len: 0 } }));
+    await new Promise((res) => {
+      clearInterval(this.iv);
+      this.iv = setInterval(() => {
+        const st = this.state.stream; if (!st) { clearInterval(this.iv); res(); return; }
+        const len = st.len + 4;
+        if (len >= text.length) { clearInterval(this.iv); this.setState({ stream: null }); res(); }
+        else this.setState({ stream: { id, len } });
+      }, 16);
+    });
+    await this.wait(120);
+  }
+  card(key, data) { this.setState((s) => ({ cards: Object.assign({}, s.cards, { [key]: Object.assign({ status: 'draft' }, data) }) })); this.push({ role: 'card', cardId: key }); }
+  setCard(key, patch) { this.setState((s) => ({ cards: Object.assign({}, s.cards, { [key]: Object.assign({}, s.cards[key], patch) }) })); }
+  async run(text) {
+    const t = text.trim(); if (!t || this.state.busy) return;
+    this.setState({ busy: true, input: '' });
+    this.push({ role: 'user', text: t });
+    const q = t.toLowerCase();
+    await this.wait(250);
+    if (q.indexOf('maria') >= 0) await this.flowMaria();
+    else if (q.indexOf('week') >= 0 || q.indexOf('enough') >= 0) await this.flowWeek();
+    else if ((q.indexOf('limit') >= 0 || q.indexOf('lower') >= 0) && q.indexOf('procurement') >= 0) await this.flowLimit();
+    else if (q.indexOf('pause') >= 0 || q.indexOf('stop') >= 0) await this.flowPause();
+    else if (q.indexOf('chen') >= 0 || q.indexOf('fail') >= 0) await this.flowChen();
+    else { await this.typing(600); await this.say('I can prepare changes (recipients, schedules, mandates, pause) or answer questions about payments and limits. Try one of these:'); this.push({ role: 'question', options: ['What do we pay this week?', 'Pay Maria 1500 monthly on Base'], kind: 'suggest' }); }
+    this.setState({ busy: false });
+  }
+  async flowMaria() {
+    await this.typing(900);
+    await this.say('Here’s what I prepared. Maria is new, so I add her as a recipient and schedule the payment from payroll.');
+    await this.wait(150);
+    this.card('rec', { type: 'AddRecipient', title: 'New recipient', tx: 'Add recipient Maria — Base 0xAb12…34' });
+    await this.wait(350);
+    this.card('sched', { type: 'AddSchedule', title: 'New scheduled payment', tx: 'Add schedule: Maria, 1,500 USDC monthly on the 1st, paid by payroll' });
+    await this.wait(500);
+    await this.say('Want me to raise payroll’s approval threshold to 2,000 so it goes out automatically?');
+    this.push({ role: 'question', options: ['Yes, raise to 2,000', 'No, keep approvals'], kind: 'thr' });
+  }
+  async flowThr(yes) {
+    this.push({ role: 'user', text: yes ? 'Yes' : 'No, keep approvals' });
+    await this.typing(600);
+    if (yes) {
+      await this.say('Done — one more card. Queue all three and sign them together.');
+      this.card('mandate', { type: 'UpdateMandate', title: 'Update payroll’s mandate', tx: 'Update payroll mandate: approval threshold 1,000 → 2,000' });
+    } else await this.say('Okay. Each Maria payment will wait for your approval in the dashboard.');
+  }
+  async flowWeek() {
+    await this.typing(900);
+    await this.say('This week you pay 4 payments — 4,250.00 USDC. The vault holds 12,480.50, so the balance covers it.\nOne catch: Mon 2 Nov totals 3,800, above the vault’s 3,000 daily limit — 800 moves to Tue 3 Nov.');
+    this.push({ role: 'data' });
+  }
+  async flowLimit() {
+    await this.typing(700);
+    await this.say('Here’s the change. procurement has spent 150 today, so it will stop for the rest of the day once this is signed.');
+    this.card('proc', { type: 'UpdateMandate', title: 'Update procurement’s mandate', tx: 'Update procurement mandate: daily limit 200 → 100' });
+  }
+  async flowPause() {
+    await this.typing(500);
+    await this.say('Pausing is one action — no batch needed.');
+    this.card('pause', { type: 'PauseAgent', title: 'Pause procurement', tx: 'Pause agent procurement', danger: true });
+  }
+  async flowChen() {
+    await this.typing(1000);
+    await this.say('I don’t see a failed payment to Chen this month. Alex Chen’s last payment — 2,000.00 USDC → Solana on 2 Oct — arrived.\nThe only refunded payout this month is Tron supplier (250 USDC, 30 Oct): the Tron route returned no quote, so the funds came back and the daily limit was restored.');
+  }
+  cardView(key) {
+    const s = this.state, c = s.cards[key]; if (!c) return null;
+    const L = (t, strong) => ({ t, color: strong ? '#E6E8EC' : '#A9B1BF', weight: strong ? 600 : 400 });
+    let lines = [], diff = [], warn = '', ok = '';
+    if (key === 'rec') lines = [L('Maria · designer', true), L('Base · 0xAb12…34')];
+    if (key === 'sched') {
+      lines = [L('Maria · 1,500 USDC → Base 0xAb12…34', true), L('Monthly on the 1st · from 1 Dec · no end'), L('Paid by payroll · next: 1 Dec, 1 Jan, 1 Feb'), L('Adds Maria to payroll’s fixed recipients')];
+      const m = s.cards.mandate;
+      if (m && m.status !== 'discarded') ok = m.status === 'signed' ? 'Within payroll’s limits — pays automatically.' : 'Goes out automatically once the mandate change is signed.';
+      else warn = 'Above payroll’s approval threshold (1,000): each payment will wait for your approval.';
+    }
+    if (key === 'mandate') diff = [{ label: 'Approval threshold', from: '1,000', to: '2,000' }];
+    if (key === 'proc') diff = [{ label: 'Daily limit', from: '200', to: '100' }];
+    if (key === 'pause') lines = [L('It can’t request payments until you resume it. Other agents keep working.')];
+    const st = c.status;
+    const badge = { draft: 'draft', queued: 'Queued', signing: 'Signing', signed: 'Signed', discarded: 'Discarded' }[st];
+    return {
+      title: c.title, lines, diff, hasWarn: !!warn && st !== 'discarded', warn, hasOk: !!ok && st !== 'discarded', ok,
+      isDraft: st === 'draft', isSigning: st === 'signing', isSigned: st === 'signed',
+      isDanger: !!c.danger, notDanger: !c.danger,
+      badge, badgeBg: st === 'signed' || st === 'queued' ? 'rgba(46,204,113,.14)' : st === 'discarded' ? 'transparent' : c.danger ? 'rgba(229,72,77,.14)' : 'rgba(138,147,163,.14)',
+      badgeFg: st === 'signed' || st === 'queued' ? '#2ECC71' : st === 'discarded' ? '#6B7383' : c.danger ? '#FF8A8E' : '#A9B1BF',
+      border: st === 'queued' || st === 'signed' ? 'rgba(46,204,113,.7)' : st === 'discarded' ? '#1C2028' : c.danger ? 'rgba(229,72,77,.5)' : '#2E3440',
+      shadow: st === 'signed' ? '0 0 18px rgba(46,204,113,.18)' : 'none',
+      add: () => this.setCard(key, { status: 'queued' }),
+      discard: () => this.setCard(key, { status: 'discarded' }),
+      pauseNow: async () => { this.setCard(key, { status: 'signing' }); await this.wait(1200); this.setCard(key, { status: 'signed' }); this.setState({ procPaused: true }); await this.say('procurement is paused. payroll keeps working. Say “resume procurement” when you want it back.'); }
+    };
+  }
+  async signAll() {
+    const keys = Object.keys(this.state.cards).filter((k) => this.state.cards[k].status === 'queued');
+    this.setState({ signingAll: true });
+    for (let i = 0; i < keys.length; i++) { this.setState({ signIdx: i }); await this.wait(800); }
+    this.setState({ signIdx: keys.length });
+    await this.wait(400);
+    const patch = {}; keys.forEach((k) => { patch[k] = Object.assign({}, this.state.cards[k], { status: 'signed' }); });
+    this.setState((s) => ({ cards: Object.assign({}, s.cards, patch), reviewOpen: false, signingAll: false, signIdx: -1, mariaAdded: s.mariaAdded || keys.indexOf('sched') >= 0, thrRaised: s.thrRaised || keys.indexOf('mandate') >= 0, procLimit: keys.indexOf('proc') >= 0 ? 100 : s.procLimit }));
+    await this.wait(200);
+    await this.say(keys.length === 1 ? 'Signed. The change is live.' : 'Signed — ' + keys.length + ' changes in one transaction.' + (keys.indexOf('sched') >= 0 ? ' Maria’s first payment goes out on 1 Dec.' : ''));
+  }
+  renderVals() {
+    const s = this.state;
+    const queued = Object.keys(s.cards).filter((k) => s.cards[k].status === 'queued');
+    const base = [
+      { name: 'Maria Ivanova', chain: '#3B82F6', amount: '1,200.00', freq: 'Monthly on the 2nd', next: 'Mon 2 Nov', tag: '⏳ approval', tagColor: '#F5B544' },
+      { name: 'Alex Chen', chain: '#A78BFA', amount: '2,000.00', freq: 'Monthly on the 2nd', next: 'Mon 2 Nov', tag: '⏳ approval', tagColor: '#F5B544' },
+      { name: 'Lena Design', chain: '#3B82F6', amount: '600.00', freq: 'Every Monday', next: 'Mon 2 Nov', tag: 'payroll', tagColor: '#8A93A3' },
+      { name: 'Northwind Ops', chain: '#38BDF8', amount: '450.00', freq: 'Every Friday', next: 'Fri 6 Nov', tag: 'payroll', tagColor: '#8A93A3' },
+      { name: 'Kenji Mori', chain: '#A78BFA', amount: '300.00', freq: 'Every 14 days', next: 'Thu 12 Nov', tag: 'payroll', tagColor: '#8A93A3' }
+    ];
+    if (s.thrRaised) { base[0].tag = 'payroll'; base[0].tagColor = '#8A93A3'; }
+    const rows = (s.mariaAdded ? [{ name: 'Maria · designer', chain: '#3B82F6', amount: '1,500.00', freq: 'Monthly on the 1st', next: 'Tue 1 Dec', tag: s.thrRaised ? 'payroll' : '⏳ approval', tagColor: s.thrRaised ? '#8A93A3' : '#F5B544', fresh: true }] : []).concat(base);
+    const suggestions = ['Pay Maria 1500 monthly on Base', 'What do we pay this week?', 'Lower procurement’s daily limit to 100', 'Why did Chen’s payment fail?'];
+    const full = { 'Pay Maria 1500 monthly on Base': 'Add Maria, designer, 1500 USDC on the 1st of every month, Base 0xAb12…34, starting Dec, paid by payroll.' };
+    return {
+      upTotal: s.mariaAdded ? '14,140.00' : '12,640.00',
+      procStatus: s.procPaused ? 'Paused' : 'Active', procColor: s.procPaused ? '#F5B544' : '#2ECC71', procLimit: s.procLimit,
+      sched: rows.map((r) => ({ name: r.name, chainColor: r.chain, amount: r.amount, freq: r.freq, next: r.next, tag: r.tag, tagColor: r.tagColor, cls: r.fresh ? 'row-in' : '' })),
+      empty: s.messages.length === 0,
+      suggestions: suggestions.map((l) => ({ label: l, go: () => this.run(full[l] || l) })),
+      messages: s.messages.map((m) => {
+        const base2 = { isUser: m.role === 'user', isAi: m.role === 'ai', isTyping: m.role === 'typing', isQuestion: m.role === 'question', isData: m.role === 'data', isCard: m.role === 'card', align: m.role === 'user' ? 'flex-end' : 'flex-start' };
+        if (m.role === 'ai') { const st = s.stream && s.stream.id === m.id; return Object.assign(base2, { text: st ? m.text.slice(0, s.stream.len) : m.text, caret: st ? 'caret' : '' }); }
+        if (m.role === 'user') return Object.assign(base2, { text: m.text });
+        if (m.role === 'question') return Object.assign(base2, { options: m.options.map((o, i) => ({ label: o, disabled: !!m.answered, bg: m.answered === o ? 'rgba(46,204,113,.12)' : '#13161B', border: m.answered === o ? '#2ECC71' : '#2E3440', go: async () => {
+          if (m.answered || s.busy) return;
+          this.setState((st2) => ({ busy: true, messages: st2.messages.map((x) => x.id === m.id ? Object.assign({}, x, { answered: o }) : x) }));
+          if (m.kind === 'thr') await this.flowThr(i === 0); else { this.setState({ busy: false }); await this.run(full[o] || o); }
+          this.setState({ busy: false });
+        } })) });
+        if (m.role === 'card') return Object.assign(base2, { c: this.cardView(m.cardId) || {} });
+        return base2;
+      }),
+      weekRows: [
+        { date: 'Mon 2 Nov', name: 'Maria Ivanova', tag: s.thrRaised ? '' : '⏳', tagColor: '#F5B544', amount: '1,200.00' },
+        { date: 'Mon 2 Nov', name: 'Alex Chen', tag: '⏳', tagColor: '#F5B544', amount: '2,000.00' },
+        { date: 'Mon 2 Nov', name: 'Lena Design', tag: '', tagColor: '#8A93A3', amount: '600.00' },
+        { date: 'Fri 6 Nov', name: 'Northwind Ops', tag: '', tagColor: '#8A93A3', amount: '450.00' }
+      ],
+      hasBatch: queued.length > 0 && !s.reviewOpen, batchCount: queued.length,
+      batchText: queued.length === 1 ? 'change ready to sign' : 'changes ready to sign',
+      openReview: () => this.setState({ reviewOpen: true }), closeReview: () => this.setState({ reviewOpen: false }),
+      reviewOpen: s.reviewOpen, signingAll: s.signingAll,
+      reviewItems: queued.map((k, i) => ({ n: i + 1, text: s.cards[k].tx, done: s.signIdx > i, active: s.signIdx === i, todo: s.signIdx < i })),
+      signAll: () => this.signAll(), signLabel: s.signingAll ? 'Confirm in wallet…' : 'Sign in wallet',
+      input: s.input, onInput: (e) => this.setState({ input: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') this.run(s.input); },
+      send: () => this.run(s.input), sendDisabled: !s.input.trim() || s.busy,
+      reset: () => { this.clearAll(); this.setState(this.initial()); }
+    };
+  }
+}
+</script>
+</body>
+</html>

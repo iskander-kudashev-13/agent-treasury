@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent — procurement</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0D10}
+a{color:#8AB4FF;text-decoration:none}a:hover{color:#B9D1FF;text-decoration:underline}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.btn{transition:filter .15s,transform .1s}.btn:hover{filter:brightness(1.15)}.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.inp{height:40px;box-sizing:border-box;padding:0 12px;background:#0F1216;border:1px solid #2E3440;border-radius:8px;color:#E6E8EC;font:inherit;width:100%}
+.inp:focus{outline:none;border-color:#2ECC71;box-shadow:0 0 0 3px rgba(46,204,113,.18)}
+.row-in{animation:rowIn .25s cubic-bezier(.2,.9,.3,1) both}
+@keyframes rowIn{from{opacity:0;transform:translateY(-6px)}}
+.tab-in{animation:tabIn .25s ease-out both}@keyframes tabIn{from{opacity:0;transform:translateY(6px)}}
+.bar{transition:width .8s cubic-bezier(.2,.7,.2,1)}
+.uline{transition:left .25s cubic-bezier(.2,.7,.2,1),width .25s cubic-bezier(.2,.7,.2,1)}
+.sheet{animation:sheet .3s cubic-bezier(.2,.9,.3,1) both}@keyframes sheet{from{opacity:0;transform:translateY(20px) scale(.98)}}
+.fade{animation:fade .2s ease-out both}@keyframes fade{from{opacity:0}}
+.live{position:relative}
+.live::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid #2ECC71;animation:ping 2.4s cubic-bezier(.2,.7,.2,1) infinite}
+@keyframes ping{0%{transform:scale(.6);opacity:.8}80%,100%{transform:scale(1.6);opacity:0}}
+.newglow{animation:newglow 1.6s ease-out 1 both}
+@keyframes newglow{0%{background:rgba(138,147,163,.16)}100%{background:transparent}}
+@media (prefers-reduced-motion:reduce){.row-in,.tab-in,.sheet,.fade,.newglow{animation-duration:1ms}.live::after{animation:none}.bar,.uline{transition:none}}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0B0D10; color: #E6E8EC; font-family: Inter, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
+<header style="border-bottom: 1px solid #232832">
+<div style="max-width: 1280px; margin: 0 auto; padding: 12px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+<span style="font-weight: 600; font-size: 15px">Agent Treasury</span>
+<nav style="display: flex; gap: 4px; flex-wrap: wrap" aria-label="Main">
+<a href="Main.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Treasury</a>
+<a href="Agents.dc.html" style="padding: 6px 10px; border-radius: 8px; background: #1A1E25; color: #E6E8EC; text-decoration: none">Agents</a>
+<a href="Payments.dc.html" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Payments</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Payouts</a>
+<a href="#" style="padding: 6px 10px; border-radius: 8px; color: #8A93A3; text-decoration: none">Policy</a>
+</nav>
+</div>
+</header>
+
+<main style="max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 18px">
+<a href="Agents.dc.html" style="font-size: 13px; color: #8A93A3">← All agents</a>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: center">
+<span style="width: 52px; height: 52px; border-radius: 14px; background: #1A1E25; border: 1px solid #2E3440; display: flex; align-items: center; justify-content: center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A9B1BF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Key agent"><circle cx="8" cy="15" r="4"></circle><path d="m10.8 12.2 8.2-8.2M17 6l2 2M15 8l2 2"></path></svg></span>
+<div style="flex: 1 1 300px; min-width: 0">
+<div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600">procurement</h1>
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: {{statusColor}}">
+<sc-if value="{{active}}" hint-placeholder-val="{{ true }}"><span class="live" style="width: 8px; height: 8px; border-radius: 50%; background: #2ECC71"></span></sc-if>
+<sc-if value="{{paused}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F5B544"></span></sc-if>
+<sc-if value="{{revoked}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #6B7383; box-sizing: border-box"></span></sc-if>
+{{statusText}}</span>
+</div>
+<div class="mono" style="font-size: 12px; color: #8A93A3">Key · ed25519:9Hk2…pQ · procurement.vault.example.testnet</div>
+</div>
+<sc-if value="{{notRevoked}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; gap: 8px">
+<button class="btn" onClick="{{togglePause}}" style="height: 40px; padding: 0 16px; background: transparent; border: 1px solid #2E3440; border-radius: 8px; color: #E6E8EC; font: inherit; cursor: pointer">{{pauseLabel}}</button>
+<button class="btn" onClick="{{openRevoke}}" style="height: 40px; padding: 0 16px; background: transparent; border: 1px solid rgba(229,72,77,.5); border-radius: 8px; color: #FF8A8E; font: inherit; cursor: pointer">Revoke</button>
+</div>
+</sc-if>
+</div>
+
+<div role="tablist" aria-label="Agent sections" style="position: relative; display: flex; gap: 4px; border-bottom: 1px solid #232832">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+<button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 44px; padding: 0 16px; background: none; border: 0; font: inherit; font-weight: 500; color: {{t.fg}}; cursor: pointer">{{t.label}}<sc-if value="{{t.hasCount}}" hint-placeholder-val="{{ false }}"><span class="mono" style="margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: rgba(245,181,68,.14); color: #F5B544; font-size: 11px">{{t.count}}</span></sc-if></button>
+</sc-for>
+<span class="uline" aria-hidden="true" style="position: absolute; bottom: -1px; height: 2px; background: #2ECC71; left: {{ulLeft}}px; width: {{ulW}}px"></span>
+</div>
+
+<sc-if value="{{tOverview}}" hint-placeholder-val="{{ true }}">
+<div class="tab-in" style="display: flex; flex-direction: column; gap: 16px">
+<section style="position: relative; overflow: hidden; background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 20px 22px">
+<div aria-hidden="true" style="position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%; background: radial-gradient(closest-side, rgba(138,180,255,.10), transparent)"></div>
+<div style="position: relative; display: flex; gap: 12px; align-items: flex-start">
+<p style="margin: 0; flex: 1; font-size: 18px; line-height: 1.55; color: #A9B1BF">Can spend up to <b style="color: #E6E8EC; font-weight: 600">{{dailyText}} USDC per day</b>, <b style="color: #E6E8EC; font-weight: 600">50 per payment</b>, on <b style="color: #E6E8EC; font-weight: 600">Base and Solana</b>, to <b style="color: #E6E8EC; font-weight: 600">any address</b>. Payments above <b style="color: #E6E8EC; font-weight: 600">30 USDC</b> need your approval.</p>
+<button onClick="{{goMandate}}" style="background: none; border: 0; color: #8AB4FF; font: inherit; cursor: pointer">Edit</button>
+</div>
+</section>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px">
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 16px">
+<div style="font-size: 12px; color: #8A93A3">Spent today</div>
+<div class="mono" style="font-size: 22px; font-weight: 600">150.00 <span style="font-size: 13px; color: #8A93A3">/ {{dailyText}}</span></div>
+<div style="height: 8px; margin-top: 10px; border-radius: 999px; background: #1C2028; overflow: hidden"><div class="bar" style="height: 100%; width: {{barW}}%; background: {{barColor}}; border-radius: 999px"></div></div>
+</div>
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 16px">
+<div style="font-size: 12px; color: #8A93A3">Spent this week</div>
+<div class="mono" style="font-size: 22px; font-weight: 600">612.40</div>
+<div aria-hidden="true" style="display: flex; align-items: flex-end; gap: 6px; height: 28px; margin-top: 8px">
+<span style="flex: 1; height: 40%; background: #2A2F38; border-radius: 3px"></span><span style="flex: 1; height: 70%; background: #2A2F38; border-radius: 3px"></span><span style="flex: 1; height: 25%; background: #2A2F38; border-radius: 3px"></span><span style="flex: 1; height: 90%; background: #2A2F38; border-radius: 3px"></span><span style="flex: 1; height: 55%; background: #2A2F38; border-radius: 3px"></span><span style="flex: 1; height: 30%; background: #2A2F38; border-radius: 3px"></span><span style="flex: 1; height: 75%; background: #AEB5C1; border-radius: 3px"></span>
+</div>
+</div>
+<div style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 16px">
+<div style="font-size: 12px; color: #8A93A3">Requests today</div>
+<div style="display: flex; gap: 18px; margin-top: 4px">
+<div><div class="mono" style="font-size: 22px; font-weight: 600">{{cntPaid}}</div><div style="font-size: 12px; color: #2ECC71">paid</div></div>
+<div><div class="mono" style="font-size: 22px; font-weight: 600">{{cntPending}}</div><div style="font-size: 12px; color: #F5B544">pending</div></div>
+<div><div class="mono" style="font-size: 22px; font-weight: 600">{{cntRefused}}</div><div style="font-size: 12px; color: #A9B1BF">refused</div></div>
+</div>
+</div>
+</div>
+<section style="background: #13161B; border: 1px solid #232832; border-radius: 12px; padding: 16px 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px">
+<div><div style="font-size: 12px; color: #8A93A3">Public key</div><div class="mono" style="font-size: 13px">ed25519:9Hk2…pQ</div></div>
+<div><div style="font-size: 12px; color: #8A93A3">Account</div><div class="mono" style="font-size: 13px">procurement.vault.example.testnet</div></div>
+<div><div style="font-size: 12px; color: #8A93A3">Permitted methods</div><div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px"><span class="mono" style="font-size: 11px; padding: 2px 6px; border: 1px solid #2E3440; border-radius: 6px; color: #A9B1BF">request_payment</span><span class="mono" style="font-size: 11px; padding: 2px 6px; border: 1px solid #2E3440; border-radius: 6px; color: #A9B1BF">report_payout_status</span></div></div>
+<div><div style="font-size: 12px; color: #8A93A3">Gas allowance left</div><div class="mono" style="font-size: 13px">0.21 / 0.25 NEAR</div></div>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{tActivity}}" hint-placeholder-val="{{ false }}">
+<div class="tab-in" style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+<sc-for list="{{filters}}" as="fl" hint-placeholder-count="4">
+<button onClick="{{fl.pick}}" aria-pressed="{{fl.on}}" style="height: 34px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 13px; cursor: pointer; background: {{fl.bg}}; border: 1px solid {{fl.border}}; color: {{fl.fg}}">{{fl.label}}</button>
+</sc-for>
+<div style="flex-grow: 1"></div>
+<button class="btn" onClick="{{simulate}}" style="height: 34px; padding: 0 12px; border-radius: 8px; background: #1A1E25; border: 1px solid #2E3440; color: #A9B1BF; font: inherit; font-size: 13px; cursor: pointer">Simulate request from Claude</button>
+</div>
+<section aria-label="Activity" style="background: #13161B; border: 1px solid #232832; border-radius: 12px; overflow: hidden">
+<sc-if value="{{noItems}}" hint-placeholder-val="{{ false }}"><div style="padding: 28px; text-align: center; color: #8A93A3">Nothing here yet.</div></sc-if>
+<sc-for list="{{items}}" as="it" hint-placeholder-count="5">
+<article class="{{it.cls}}" style="display: flex; gap: 14px; padding: 14px 20px; border-bottom: 1px solid #1C2028; align-items: flex-start">
+<span style="width: 28px; height: 28px; flex: none; display: flex; align-items: center; justify-content: center; margin-top: 2px">
+<sc-if value="{{it.isPaid}}" hint-placeholder-val="{{ true }}"><svg width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="Paid"><circle cx="12" cy="12" r="11" fill="rgba(46,204,113,.14)"></circle><path d="m7.5 12.5 3 3 6-6.5" fill="none" stroke="#2ECC71" stroke-width="2.2" stroke-linecap="round"></path></svg></sc-if>
+<sc-if value="{{it.isPending}}" hint-placeholder-val="{{ false }}"><svg width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="Pending approval"><circle cx="12" cy="12" r="11" fill="rgba(245,181,68,.14)"></circle><path d="M12 7v5l3 2" fill="none" stroke="#F5B544" stroke-width="2.2" stroke-linecap="round"></path></svg></sc-if>
+<sc-if value="{{it.isRefused}}" hint-placeholder-val="{{ false }}"><svg width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="Refused"><circle cx="12" cy="12" r="10" fill="none" stroke="#8A93A3" stroke-width="1.6"></circle><path d="m5 19 14-14" stroke="#8A93A3" stroke-width="1.6"></path></svg></sc-if>
+</span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px">
+<div style="display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap">
+<span style="font-weight: 600; color: {{it.titleColor}}">{{it.title}}</span>
+<span class="mono" style="font-weight: 600">{{it.amount}}</span>
+<span style="color: #A9B1BF; font-size: 13px; display: inline-flex; align-items: center; gap: 6px">→ <span style="width: 9px; height: 9px; border-radius: 50%; background: {{it.chainColor}}"></span>{{it.chain}} <span class="mono" style="color: #8A93A3">{{it.addr}}</span></span>
+<div style="flex-grow: 1"></div>
+<span style="font-size: 12px; color: #6B7383">{{it.time}}</span>
+</div>
+<div style="font-size: 13px; color: #8A93A3; font-style: italic">“{{it.memo}}”</div>
+<sc-if value="{{it.isRefused}}" hint-placeholder-val="{{ false }}"><div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 2px"><span class="mono" style="font-size: 11px; padding: 2px 7px; border: 1px solid #2E3440; border-radius: 6px; color: #A9B1BF">{{it.code}}</span><span style="font-size: 13px; color: #A9B1BF">{{it.detail}}</span></div></sc-if>
+<sc-if value="{{it.isPaid}}" hint-placeholder-val="{{ true }}"><div style="display: flex; gap: 14px; font-size: 12px"><a href="#">NEAR tx ↗</a><a href="#">Track ↗</a></div></sc-if>
+<sc-if value="{{it.isPending}}" hint-placeholder-val="{{ false }}"><div style="display: flex; gap: 8px; margin-top: 6px"><button class="btn" onClick="{{it.reject}}" style="height: 34px; padding: 0 12px; background: transparent; border: 1px solid #2E3440; border-radius: 8px; color: #E6E8EC; font: inherit; font-size: 13px; cursor: pointer">Reject</button><button class="btn" onClick="{{it.approve}}" style="height: 34px; padding: 0 12px; background: #F5B544; border: 0; border-radius: 8px; color: #241703; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">Approve</button></div></sc-if>
+</div>
+</article>
+</sc-for>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{tMandate}}" hint-placeholder-val="{{ false }}">
+<div class="tab-in" style="display: flex; flex-direction: column; gap: 16px; max-width: 720px">
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #A9B1BF">Daily limit, USDC</span><input class="inp mono" value="{{dailyInput}}" onChange="{{onDaily}}"></label>
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #A9B1BF">Per payment, USDC</span><input class="inp mono" value="50"></label>
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #A9B1BF">Needs my approval above</span><input class="inp mono" value="30"></label>
+</div>
+<sc-if value="{{belowSpent}}" hint-placeholder-val="{{ false }}"><div style="font-size: 13px; color: #FF8A8E">Lower than today’s spend (150.00). No more payments today.</div></sc-if>
+<sc-if value="{{hasDiff}}" hint-placeholder-val="{{ false }}">
+<div class="row-in" style="padding: 14px 16px; border-radius: 12px; background: #0F1216; border: 1px solid #232832; display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+<span style="font-size: 12px; color: #8A93A3">Changes</span>
+<span>Daily limit <span class="mono" style="color: #8A93A3; text-decoration: line-through">200</span> → <span class="mono" style="font-weight: 600">{{dailyNew}}</span> USDC</span>
+<div style="flex-grow: 1"></div>
+<button class="btn" onClick="{{saveMandate}}" style="height: 38px; padding: 0 16px; background: #2ECC71; border: 0; border-radius: 8px; color: #06210F; font: inherit; font-weight: 600; cursor: pointer">Sign in wallet</button>
+</div>
+</sc-if>
+</div>
+</sc-if>
+</main>
+
+<sc-if value="{{revokeOpen}}" hint-placeholder-val="{{ false }}">
+<div class="fade" style="position: fixed; inset: 0; background: rgba(5,6,8,.72); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 20">
+<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="t-rev" style="width: 100%; max-width: 460px; background: #13161B; border: 1px solid #2E3440; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+<h2 id="t-rev" style="margin: 0; font-size: 18px; font-weight: 600">Revoke procurement?</h2>
+<p style="margin: 0; color: #A9B1BF">It will never be able to request payments again. Pending approvals from this agent will be rejected. This can’t be undone.</p>
+<label style="display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 13px"><input type="checkbox" checked="{{delKey}}" onChange="{{onDelKey}}" style="width: 18px; height: 18px; accent-color: #E5484D; margin-top: 1px"><span>Also delete its access key from <span class="mono">procurement.vault.example.testnet</span></span></label>
+<div style="display: flex; gap: 8px; justify-content: flex-end">
+<button class="btn" onClick="{{closeRevoke}}" style="height: 40px; padding: 0 16px; background: transparent; border: 1px solid #2E3440; border-radius: 8px; color: #E6E8EC; font: inherit; cursor: pointer">Cancel</button>
+<button class="btn" onClick="{{doRevoke}}" style="height: 40px; padding: 0 16px; background: #E5484D; border: 0; border-radius: 8px; color: #fff; font: inherit; font-weight: 600; cursor: pointer">Revoke agent</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{hasToast}}" hint-placeholder-val="{{ false }}">
+<div class="fade" role="status" style="position: fixed; right: 24px; bottom: 24px; padding: 12px 14px; background: #1A1E25; border: 1px solid #2E3440; border-radius: 10px; display: flex; gap: 10px; align-items: center; max-width: 380px; z-index: 30"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{toastColor}}; flex: none"></span><span>{{toastText}}</span></div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1160}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.chains = { Base: '#3B82F6', Solana: '#A78BFA', Ethereum: '#94A3B8' };
+    this.reasons = {
+      AGENT_PER_TX_LIMIT_EXCEEDED: 'Over the per payment limit',
+      CHAIN_NOT_ALLOWED: 'Chain not in this agent’s mandate',
+      AGENT_DAILY_LIMIT_EXCEEDED: 'Over the agent’s daily limit',
+      OWNER_REJECTED: 'Rejected by owner',
+      AGENT_REVOKED: 'Agent revoked'
+    };
+    this.state = {
+      tab: 'activity', filter: 'all', status: 'active', mounted: false, revokeOpen: false, delKey: true,
+      daily: '200', toast: null, sim: 0,
+      items: [
+        { id: 'a1', kind: 'pending', amount: 45, chain: 'Base', addr: '0x71C0…a3E9', memo: 'Logo redesign invoice #42', time: '2 min ago' },
+        { id: 'a2', kind: 'refused', amount: 120, chain: 'Base', addr: '0x9fE1…77b0', memo: 'Annual Figma seats', code: 'AGENT_PER_TX_LIMIT_EXCEEDED', detail: '120 USDC is above the 50 USDC per payment limit.', time: '9 min ago' },
+        { id: 'a3', kind: 'paid', amount: 50, chain: 'Solana', addr: '7xKX…gAsU', memo: 'GPU hours, week 44', time: '31 min ago' },
+        { id: 'a4', kind: 'refused', amount: 20, chain: 'Ethereum', addr: '0x3b2A…c1D4', memo: 'Domain renewal', code: 'CHAIN_NOT_ALLOWED', detail: 'Ethereum isn’t in this agent’s chains (Base, Solana).', time: '1 h ago' },
+        { id: 'a5', kind: 'paid', amount: 25, chain: 'Base', addr: '0x71C0…a3E9', memo: 'Stock photos', time: '3 h ago' },
+        { id: 'a6', kind: 'paid', amount: 75, chain: 'Solana', addr: '4kPq…Zt1M', memo: 'API credits', time: '5 h ago' }
+      ]
+    };
+  }
+  componentDidMount() { this.m = setTimeout(() => this.setState({ mounted: true }), 60); }
+  componentWillUnmount() { clearTimeout(this.m); clearTimeout(this.t); }
+  toast(text, color) { clearTimeout(this.t); this.setState({ toast: { text, color } }); this.t = setTimeout(() => this.setState({ toast: null }), 2800); }
+  setKind(id, kind) { this.setState((s) => ({ items: s.items.map((x) => x.id === id ? Object.assign({}, x, { kind, fresh: true }) : x) })); }
+  renderVals() {
+    const s = this.state;
+    const tabsDef = [['overview', 'Overview', 0, 98], ['activity', 'Activity', 102, 92], ['mandate', 'Mandate', 198, 96]];
+    const pend = s.items.filter((i) => i.kind === 'pending').length;
+    const cur = tabsDef.find((t) => t[0] === s.tab);
+    const list = s.items.filter((i) => s.filter === 'all' || i.kind === s.filter);
+    const daily = parseFloat(s.daily) || 0;
+    const pct = daily ? 150 / daily : 1;
+    return {
+      active: s.status === 'active', paused: s.status === 'paused', revoked: s.status === 'revoked', notRevoked: s.status !== 'revoked',
+      statusText: { active: 'Active', paused: 'Paused', revoked: 'Revoked' }[s.status],
+      statusColor: { active: '#2ECC71', paused: '#F5B544', revoked: '#8A93A3' }[s.status],
+      pauseLabel: s.status === 'active' ? 'Pause' : 'Resume',
+      togglePause: () => { const n = s.status === 'active' ? 'paused' : 'active'; this.setState({ status: n }); this.toast(n === 'paused' ? 'procurement paused. Other agents keep working.' : 'procurement resumed.', n === 'paused' ? '#F5B544' : '#2ECC71'); },
+      openRevoke: () => this.setState({ revokeOpen: true }), closeRevoke: () => this.setState({ revokeOpen: false }),
+      delKey: s.delKey, onDelKey: (e) => this.setState({ delKey: e.target.checked }),
+      doRevoke: () => { this.setState((st) => ({ revokeOpen: false, status: 'revoked', items: st.items.map((i) => i.kind === 'pending' ? Object.assign({}, i, { kind: 'refused', code: 'AGENT_REVOKED', detail: 'Rejected because the agent was revoked.', fresh: true }) : i) })); this.toast(s.delKey ? 'Revoked. Access key deleted.' : 'Revoked.', '#E5484D'); },
+      revokeOpen: s.revokeOpen,
+      tabs: tabsDef.map((t) => ({ label: t[1], on: s.tab === t[0], fg: s.tab === t[0] ? '#E6E8EC' : '#8A93A3', pick: () => this.setState({ tab: t[0] }), hasCount: t[0] === 'activity' && pend > 0, count: pend })),
+      ulLeft: cur[2], ulW: cur[3],
+      tOverview: s.tab === 'overview', tActivity: s.tab === 'activity', tMandate: s.tab === 'mandate',
+      goMandate: () => this.setState({ tab: 'mandate' }),
+      dailyText: daily.toLocaleString('en-US'),
+      barW: s.mounted ? Math.min(100, pct * 100).toFixed(1) : 0,
+      barColor: pct >= 1 ? '#E5484D' : pct >= 0.8 ? '#F5B544' : '#AEB5C1',
+      cntPaid: s.items.filter((i) => i.kind === 'paid').length, cntPending: pend, cntRefused: s.items.filter((i) => i.kind === 'refused').length,
+      filters: [['all', 'All'], ['paid', 'Paid'], ['pending', 'Pending'], ['refused', 'Rejected']].map((f) => ({ label: f[1], on: s.filter === f[0], pick: () => this.setState({ filter: f[0] }), bg: s.filter === f[0] ? 'rgba(46,204,113,.12)' : 'transparent', border: s.filter === f[0] ? '#2ECC71' : '#2E3440', fg: s.filter === f[0] ? '#E6E8EC' : '#A9B1BF' })),
+      simulate: () => {
+        const n = s.sim + 1;
+        const item = n % 2 ? { id: 's' + n, kind: 'refused', amount: 80, chain: 'Base', addr: '0x5aD3…E902', memo: 'Conference tickets', code: 'AGENT_DAILY_LIMIT_EXCEEDED', detail: '80 USDC would exceed today’s remaining 50 USDC.', time: 'just now', fresh: true }
+          : { id: 's' + n, kind: 'paid', amount: 12, chain: 'Solana', addr: '4kPq…Zt1M', memo: 'Hosting top-up', time: 'just now', fresh: true };
+        this.setState((st) => ({ sim: n, items: [item].concat(st.items) }));
+      },
+      noItems: list.length === 0,
+      items: list.map((i) => ({
+        isPaid: i.kind === 'paid', isPending: i.kind === 'pending', isRefused: i.kind === 'refused',
+        title: i.kind === 'paid' ? 'Paid' : i.kind === 'pending' ? 'Waiting for your approval' : 'Refused: ' + (this.reasons[i.code] || 'Agent revoked'),
+        titleColor: i.kind === 'refused' ? '#A9B1BF' : '#E6E8EC',
+        amount: i.amount.toFixed(2), chain: i.chain, chainColor: this.chains[i.chain], addr: i.addr, memo: i.memo, time: i.time,
+        code: i.code, detail: i.detail, cls: i.fresh ? 'row-in newglow' : '',
+        approve: () => { this.setKind(i.id, 'paid'); this.toast('Approved · 45.00 USDC → Base', '#2ECC71'); },
+        reject: () => { this.setState((st) => ({ items: st.items.map((x) => x.id === i.id ? Object.assign({}, x, { kind: 'refused', code: 'OWNER_REJECTED', detail: 'You rejected this payment.', fresh: true }) : x) })); }
+      })),
+      dailyInput: s.daily, onDaily: (e) => this.setState({ daily: e.target.value }),
+      hasDiff: s.daily !== '200' && daily > 0, dailyNew: daily.toLocaleString('en-US'), belowSpent: daily > 0 && daily < 150,
+      saveMandate: () => this.toast('Mandate updated · daily limit ' + daily.toLocaleString('en-US') + ' USDC', '#2ECC71'),
+      hasToast: !!s.toast, toastText: s.toast ? s.toast.text : '', toastColor: s.toast ? s.toast.color : '#2ECC71'
+    };
+  }
+}
+</script>
+</body>
+</html>
