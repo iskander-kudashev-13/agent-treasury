@@ -1,0 +1,2549 @@
+{
+ "description": "Shared vectors for ADR-0004 \u00a72 date rules (UTC ms). Generated independently with Python datetime by the lead; checked by contract/src/frequency.rs tests, worker/src/ai/frequency.ts and dashboard/src/lib/frequency.ts.",
+ "cases": [
+  {
+   "frequency": "Once",
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796549400000,
+   "next_after_first": 1797154200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796549400000,
+   "next_after_first": 1797154200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1796549400000,
+   "next_after_first": 1797154200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1796549400000,
+   "next_after_first": 1797154200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1799573400000,
+   "next_after_first": 1800178200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1831023000000,
+   "next_after_first": 1831627800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796635800000,
+   "next_after_first": 1797240600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796635800000,
+   "next_after_first": 1797240600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1796635800000,
+   "next_after_first": 1797240600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1796635800000,
+   "next_after_first": 1797240600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1799659800000,
+   "next_after_first": 1800264600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1831109400000,
+   "next_after_first": 1831714200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796463000000,
+   "next_after_first": 1797067800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796463000000,
+   "next_after_first": 1797067800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1796463000000,
+   "next_after_first": 1797067800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1796463000000,
+   "next_after_first": 1797067800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1800091800000,
+   "next_after_first": 1800696600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1830936600000,
+   "next_after_first": 1831541400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1798795800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1798795800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1798795800000,
+   "next_after_first": 1801474200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1798795800000,
+   "next_after_first": 1801474200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1801474200000,
+   "next_after_first": 1803893400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1833010200000,
+   "next_after_first": 1835515800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1797327000000,
+   "next_after_first": 1800005400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1797327000000,
+   "next_after_first": 1800005400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1797327000000,
+   "next_after_first": 1800005400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1797327000000,
+   "next_after_first": 1800005400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1800005400000,
+   "next_after_first": 1802683800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1831541400000,
+   "next_after_first": 1834219800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1798450200000,
+   "next_after_first": 1801128600000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1798450200000,
+   "next_after_first": 1801128600000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1798450200000,
+   "next_after_first": 1801128600000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1798450200000,
+   "next_after_first": 1801128600000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1801128600000,
+   "next_after_first": 1803807000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1832664600000,
+   "next_after_first": 1835343000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1796203800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1796203800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1796203800000,
+   "next_after_first": 1796290200000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1796203800000,
+   "next_after_first": 1796290200000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1799573400000,
+   "next_after_first": 1799659800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1830677400000,
+   "next_after_first": 1830763800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1797327000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1797327000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1797327000000,
+   "next_after_first": 1798536600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1797327000000,
+   "next_after_first": 1798536600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1799746200000,
+   "next_after_first": 1800955800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1831195800000,
+   "next_after_first": 1832405400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 0,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1827653400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400000,
+   "first_at_or_after": 1796117400000,
+   "next_after_first": 1827653400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796117400001,
+   "first_at_or_after": 1827653400000,
+   "next_after_first": 1859189400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1796203800000,
+   "first_at_or_after": 1827653400000,
+   "next_after_first": 1859189400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1799573400000,
+   "first_at_or_after": 1827653400000,
+   "next_after_first": 1859189400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1796117400000,
+   "t": 1830677400000,
+   "first_at_or_after": 1859189400000,
+   "next_after_first": 1890725400000
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1770508800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1770508800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1770508800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1770508800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1773532800000,
+   "next_after_first": 1774137600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1804377600000,
+   "next_after_first": 1804982400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769990400000,
+   "next_after_first": 1770595200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769990400000,
+   "next_after_first": 1770595200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1769990400000,
+   "next_after_first": 1770595200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1769990400000,
+   "next_after_first": 1770595200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1773619200000,
+   "next_after_first": 1774224000000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1804464000000,
+   "next_after_first": 1805068800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1770422400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1770422400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1770422400000,
+   "next_after_first": 1771027200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1770422400000,
+   "next_after_first": 1771027200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1773446400000,
+   "next_after_first": 1774051200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1804896000000,
+   "next_after_first": 1805500800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1772323200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1772323200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1772323200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1772323200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1775001600000,
+   "next_after_first": 1777593600000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1806537600000,
+   "next_after_first": 1809129600000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1771113600000,
+   "next_after_first": 1773532800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1771113600000,
+   "next_after_first": 1773532800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1771113600000,
+   "next_after_first": 1773532800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1771113600000,
+   "next_after_first": 1773532800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1773532800000,
+   "next_after_first": 1776211200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1805068800000,
+   "next_after_first": 1807747200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1772236800000,
+   "next_after_first": 1774656000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1772236800000,
+   "next_after_first": 1774656000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1772236800000,
+   "next_after_first": 1774656000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1772236800000,
+   "next_after_first": 1774656000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1774656000000,
+   "next_after_first": 1777334400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1806192000000,
+   "next_after_first": 1808870400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1769904000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1769904000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1769990400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1769904000000,
+   "next_after_first": 1769990400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1773273600000,
+   "next_after_first": 1773360000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1804377600000,
+   "next_after_first": 1804464000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1771027200000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1771027200000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1771027200000,
+   "next_after_first": 1772236800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1771027200000,
+   "next_after_first": 1772236800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1773446400000,
+   "next_after_first": 1774656000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1804896000000,
+   "next_after_first": 1806105600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 0,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1801353600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600000,
+   "first_at_or_after": 1769817600000,
+   "next_after_first": 1801353600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769817600001,
+   "first_at_or_after": 1801353600000,
+   "next_after_first": 1832889600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1769904000000,
+   "first_at_or_after": 1801353600000,
+   "next_after_first": 1832889600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1773273600000,
+   "first_at_or_after": 1801353600000,
+   "next_after_first": 1832889600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1769817600000,
+   "t": 1804377600000,
+   "first_at_or_after": 1832889600000,
+   "next_after_first": 1864425600000
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835913540000,
+   "next_after_first": 1836518340000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835913540000,
+   "next_after_first": 1836518340000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1835913540000,
+   "next_after_first": 1836518340000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1835913540000,
+   "next_after_first": 1836518340000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1838937540000,
+   "next_after_first": 1839542340000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1870387140000,
+   "next_after_first": 1870991940000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835999940000,
+   "next_after_first": 1836604740000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835999940000,
+   "next_after_first": 1836604740000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1835999940000,
+   "next_after_first": 1836604740000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1835999940000,
+   "next_after_first": 1836604740000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1839023940000,
+   "next_after_first": 1839628740000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1870473540000,
+   "next_after_first": 1871078340000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835827140000,
+   "next_after_first": 1836431940000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835827140000,
+   "next_after_first": 1836431940000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1835827140000,
+   "next_after_first": 1836431940000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1835827140000,
+   "next_after_first": 1836431940000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1839455940000,
+   "next_after_first": 1840060740000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1870300740000,
+   "next_after_first": 1870905540000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835567940000,
+   "next_after_first": 1838246340000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835567940000,
+   "next_after_first": 1838246340000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1835567940000,
+   "next_after_first": 1838246340000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1835567940000,
+   "next_after_first": 1838246340000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1840838340000,
+   "next_after_first": 1843516740000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1872374340000,
+   "next_after_first": 1875052740000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1836777540000,
+   "next_after_first": 1839455940000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1836777540000,
+   "next_after_first": 1839455940000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1836777540000,
+   "next_after_first": 1839455940000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1836777540000,
+   "next_after_first": 1839455940000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1839455940000,
+   "next_after_first": 1842047940000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1870991940000,
+   "next_after_first": 1873583940000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1837900740000,
+   "next_after_first": 1840579140000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1837900740000,
+   "next_after_first": 1840579140000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1837900740000,
+   "next_after_first": 1840579140000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1837900740000,
+   "next_after_first": 1840579140000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1840579140000,
+   "next_after_first": 1843171140000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1872115140000,
+   "next_after_first": 1874707140000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": 1835567940000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": 1835567940000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1835567940000,
+   "next_after_first": 1835654340000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1835567940000,
+   "next_after_first": 1835654340000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1838937540000,
+   "next_after_first": 1839023940000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1870041540000,
+   "next_after_first": 1870127940000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": 1836691140000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": 1836691140000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1836691140000,
+   "next_after_first": 1837900740000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1836691140000,
+   "next_after_first": 1837900740000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1839110340000,
+   "next_after_first": 1840319940000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1870559940000,
+   "next_after_first": 1871769540000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 0,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": 1867017540000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540000,
+   "first_at_or_after": 1835481540000,
+   "next_after_first": 1867017540000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835481540001,
+   "first_at_or_after": 1867017540000,
+   "next_after_first": 1898553540000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1835567940000,
+   "first_at_or_after": 1867017540000,
+   "next_after_first": 1898553540000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1838937540000,
+   "first_at_or_after": 1867017540000,
+   "next_after_first": 1898553540000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1835481540000,
+   "t": 1870041540000,
+   "first_at_or_after": 1898553540000,
+   "next_after_first": 1930089540000
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": "Once",
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": null,
+   "next_after_first": null
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1794139200000,
+   "next_after_first": 1794744000000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1794139200000,
+   "next_after_first": 1794744000000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1794139200000,
+   "next_after_first": 1794744000000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1794139200000,
+   "next_after_first": 1794744000000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1797768000000,
+   "next_after_first": 1798372800000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 0
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1828612800000,
+   "next_after_first": 1829217600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1794225600000,
+   "next_after_first": 1794830400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1794225600000,
+   "next_after_first": 1794830400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1794225600000,
+   "next_after_first": 1794830400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1794225600000,
+   "next_after_first": 1794830400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1797854400000,
+   "next_after_first": 1798459200000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1828699200000,
+   "next_after_first": 1829304000000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1794052800000,
+   "next_after_first": 1794657600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1794052800000,
+   "next_after_first": 1794657600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1794052800000,
+   "next_after_first": 1794657600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1794052800000,
+   "next_after_first": 1794657600000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1797681600000,
+   "next_after_first": 1798286400000
+  },
+  {
+   "frequency": {
+    "Weekly": {
+     "weekday": 6
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1828526400000,
+   "next_after_first": 1829131200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1796126400000,
+   "next_after_first": 1798804800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1796126400000,
+   "next_after_first": 1798804800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1796126400000,
+   "next_after_first": 1798804800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1796126400000,
+   "next_after_first": 1798804800000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1798804800000,
+   "next_after_first": 1801483200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1830340800000,
+   "next_after_first": 1833019200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1794744000000,
+   "next_after_first": 1797336000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1794744000000,
+   "next_after_first": 1797336000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1794744000000,
+   "next_after_first": 1797336000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1794744000000,
+   "next_after_first": 1797336000000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1797336000000,
+   "next_after_first": 1800014400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 15
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1828872000000,
+   "next_after_first": 1831550400000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1795867200000,
+   "next_after_first": 1798459200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1795867200000,
+   "next_after_first": 1798459200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1795867200000,
+   "next_after_first": 1798459200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1795867200000,
+   "next_after_first": 1798459200000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1798459200000,
+   "next_after_first": 1801137600000
+  },
+  {
+   "frequency": {
+    "Monthly": {
+     "day": 28
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1829995200000,
+   "next_after_first": 1832673600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": 1793966400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": 1793966400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1793966400000,
+   "next_after_first": 1794052800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1793966400000,
+   "next_after_first": 1794052800000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1797336000000,
+   "next_after_first": 1797422400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 1
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1828440000000,
+   "next_after_first": 1828526400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": 1795089600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": 1795089600000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1795089600000,
+   "next_after_first": 1796299200000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1795089600000,
+   "next_after_first": 1796299200000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1797508800000,
+   "next_after_first": 1798718400000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 14
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1828958400000,
+   "next_after_first": 1830168000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 0,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": 1825416000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000000,
+   "first_at_or_after": 1793880000000,
+   "next_after_first": 1825416000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793880000001,
+   "first_at_or_after": 1825416000000,
+   "next_after_first": 1856952000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1793966400000,
+   "first_at_or_after": 1825416000000,
+   "next_after_first": 1856952000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1797336000000,
+   "first_at_or_after": 1825416000000,
+   "next_after_first": 1856952000000
+  },
+  {
+   "frequency": {
+    "EveryNDays": {
+     "n": 365
+    }
+   },
+   "start_at": 1793880000000,
+   "t": 1828440000000,
+   "first_at_or_after": 1856952000000,
+   "next_after_first": 1888488000000
+  }
+ ]
+}
