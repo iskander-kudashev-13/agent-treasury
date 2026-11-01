@@ -1,0 +1,8 @@
+{
+  "NEAR_NETWORK": "testnet",
+  "VAULT_CONTRACT_ID": "REPLACE_WITH_VAULT_ID",
+  "AGENT_ID": "payroll",
+  "ONECLICK_BASE_URL": "https://1click.chaindefuser.com",
+  "ONECLICK_MODE": "live",
+  "DRY_RUN": "true"
+}

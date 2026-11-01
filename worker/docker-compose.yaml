@@ -1,0 +1,35 @@
+# Derived from NearDeFi/shade-agent-template (Apache-2.0). Modified for Agent Treasury.
+# `shade deploy` (TEE) rewrites `image:` with the digest of the image it builds from ./Dockerfile.
+#
+# SECURITY (audit H1): the TEE measurements cover this file's TEXT and the image digest, but NOT the values of `${...}`
+# placeholders (those arrive as unmeasured env). So everything that decides where money goes is a LITERAL below and is
+# repeated in tee.config.json (baked into the image). CHANGING ANY LITERAL CHANGES THE MEASUREMENTS: the owner must
+# approve the new measurements before the agent can register again. The worker refuses to start if its env differs from
+# tee.config.json (src/config.ts). Keep these literals identical to tee.config.json (test/tee-config.test.ts checks it).
+# Only non-money values stay as ${...}: secrets, token, intervals, CORS origin.
+services:
+  agent-treasury-worker:
+    environment:
+      NEAR_NETWORK: testnet
+      VAULT_CONTRACT_ID: REPLACE_WITH_VAULT_ID
+      AGENT_ID: payroll
+      ONECLICK_BASE_URL: https://1click.chaindefuser.com
+      ONECLICK_MODE: live
+      DRY_RUN: "true"
+      RUN_MODE: tee
+      SPONSOR_ACCOUNT_ID: ${SPONSOR_ACCOUNT_ID}
+      SPONSOR_PRIVATE_KEY: ${SPONSOR_PRIVATE_KEY}
+      LOOP_INTERVAL_MIN: ${LOOP_INTERVAL_MIN}
+      ONECLICK_API_KEY: ${ONECLICK_API_KEY}
+      WORKER_ADMIN_TOKEN: ${WORKER_ADMIN_TOKEN}
+      DASHBOARD_ORIGIN: ${DASHBOARD_ORIGIN}
+      PORT: 3000
+    platform: linux/amd64
+    # Placeholder: set by `shade deploy` after build_docker_image (see deployment.yaml).
+    image: REPLACE_WITH_DOCKER_USER/agent-treasury-worker@sha256:REPLACE_WITH_DIGEST
+    container_name: agent-treasury-worker
+    ports:
+      - 3000:3000
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    restart: always

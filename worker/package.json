@@ -1,0 +1,37 @@
+{
+  "name": "agent-treasury-worker",
+  "version": "0.1.0",
+  "description": "Agent Treasury payout worker (Shade Agent v2 + NEAR Intents 1Click)",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "dry-quote": "tsx scripts/dry-quote.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@near-js/providers": "2.5.1",
+    "@near-js/types": "2.5.1",
+    "@neardefi/shade-agent-js": "2.2.0",
+    "dotenv": "18.0.9",
+    "hono": "4.13.14",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@neardefi/shade-agent-cli": "2.4.0",
+    "@types/node": "^20.19.39",
+    "eslint": "10.14.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5"
+  },
+  "packageManager": "pnpm@11.22.0"
+}
