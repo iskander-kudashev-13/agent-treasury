@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "circle-skills@claude-plugins-official": true
+  }
+}
