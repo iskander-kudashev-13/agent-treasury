@@ -8,7 +8,7 @@ Derived from [NearDeFi/shade-agent-template](https://github.com/NearDeFi/shade-a
 (`ShadeClient.create`, `register`, re-register every 6 days), Dockerfile, docker-compose, deployment.yaml. The oracle logic is replaced.
 License of this directory: Apache-2.0 for template-derived files, MIT for the rest of the repo.
 
-Status: **M0** (dry quote works) and **M2** code (payout loop, tested against fakes). Not yet run against a live vault.
+Status: local mode runs end to end against the testnet vault `at-vault-11012309.testnet` with simulated 1Click (2026-11-01/02, see `../docs/deployments.md`). Not yet run in a TEE or against real 1Click on mainnet.
 
 ## Run modes
 
