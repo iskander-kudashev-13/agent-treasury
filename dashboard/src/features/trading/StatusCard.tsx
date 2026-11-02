@@ -40,6 +40,7 @@ export function StatusCard({ status, log, logLoading, logHint }: { status: Tradi
       {why && (
         <Callout accent={status.state === "halted" || status.state === "error" ? "danger" : "warn"}>{why}</Callout>
       )}
+      {status.dead_man.available === false && status.state_reason !== "DEADMAN_VOLUME_GATED" && <Callout accent="neutral">{t("trading.reason.DEADMAN_VOLUME_GATED")}</Callout>}
       {!status.perp_check.ok && <Callout accent="danger">{t("trading.status.perp")}</Callout>}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

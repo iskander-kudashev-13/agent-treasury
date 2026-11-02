@@ -9,7 +9,7 @@ import { DEFAULT_HARD, deriveSteps, hardLimitsOf, pickPair } from "@/lib/trading
 import { buildTraderSetup, DEFAULT_DAILY_FUNDING, DEFAULT_TOPUP } from "@/lib/tradingView";
 import { useNow } from "@/lib/useNow";
 import { useAgents, usePendingApprovals } from "@/lib/useVault";
-import { Intro } from "./Intro";
+import { GuideLinks } from "./Intro";
 import { KillSwitch } from "./KillSwitch";
 import { RulesCard } from "./RulesCard";
 import { RulesHelp } from "./RulesHelp";
@@ -58,7 +58,6 @@ export function Trading() {
     aiEnabled: AI_ENABLED,
     nowMs: now,
   });
-  const setupDone = steps.slice(0, 5).every((s) => s.state === "done");
   const allDone = steps.every((s) => s.state === "done");
   const running = live !== null && live.active_rules !== null;
   const help = <RulesHelp pair={pair} hard={hard} />;
@@ -87,7 +86,7 @@ export function Trading() {
     <div className="flex flex-col gap-4">
       <QueryErrors sources={[{ label: t("src.agents"), error: agents.error, refresh: agents.refresh }]} />
 
-      <Intro trader={trader} status={live} defaultOpen={!setupDone} />
+      <GuideLinks />
 
       {WORKER_URL === "" ? (
         <EmptyState title={t("trading.page.workerNotConfigured")}>{t("trading.page.setWorkerUrl")}</EmptyState>

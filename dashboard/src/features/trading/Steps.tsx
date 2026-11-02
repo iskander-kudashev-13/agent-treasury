@@ -7,8 +7,8 @@ import { mandateSegments } from "@/lib/describeMandate";
 import { formatTime } from "@/lib/format";
 import { relativeTime } from "@/lib/relativeTime";
 import type { HlAgent, TradingStatus } from "@/lib/tradingClient";
-import { apiWalletNameStable, doneCount, expiryTooLong, MIN_ORDER_USDC, STEP_WALLETS, type StepId, type StepInfo, type StepState } from "@/lib/tradingGuide";
-import { fmtDec, hlAppUrl, type AccountTrust } from "@/lib/tradingView";
+import { apiWalletNameStable, doneCount, MIN_ORDER_USDC, STEP_WALLETS, type StepId, type StepInfo, type StepState } from "@/lib/tradingGuide";
+import { fmtDec, hlAppUrl, reasonText, type AccountTrust } from "@/lib/tradingView";
 import type { AgentView, Payout } from "@/lib/types";
 import { WalletBadge } from "./Intro";
 import { MasterField } from "./SetupCard";
@@ -165,7 +165,11 @@ export function Stepper(p: StepperProps) {
       </StepShell>
 
       {/* 6 */}
-      <StepShell info={byId(6)} summary={t("trading.step.6.done")}>
+      <StepShell info={byId(6)} defaultOpen={s && (s.state === "error" || s.state === "halted" || s.state === "stopped_today") ? true : undefined} summary={t("trading.step.6.done")}>
+        {s && (s.state === "error" || s.state === "halted" || s.state === "stopped_today") && (() => {
+          const why = reasonText(s.state_reason, s.state_detail);
+          return why ? <Callout accent={s.state === "stopped_today" ? "warn" : "danger"}>{why}</Callout> : null;
+        })()}
         <p className="m-0 text-sm text-ink-secondary">{s ? t(`trading.hint.${s.state}`, { sec: 60, lost: fmtDec(s.pnl.today_usdc.replace("-", ""), 2), limit: fmtDec(s.limits.effective.daily_loss_stop_usdc, 2) }) : t("trading.step.6.wait")}</p>
       </StepShell>
     </ol>

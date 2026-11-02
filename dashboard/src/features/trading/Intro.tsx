@@ -1,5 +1,5 @@
 import { useT, rich } from "@/i18n";
-import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Callout, Card, Icons, Pill } from "@/kit";
 import { usdcGrouped } from "@/lib/amount";
 import { hardLimitsOf, STEP_WALLETS, type StepId, type WalletKind } from "@/lib/tradingGuide";
@@ -84,54 +84,60 @@ function ThreeWallets() {
   );
 }
 
-/**
- * What the trading agent is, where the money goes, what is and is not protected, and the three wallets. Open for a new user,
- * one line once set up. Numbers come from the mandate and the worker's limits, never typed into the copy.
- */
-export function Intro({ trader, status, defaultOpen }: { trader: AgentView | null; status: TradingStatus | null; defaultOpen: boolean }) {
+/** Compact pointer on the Trading page to the full guide (how the bot works, how to write rules). */
+export function GuideLinks() {
   const t = useT();
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const open = userOpen ?? defaultOpen;
+  return (
+    <Card aria-label={t("trading.guide.linksAria")} className="flex flex-wrap items-center gap-x-5 gap-y-1.5 py-3">
+      <span className="text-sm text-ink-secondary">{t("trading.guide.linksLead")}</span>
+      <Link to="/trading/guide#how" className="text-sm font-medium">{t("trading.guide.linkHow")} →</Link>
+      <Link to="/trading/guide#rules" className="text-sm font-medium">{t("trading.guide.linkRules")} →</Link>
+    </Card>
+  );
+}
+
+/**
+ * What the trading agent is, where the money goes, what is and is not protected, and the three wallets (the "#how" section of the
+ * guide page). Numbers come from the mandate and the worker's limits, never typed into the copy.
+ */
+export function HowItWorks({ trader, status }: { trader: AgentView | null; status: TradingStatus | null }) {
+  const t = useT();
   const hard = hardLimitsOf(status);
   const daily = trader ? `${usdcGrouped(trader.mandate.daily_limit, 0)} USDC` : t("trading.intro.dailyWord");
   const approval = trader !== null && trader.mandate.approval_threshold === "0" ? t("trading.intro.p.approvalTail") : "";
   return (
-    <Card aria-labelledby="trading-intro" className="flex flex-col gap-4">
-      <details open={open} onToggle={(e) => setUserOpen((e.currentTarget as HTMLDetailsElement).open)}>
-        <summary id="trading-intro" className="cursor-pointer text-[15px] font-semibold">
-          {open ? t("trading.intro.title") : t("trading.intro.collapsed")}
-        </summary>
-        <div className="mt-4 flex flex-col gap-5">
-          <p className="m-0 text-sm leading-relaxed text-ink-secondary">{t("trading.intro.what")}</p>
-          <MoneyFlow />
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <h3 className="m-0 flex items-center gap-1.5 text-sm font-semibold text-ok">
-                <Icons.ShieldCheck size={15} /> {t("trading.intro.protected")}
-              </h3>
-              <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-[13px] text-ink-secondary">
-                <li>{t("trading.intro.p.vault", { daily, tail: approval })}</li>
-                <li>{t("trading.intro.p.bot")}</li>
-                <li>{t("trading.intro.p.rules")}</li>
-                <li>{hard ? t("trading.intro.p.caps", { pos: hard.maxPosition, order: hard.maxOrder, loss: hard.lossStop }) : t("trading.intro.p.capsGeneric")}</li>
-                <li>{t("trading.intro.p.kill")}</li>
-              </ul>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <h3 className="m-0 flex items-center gap-1.5 text-sm font-semibold text-danger-text">
-                <Icons.AlertTriangle size={15} /> {t("trading.intro.notProtected")}
-              </h3>
-              <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-[13px] text-ink-secondary">
-                <li>{t("trading.intro.n.loss")}</li>
-                <li>{t("trading.intro.n.account")}</li>
-                <li>{t("trading.intro.n.perps")}</li>
-                <li>{rich("trading.intro.n.local", { tee: <span className="mono">TEE</span> })}</li>
-              </ul>
-            </div>
-          </div>
-          <ThreeWallets />
+    <Card aria-labelledby="trading-intro" className="flex flex-col gap-5">
+      <h2 id="trading-intro" className="m-0 text-[15px] font-semibold">
+        {t("trading.intro.title")}
+      </h2>
+      <p className="m-0 text-sm leading-relaxed text-ink-secondary">{t("trading.intro.what")}</p>
+      <MoneyFlow />
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <h3 className="m-0 flex items-center gap-1.5 text-sm font-semibold text-ok">
+            <Icons.ShieldCheck size={15} /> {t("trading.intro.protected")}
+          </h3>
+          <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-[13px] text-ink-secondary">
+            <li>{t("trading.intro.p.vault", { daily, tail: approval })}</li>
+            <li>{t("trading.intro.p.bot")}</li>
+            <li>{t("trading.intro.p.rules")}</li>
+            <li>{hard ? t("trading.intro.p.caps", { pos: hard.maxPosition, order: hard.maxOrder, loss: hard.lossStop }) : t("trading.intro.p.capsGeneric")}</li>
+            <li>{t("trading.intro.p.kill")}</li>
+          </ul>
         </div>
-      </details>
+        <div className="flex flex-col gap-1.5">
+          <h3 className="m-0 flex items-center gap-1.5 text-sm font-semibold text-danger-text">
+            <Icons.AlertTriangle size={15} /> {t("trading.intro.notProtected")}
+          </h3>
+          <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-[13px] text-ink-secondary">
+            <li>{t("trading.intro.n.loss")}</li>
+            <li>{t("trading.intro.n.account")}</li>
+            <li>{t("trading.intro.n.perps")}</li>
+            <li>{rich("trading.intro.n.local", { tee: <span className="mono">TEE</span> })}</li>
+          </ul>
+        </div>
+      </div>
+      <ThreeWallets />
     </Card>
   );
 }

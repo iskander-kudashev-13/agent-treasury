@@ -13,6 +13,7 @@ import { PaymentsPage } from "@/pages/PaymentsPage";
 import { PayoutDetailPage } from "@/pages/PayoutDetailPage";
 import { PayoutsPage } from "@/pages/PayoutsPage";
 import { PolicyPage } from "@/pages/PolicyPage";
+import { TradingGuidePage } from "@/pages/TradingGuidePage";
 import { TradingPage } from "@/pages/TradingPage";
 import { TreasuryPage } from "@/pages/TreasuryPage";
 
@@ -42,6 +43,7 @@ export function App() {
                     <Route path="payouts" element={<PayoutsPage />} />
                     <Route path="payouts/:id" element={<PayoutDetailPage />} />
                     <Route path="trading" element={<TradingPage />} />
+                    <Route path="trading/guide" element={<TradingGuidePage />} />
                     <Route path="policy" element={<PolicyPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Route>

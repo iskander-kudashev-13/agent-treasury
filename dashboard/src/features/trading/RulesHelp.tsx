@@ -1,4 +1,5 @@
 import { useT } from "@/i18n";
+import { Link } from "react-router-dom";
 import { Button, Callout, Chip, Icons } from "@/kit";
 import { AI_ENABLED } from "@/lib/config";
 import { baseOfPair, buildExamples, buildTemplates, MIN_ORDER_USDC, type HardLimits } from "@/lib/tradingGuide";
@@ -8,18 +9,46 @@ const CAN = ["coin", "when", "do", "often", "limits", "count"] as const;
 const CANT = ["perps", "indicators", "times", "size", "caps", "money", "manual"] as const;
 
 /**
- * How to describe rules: template chips and example prompts that fill the assistant input (the owner edits the numbers, reads the
+ * Compact rules help for the Trading page: template chips in one row (they fill the assistant's input) and a link to the full
+ * guide. Sizes and the pair come from the worker's limits, so every template stays inside them.
+ */
+export function RulesHelp({ pair, hard }: { pair: string; hard: HardLimits }) {
+  const t = useT();
+  const { openWith } = useAssistantPanel();
+  const templates = buildTemplates(pair, hard);
+  return (
+    <div id="trading-rules-help" className="flex flex-col gap-2">
+      {!AI_ENABLED && <Callout accent="neutral">{t("trading.rules.aiOff")}</Callout>}
+      {templates ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-ink-muted">{t("trading.help.templatesShort")}</span>
+          {templates.map((x) => (
+            <Chip key={x.id} icon={<Icons.Sparkles size={13} />} onClick={AI_ENABLED ? () => openWith(x.prompt) : undefined}>
+              {x.label}
+            </Chip>
+          ))}
+        </div>
+      ) : (
+        <Callout accent="warn">{t("trading.help.capsTooLow", { min: MIN_ORDER_USDC })}</Callout>
+      )}
+      <Link to="/trading/guide#rules" className="text-sm">{t("trading.guide.linkRules")} →</Link>
+    </div>
+  );
+}
+
+/**
+ * The full "how to write rules" content (the "#rules" section of the guide page): template chips and example prompts that fill the assistant input (the owner edits the numbers, reads the
  * rules the dashboard renders back, then signs), plus what the bot can and cannot be told. Sizes and the pair come from the
  * worker's limits, so every example stays inside them.
  */
-export function RulesHelp({ pair, hard }: { pair: string; hard: HardLimits }) {
+export function RulesGuide({ pair, hard }: { pair: string; hard: HardLimits }) {
   const t = useT();
   const { openWith } = useAssistantPanel();
   const templates = buildTemplates(pair, hard);
   const examples = buildExamples(pair, hard);
   const base = baseOfPair(pair);
   return (
-    <div id="trading-rules-help" className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {!AI_ENABLED && <Callout accent="neutral">{t("trading.rules.aiOff")}</Callout>}
       <p className="m-0 text-sm text-ink-secondary">{t("trading.help.how")}</p>
 

@@ -68,7 +68,8 @@ export interface TradingStatus {
   };
   open_orders: TradingOrder[];
   active_rules: { hash: string; name: string; confirmed_at_ms: number; confirmed_by: string } | null;
-  dead_man: { cancel_at_ms: number | null };
+  /** `available` is false while Hyperliquid has not enabled the auto-cancel for the account; null on older workers that do not report it. */
+  dead_man: { cancel_at_ms: number | null; available: boolean | null };
   perp_check: { ok: boolean; at_ms: number };
   last_tick_ms: number | null;
   next_tick_ms: number | null;
@@ -197,7 +198,7 @@ export function parseTradingStatus(j: unknown): TradingStatusResult | null {
       isObj(x) ? [{ oid: num(x.oid), cloid: str(x.cloid), pair: str(x.pair), side: x.side === "sell" ? "sell" : "buy", price: str(x.price, "0"), size: str(x.size, "0"), placed_at_ms: num(x.placed_at_ms), rule_id: strOrNull(x.rule_id, 32) }] : [],
     ),
     active_rules: ar ? { hash: str(ar.hash, "", 64), name: str(ar.name, "", 80), confirmed_at_ms: num(ar.confirmed_at_ms), confirmed_by: str(ar.confirmed_by, "", 80) } : null,
-    dead_man: { cancel_at_ms: numOrNull(obj(j.dead_man).cancel_at_ms) },
+    dead_man: { cancel_at_ms: numOrNull(obj(j.dead_man).cancel_at_ms), available: typeof obj(j.dead_man).available === "boolean" ? (obj(j.dead_man).available as boolean) : null },
     perp_check: { ok: obj(j.perp_check).ok !== false, at_ms: num(obj(j.perp_check).at_ms) },
     last_tick_ms: numOrNull(j.last_tick_ms),
     next_tick_ms: numOrNull(j.next_tick_ms),

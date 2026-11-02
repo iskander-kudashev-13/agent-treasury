@@ -33,7 +33,7 @@ const STATUS = {
   },
   open_orders: [],
   active_rules: { hash: "ab", name: "HYPE dip buyer", confirmed_at_ms: 1, confirmed_by: "owner.testnet" },
-  dead_man: { cancel_at_ms: null },
+  dead_man: { cancel_at_ms: null, available: null },
   perp_check: { ok: true, at_ms: 1 },
   last_tick_ms: 1,
   next_tick_ms: 2,
@@ -58,6 +58,11 @@ describe("parsers", () => {
     expect(parseTradingStatus(STATUS)).toMatchObject({ other_approved_agents: [{ address: "0x2222222222222222222222222222222222222222", name: "old", valid_until_ms: 9 }] });
     expect(parseTradingStatus({ ...STATUS, other_approved_agents: [1, { name: "x" }] })).toMatchObject({ other_approved_agents: [] });
     expect(parseTradingStatus({ enabled: true, state: "running" })).toMatchObject({ other_approved_agents: [] });
+  });
+  it("reads dead_man.available when present and leaves it null on older workers", () => {
+    expect(parseTradingStatus(STATUS)).toMatchObject({ dead_man: { available: null } });
+    expect(parseTradingStatus({ ...STATUS, dead_man: { cancel_at_ms: null, available: false } })).toMatchObject({ dead_man: { available: false } });
+    expect(parseTradingStatus({ enabled: true, state: "running" })).toMatchObject({ dead_man: { available: null } });
   });
   it("rejects unknown states and garbage", () => {
     expect(parseTradingStatus({ ...STATUS, state: "yolo" })).toBeNull();

@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { setLocaleSilently } from "@/i18n/core";
 import type { AgentView } from "./types";
 import { apiWalletName, buildTraderSetup, checkHlAccount, mainnetSetupCommands, trustedHlAccount, fmtDec, fmtSigned, hlAppUrl, pnlAccent, ratio, reasonText } from "./tradingView";
+
+describe("reasonText in every language", () => {
+  const CODES = ["SCHEDULE_CANCEL_FAILED", "DEADMAN_VOLUME_GATED", "LIMIT_NEEDS_DEADMAN", "FILLS_TRUNCATED", "NO_MID_FOR_POSITION", "EQUITY_DROP", "NO_DAY_SNAPSHOT", "STATE_WRITE_FAILED", "HL_READ_FAILED", "VAULT_STATUS_UNAVAILABLE", "PERP_POSITION_DETECTED", "KILLED", "DAILY_LOSS_STOP", "API_WALLET_NOT_APPROVED", "API_WALLET_EXPIRING", "PAIR_LOW_VOLUME", "STALE_DATA"];
+  it("translates each known code to plain words, never the bare code", () => {
+    for (const l of ["en", "ru", "uk"] as const) {
+      setLocaleSilently(l);
+      for (const c of CODES) {
+        const r = reasonText(c, null);
+        expect(r, `${l}:${c}`).toBeTruthy();
+        expect(r, `${l}:${c}`).not.toContain(c);
+      }
+      expect(reasonText("WEIRD_CODE", null), l).toContain("WEIRD_CODE");
+    }
+    setLocaleSilently("en");
+  });
+});
 
 const NOW = 1_800_000_000_000;
 const HL = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01";
@@ -64,7 +81,9 @@ describe("Hyperliquid helpers", () => {
   it("explains known halt reasons", () => {
     expect(reasonText("PERP_POSITION_DETECTED", null)).toMatch(/spot only/);
     expect(reasonText(null, null)).toBeNull();
-    expect(reasonText("OTHER", "x")).toBe("OTHER x");
+    expect(reasonText("OTHER", "x")).toBe("The bot reported a problem (code OTHER). x");
+    expect(reasonText("DEADMAN_VOLUME_GATED", null)).toMatch(/\$1M/);
+    expect(reasonText(null, "only detail")).toBe("only detail");
   });
 });
 

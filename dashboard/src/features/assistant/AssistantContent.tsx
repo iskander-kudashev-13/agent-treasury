@@ -125,7 +125,7 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
       <div className="flex flex-col gap-3 px-4 py-4">
         <p className="m-0 text-[13px] text-ink-muted">{t("as.intro")}</p>
         <p className="m-0 text-xs text-ink-subtle">
-          <Link to="/trading">{t("as.tradingHelp")}</Link>
+          <Link to="/trading/guide#rules">{t("as.tradingHelp")}</Link>
         </p>
         <div className="flex flex-wrap gap-2">
           {SUGGESTION_KEYS.map((k) => (

@@ -84,11 +84,16 @@ export const stateInfo = (s: TradingState, p: { sec?: number; lost?: string; lim
   hint: t(`trading.hint.${s}`, { sec: p.sec ?? 60, lost: p.lost ?? "0", limit: p.limit ?? "0" }),
 });
 
-const REASON_CODES = ["PERP_POSITION_DETECTED", "KILL"] as const;
+const REASON_CODES = [
+  "PERP_POSITION_DETECTED", "KILL", "KILLED", "SCHEDULE_CANCEL_FAILED", "DEADMAN_VOLUME_GATED", "LIMIT_NEEDS_DEADMAN", "FILLS_TRUNCATED", "NO_MID_FOR_POSITION",
+  "EQUITY_DROP", "NO_DAY_SNAPSHOT", "STATE_WRITE_FAILED", "HL_READ_FAILED", "VAULT_STATUS_UNAVAILABLE", "DAILY_LOSS_STOP", "API_WALLET_NOT_APPROVED",
+  "API_WALLET_EXPIRING", "PAIR_LOW_VOLUME", "STALE_DATA",
+] as const;
+/** Plain words for a worker state reason code; an unknown code is shown as is in a generic sentence. The worker's detail text follows. */
 export const reasonText = (reason: string | null, detail: string | null): string | null => {
   if (!reason && !detail) return null;
   const known = reason !== null && (REASON_CODES as readonly string[]).includes(reason);
-  return [reason ? (known ? t(`trading.reason.${reason as (typeof REASON_CODES)[number]}`) : reason) : null, detail].filter(Boolean).join(" ");
+  return [reason ? (known ? t(`trading.reason.${reason as (typeof REASON_CODES)[number]}`) : t("trading.reason.generic", { code: reason })) : null, detail].filter(Boolean).join(" ");
 };
 
 /* ───────────── numbers ───────────── */
