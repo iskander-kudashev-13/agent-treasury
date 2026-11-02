@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_WORKER_URL?: string;
   readonly VITE_AI_ENABLED?: string;
   readonly VITE_ONECLICK_BASE_URL?: string;
+  /** `simulated` (testnet only, ignored elsewhere) | unset */
+  readonly VITE_ONECLICK_MODE?: string;
   /** @deprecated use VITE_NEAR_RPC */
   readonly VITE_NEAR_RPC_URL?: string;
   /** @deprecated use VITE_VAULT_CONTRACT */

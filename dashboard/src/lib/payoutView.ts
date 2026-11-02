@@ -1,7 +1,8 @@
 /** Pure view logic for payouts: filters, explorer links, and the payout timeline (PayoutDetail.dc.html). */
 import { chainName } from "../kit/tokens";
 import { formatUsdc } from "./amount";
-import { explorerAddressUrl } from "./config";
+import { explorerAddressUrl, ONECLICK_SIMULATED } from "./config";
+import { isSimulatedPayout } from "./oneclickStatus";
 import { shortId } from "@/kit/tokens";
 import type { AgentView, Payout, PayoutStatus } from "./types";
 
@@ -84,7 +85,8 @@ const APPROVAL_TEXT: Record<string, string> = {
 };
 
 /** Five steps: requested, approved, transferring, sent to Intents, confirmed/refunded. */
-export function buildTimeline(p: Payout, agent: AgentView | undefined): TimelineItem[] {
+/** `opts.simulated` defaults to the dashboard's testnet simulated-1Click mode (injected in tests). */
+export function buildTimeline(p: Payout, agent: AgentView | undefined, opts: { simulated?: boolean } = {}): TimelineItem[] {
   const s = p.status;
   const chain = chainName(p.chain);
   const sentOut = s === "Sent" || s === "Confirmed" || s === "Refunded" || (s === "Failed" && p.funds_left === true);
@@ -148,6 +150,11 @@ export function buildTimeline(p: Payout, agent: AgentView | undefined): Timeline
     final.state = "failed";
     final.atMs = Number(p.updated_at_ms);
     final.lines.push(p.refund_credited ? "Refund credited back to the vault balance" : "Funds may be returned to the vault. The owner credits them with Credit refund");
+  }
+  if (isSimulatedPayout(p, opts.simulated ?? ONECLICK_SIMULATED)) {
+    // Testnet simulated 1Click: the "destination tx" is a placeholder, nothing to link to.
+    final.lines.push("Simulated 1Click (testnet): no real cross-chain transfer");
+    return [requested, approval, transferring, sent, final];
   }
   if (p.deposit_address && sentOut) final.links.push({ label: "Track on Intents explorer", href: intentsTrackUrl(p.deposit_address) });
   if (s === "Confirmed" && p.tx_hash) {

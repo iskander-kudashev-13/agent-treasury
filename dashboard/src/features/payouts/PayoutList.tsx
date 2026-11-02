@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { agoText } from "@/lib/dates";
+import { ONECLICK_SIMULATED } from "@/lib/config";
+import { isSimulatedPayout } from "@/lib/oneclickStatus";
 import { usdcGrouped } from "@/lib/amount";
 import { intentsTrackUrl, payoutSource } from "@/lib/payoutView";
 import { payoutStatusInfo, toneAccent } from "@/lib/status";
@@ -11,7 +13,8 @@ import { agentLabel, recipientLabel } from "./ApprovalBanner";
 /** One payout row: desktop = columns, mobile = two stacked lines. Labels, memos and names are untrusted text. */
 function Row({ p, recipients, agents, now }: { p: Payout; recipients: RecipientView[]; agents: AgentView[]; now: number }) {
   const s = payoutStatusInfo(p.status);
-  const tracked = p.deposit_address && (p.status === "Sent" || p.status === "Confirmed" || p.status === "Refunded");
+  // Simulated (testnet) payouts never reach Intents: no Track link.
+  const tracked = p.deposit_address && !isSimulatedPayout(p, ONECLICK_SIMULATED) && (p.status === "Sent" || p.status === "Confirmed" || p.status === "Refunded");
   return (
     <li className="at-row row-in flex flex-col gap-1.5 border-b border-track px-4 py-3 text-sm last:border-b-0 md:grid md:grid-cols-[130px_minmax(0,1.6fr)_110px_120px_100px_150px] md:items-center md:gap-3 md:px-5">
       <div className="flex items-center gap-2 md:block">

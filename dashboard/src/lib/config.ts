@@ -1,3 +1,5 @@
+import { isSimulatedOneClick } from "./oneclickStatus";
+
 export type Network = "testnet" | "mainnet";
 
 const env = import.meta.env;
@@ -16,6 +18,8 @@ export const RPC_URL =
 export const WORKER_URL = (env.VITE_WORKER_URL ?? "").replace(/\/$/, "");
 /** NEAR Intents 1Click API (read-only /v0/status used by the "Quote check" before approving a payout). */
 export const ONECLICK_URL = (env.VITE_ONECLICK_BASE_URL || "https://1click.chaindefuser.com").replace(/\/$/, "");
+/** Testnet-only: the worker/MCP run a simulated 1Click, so the approval quote check is skipped with an explicit ack. */
+export const ONECLICK_SIMULATED = isSimulatedOneClick({ mode: env.VITE_ONECLICK_MODE, network: NETWORK, vaultId: VAULT_ID });
 export const AI_ENABLED = env.VITE_AI_ENABLED === "true";
 
 /** Contract views and worker status are refetched on this interval (UI_PLAN §2). */

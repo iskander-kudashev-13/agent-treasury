@@ -136,11 +136,40 @@ export type QuoteGate =
   | { phase: "verified"; check: QuoteCheck }
   | { phase: "mismatch"; check: QuoteCheck }
   | { phase: "not_found" }
-  | { phase: "unavailable"; reason: string };
+  | { phase: "unavailable"; reason: string }
+  /** Testnet simulated 1Click: no real quote exists; approval needs the owner's explicit acknowledgement. */
+  | { phase: "simulated" };
 
-export function evaluateGate(payout: PayoutFields, vaultId: string, fetched: StatusFetch | undefined, nowMs: number): QuoteGate {
+/**
+ * Testnet-only "simulated 1Click" mode (the worker/MCP fake 1Click; their deposit addresses are random and real 1Click
+ * has never seen them). On only when explicitly requested AND the network is testnet AND the vault is a `.testnet`
+ * account, so a misconfigured mainnet build can never relax the quote check. Mirrors the worker/SDK rule that refuses
+ * simulated 1Click on mainnet.
+ */
+export function isSimulatedOneClick(o: { mode: string | undefined; network: string; vaultId: string }): boolean {
+  return o.mode === "simulated" && o.network === "testnet" && o.vaultId.endsWith(".testnet");
+}
+
+/**
+ * Payouts settled by the simulated 1Click carry a `simulated-…` tx hash: there is nothing to track on Intents.
+ * `tx_hash` is reported by the agent, so the prefix alone is untrusted: it only counts when the dashboard itself runs in
+ * simulated mode (testnet). Otherwise a compromised agent on mainnet could hide the tracking links.
+ */
+export const isSimulatedPayout = (p: Pick<Payout, "tx_hash">, simulatedMode: boolean): boolean =>
+  simulatedMode && p.tx_hash?.startsWith("simulated-") === true;
+
+export function evaluateGate(
+  payout: PayoutFields,
+  vaultId: string,
+  fetched: StatusFetch | undefined,
+  nowMs: number,
+  opts: { simulated?: boolean } = {},
+): QuoteGate {
   if (!payout.deposit_address) return { phase: "no_address" };
   if (fetched === undefined) return { phase: "checking" };
+  // Simulated mode replaces only "1Click doesn't know this address" / "can't reach 1Click". A quote that 1Click does
+  // know is still checked normally, and a mismatch still blocks.
+  if (opts.simulated === true && (fetched.kind === "not_found" || fetched.kind === "unavailable")) return { phase: "simulated" };
   if (fetched.kind === "not_found") return { phase: "not_found" };
   if (fetched.kind === "unavailable") return { phase: "unavailable", reason: fetched.reason };
   const check = checkQuote(payout, vaultId, fetched.data, nowMs);
@@ -153,5 +182,5 @@ export function evaluateGate(payout: PayoutFields, vaultId: string, fetched: Sta
  */
 export function canApprove(gate: QuoteGate, override: boolean): boolean {
   if (gate.phase === "verified") return true;
-  return gate.phase === "unavailable" && override;
+  return (gate.phase === "unavailable" || gate.phase === "simulated") && override;
 }

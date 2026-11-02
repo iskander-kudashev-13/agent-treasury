@@ -53,6 +53,15 @@ export function QuoteCheckPanel({
         </>
       )}
 
+      {gate.phase === "simulated" && (
+        <>
+          <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
+            <strong>Simulated 1Click — quote check skipped (testnet only).</strong> The agent runs a fake 1Click, so there is no real quote behind this deposit address and nothing leaves NEAR. On mainnet this payout would be blocked.
+          </Callout>
+          <Checkbox checked={override} onChange={onOverride} label="I understand this is a testnet simulation and want to approve without a quote check" />
+        </>
+      )}
+
       {(gate.phase === "verified" || gate.phase === "mismatch") && (
         <>
           {gate.phase === "verified" ? (

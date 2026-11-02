@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { VAULT_ID } from "@/lib/config";
+import { ONECLICK_SIMULATED, VAULT_ID } from "@/lib/config";
 import { usdcGrouped } from "@/lib/amount";
 import { canApprove, evaluateGate } from "@/lib/oneclickStatus";
 import { chainName } from "@/kit";
@@ -21,17 +21,21 @@ const REASON: Record<string, string> = {
 export function ApproveModal({ payout, label, agentName, onClose }: { payout: Payout; label: string; agentName: string; onClose: () => void }) {
   const { canAct, busy, act } = useOwner();
   const q = useQuoteStatus(payout.deposit_address, true);
-  const [override, setOverride] = useState(false);
+  // One checkbox serves two different acknowledgements (unreachable API / simulated): the tick is bound to the phase it
+  // was given for, so it no longer counts once the phase changes.
+  const [ackPhase, setAckPhase] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
   const fetched = q.isFetching ? undefined : q.data;
-  const gate = evaluateGate(payout, VAULT_ID, fetched, fetched?.kind === "ok" ? fetched.fetchedAt : now);
+  const gate = evaluateGate(payout, VAULT_ID, fetched, fetched?.kind === "ok" ? fetched.fetchedAt : now, { simulated: ONECLICK_SIMULATED });
+  const override = ackPhase === gate.phase;
+  const setOverride = (v: boolean) => setAckPhase(v ? gate.phase : null);
   const expired = isDepositExpired(payout.deposit_expires_at_ms, now);
   const allowed = canApprove(gate, override) && !expired;
 
   const approve = async () => {
     // Re-evaluate at click time: the quote deadline may have passed while the dialog was open.
-    const latest = evaluateGate(payout, VAULT_ID, q.data, Date.now());
-    if (!canApprove(latest, override) || isDepositExpired(payout.deposit_expires_at_ms, Date.now())) return;
+    const latest = evaluateGate(payout, VAULT_ID, q.data, Date.now(), { simulated: ONECLICK_SIMULATED });
+    if (!canApprove(latest, ackPhase === latest.phase) || isDepositExpired(payout.deposit_expires_at_ms, Date.now())) return;
     if (await act("approve_payout", { payout_id: payout.id })) onClose();
   };
 
@@ -86,9 +90,11 @@ export function ApproveModal({ payout, label, agentName, onClose }: { payout: Pa
               <dt className="text-ink-muted">Deposit address</dt>
               <dd className="m-0 break-all">
                 <span className="mono text-xs">{payout.deposit_address}</span>{" "}
-                <a href={intentsTrackUrl(payout.deposit_address)} target="_blank" rel="noreferrer">
-                  Intents explorer ↗
-                </a>
+                {gate.phase !== "simulated" && (
+                  <a href={intentsTrackUrl(payout.deposit_address)} target="_blank" rel="noreferrer">
+                    Intents explorer ↗
+                  </a>
+                )}
               </dd>
             </>
           )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canApprove, checkQuote, evaluateGate, fetchOneClickStatus, sameAddress, sameAmount, type OneClickStatus } from "./oneclickStatus";
+import { canApprove, checkQuote, evaluateGate, fetchOneClickStatus, isSimulatedOneClick, isSimulatedPayout, sameAddress, sameAmount, type OneClickStatus } from "./oneclickStatus";
 
 const NOW = Date.parse("2026-11-01T12:00:00Z");
 const DEP = "a".repeat(64);
@@ -127,5 +127,55 @@ describe("fetchOneClickStatus", () => {
     }) as unknown as typeof fetch;
     await fetchOneClickStatus("dep addr", "https://1click.chaindefuser.com", { fetchImpl: f });
     expect(url).toBe("https://1click.chaindefuser.com/v0/status?depositAddress=dep%20addr");
+  });
+});
+
+describe("simulated 1Click (testnet only)", () => {
+  const sim = { simulated: true };
+  it("is on only for mode=simulated + testnet network + .testnet vault", () => {
+    expect(isSimulatedOneClick({ mode: "simulated", network: "testnet", vaultId: "v.testnet" })).toBe(true);
+    expect(isSimulatedOneClick({ mode: "simulated", network: "mainnet", vaultId: "v.testnet" })).toBe(false);
+    expect(isSimulatedOneClick({ mode: "simulated", network: "testnet", vaultId: "v.near" })).toBe(false);
+    expect(isSimulatedOneClick({ mode: "simulated", network: "testnet", vaultId: "" })).toBe(false);
+    expect(isSimulatedOneClick({ mode: undefined, network: "testnet", vaultId: "v.testnet" })).toBe(false);
+    expect(isSimulatedOneClick({ mode: "live", network: "testnet", vaultId: "v.testnet" })).toBe(false);
+  });
+  it("turns not_found / unavailable into 'simulated', approvable only with the acknowledgement", () => {
+    for (const f of [{ kind: "not_found" } as const, { kind: "unavailable", reason: "x" } as const]) {
+      const g = evaluateGate(payout, "vault.testnet", f, NOW, sim);
+      expect(g.phase).toBe("simulated");
+      expect(canApprove(g, false)).toBe(false);
+      expect(canApprove(g, true)).toBe(true);
+    }
+  });
+  it("never relaxes a real quote: verified stays verified, a mismatch still blocks", () => {
+    expect(evaluateGate(payout, "vault.testnet", { kind: "ok", data: status(), fetchedAt: NOW }, NOW, sim).phase).toBe("verified");
+    const bad = evaluateGate(payout, "vault.testnet", { kind: "ok", data: status({ recipient: "0xbad" }), fetchedAt: NOW }, NOW, sim);
+    expect(bad.phase).toBe("mismatch");
+    expect(canApprove(bad, true)).toBe(false);
+  });
+  it("still blocks a payout without a deposit address and waits while checking", () => {
+    expect(evaluateGate({ ...payout, deposit_address: null }, "vault.testnet", { kind: "not_found" }, NOW, sim).phase).toBe("no_address");
+    expect(evaluateGate(payout, "vault.testnet", undefined, NOW, sim).phase).toBe("checking");
+  });
+  it("without the flag, not_found is still a hard block", () => {
+    expect(canApprove(evaluateGate(payout, "vault.testnet", { kind: "not_found" }, NOW, { simulated: false }), true)).toBe(false);
+  });
+  it("recognises simulated payouts by their tx hash", () => {
+    expect(isSimulatedPayout({ tx_hash: "simulated-c7adfe26" }, true)).toBe(true);
+    expect(isSimulatedPayout({ tx_hash: "0xabc" }, true)).toBe(false);
+    expect(isSimulatedPayout({ tx_hash: null }, true)).toBe(false);
+  });
+  it("ignores an agent-reported simulated- hash when the dashboard is not in simulated mode (mainnet)", () => {
+    expect(isSimulatedPayout({ tx_hash: "simulated-x" }, false)).toBe(false);
+  });
+  it("rejects look-alike configs", () => {
+    expect(isSimulatedOneClick({ mode: "SIMULATED", network: "testnet", vaultId: "v.testnet" })).toBe(false);
+    expect(isSimulatedOneClick({ mode: "simulated", network: "testnet", vaultId: "vault.testnet.near" })).toBe(false);
+  });
+  it("an ok quote past its deadline still blocks in simulated mode", () => {
+    const late = evaluateGate(payout, "vault.testnet", { kind: "ok", data: status(), fetchedAt: NOW }, Date.parse("2100-01-01T00:00:00Z"), { simulated: true });
+    expect(late.phase).toBe("mismatch");
+    expect(canApprove(late, true)).toBe(false);
   });
 });

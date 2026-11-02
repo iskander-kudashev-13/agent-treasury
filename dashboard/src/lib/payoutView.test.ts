@@ -81,3 +81,22 @@ describe("buildTimeline", () => {
     expect(t[4]?.lines.some((l) => l.startsWith("Tx "))).toBe(true);
   });
 });
+
+describe("buildTimeline with simulated 1Click", () => {
+  it("has no Intents or destination links and says it was simulated", () => {
+    const x = p({ status: "Confirmed", deposit_address: "f7d3c4", tx_hash: "simulated-c7adfe26" });
+    const final = buildTimeline(x, undefined, { simulated: true })[4];
+    expect(final?.links).toEqual([]);
+    expect(final?.lines.join(" ")).toMatch(/Simulated 1Click/);
+    expect(final?.state).toBe("done");
+  });
+});
+
+describe("buildTimeline: agent-reported simulated- hash outside simulated mode", () => {
+  it("keeps the Intents and destination links (a mainnet agent cannot hide them)", () => {
+    const x = p({ status: "Confirmed", chain: "base", deposit_address: "f7d3c4", tx_hash: "simulated-x" });
+    const final = buildTimeline(x, undefined, { simulated: false })[4];
+    expect(final?.links.some((l) => l.label === "Track on Intents explorer")).toBe(true);
+    expect(final?.lines.join(" ")).not.toMatch(/Simulated 1Click/);
+  });
+});
