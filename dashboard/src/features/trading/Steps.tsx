@@ -90,7 +90,9 @@ export interface StepperProps {
   setup: ReactNode;
   /** Pending hl-trader top-ups waiting for the owner. */
   pendingTopups: Payout[];
-  rules: { name: string; hash: string } | null;
+  rules: { name: string; hash: string; confirmedAtMs: number } | null;
+  /** The signed rules in sentences (or a sign-in button); null when none are signed. */
+  rulesBody: ReactNode;
   /** The rules help panel (template chips, examples, can/can't). */
   rulesHelp: ReactNode;
   onChangeRules: (() => void) | null;
@@ -148,6 +150,7 @@ export function Stepper(p: StepperProps) {
       {/* 5 */}
       <StepShell
         info={byId(5)}
+        defaultOpen={p.rules !== null ? true : undefined}
         summary={
           p.rules ? (
             <span className="inline-flex flex-wrap items-center gap-x-2">
@@ -161,6 +164,12 @@ export function Stepper(p: StepperProps) {
           ) : undefined
         }
       >
+        {p.rules && (
+          <div className="flex flex-col gap-3">
+            <span className="text-xs text-ink-muted">{t("trading.rules.confirmedAt", { when: formatTime(p.rules.confirmedAtMs) })}</span>
+            {p.rulesBody}
+          </div>
+        )}
         {p.rulesHelp}
       </StepShell>
 

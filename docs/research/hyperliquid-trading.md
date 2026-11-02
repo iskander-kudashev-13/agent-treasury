@@ -59,7 +59,7 @@ How claims are marked:
 | Pruning | When deregistered, when expired, or "the account that registered the agent no longer has funds". | [doc] nonces page |
 | Nonces | Stored per **signer**: the 100 highest are kept. A new nonce must be above the smallest of those and never used before. It must also be within `(T − 2 days, T + 1 day)` of block time. Use ms timestamps from an atomic counter, and one API wallet per process. | [doc] nonces page |
 | Sub-accounts | Need $100k of volume first. They are not usable for isolation on a fresh account. | [doc] sub-accounts page |
-| Dead-man switch | `scheduleCancel` with `time` at least 5 s ahead cancels all open orders when the time arrives. Limited to 10 triggers per day. | [doc] exchange endpoint |
+| Dead-man switch | `scheduleCancel` with `time` at least 5 s ahead cancels all open orders when the time arrives. Limited to 10 triggers per day. **Refused for accounts under $1M traded volume** (live, testnet 2026-11-03): `Cannot set scheduled cancel time until enough volume traded. Required: $1000000. Traded: $0.` The engine then trades IOC only, see ADR-0005 "scheduleCancel volume gate". | [doc] exchange endpoint, [live] testnet |
 
 ### A2. Spot trading via API
 
@@ -388,7 +388,8 @@ order or exchange action was sent. Active accounts used for shape checks were ta
 | Approved API wallets | **Confirmed.** Info request `extraAgents { user }` returns `[{ name, address, validUntil }]`. `validUntil` is a **millisecond** timestamp (for example 1797408899328) or null. `name` is the name given at approval (a plain string such as `"agent-treasury valid_until 1797408899328"`). Address is lower-case. Works for both networks. `HlPort.getApprovedAgents` maps it as `{ address, name | null, validUntilMs }`. |
 | Ledger fields for `net_inflow` | **Partly confirmed.** `userNonFundingLedgerUpdates` returns `delta.type` values seen live: `send`, `spotTransfer`, `cStakingTransfer`, `deposit`, `withdraw`, `internalTransfer`, `accountClassTransfer` and others (see the library type). Transfers carry `user`, `destination`, `token` (can be `"USDC"` or `"USDC:0x..."`) and `amount`. The adapter counts USDC `spotTransfer`/`send`/`internalTransfer` by `destination`/`user` equals the account, plus `deposit`/`withdraw`, and ignores `accountClassTransfer`. **Not verified:** which `delta.type` a real 1Click HyperCore landing produces (probably a `spotTransfer` from a system address). This still needs the first 20 USDC mainnet top-up. |
 | Perp state | `clearinghouseState` (default dex) gives `assetPositions[].position.{coin, szi}` and `marginSummary.accountValue`. Open perp orders come from `frontendOpenOrders` (anything whose coin is not `@N` and has no `/`). HIP-3 builder-dex positions need a `dex` argument and are **not** covered by the adapter. |
-| Fills | `userFillsByTime { user, startTime }` has `cloid`, `fee`, `feeToken`. Buys pay the fee in the base token (for example `HYPE`), so the adapter converts to USDC at the fill price. |
+| Fills | `userFillsByTime { user, startTime }` returns at most 2000 rows per response and only the 10000 newest (paginate by last timestamp). Docs list `cloid`; **not yet seen on a live fill** (the testnet bot account had no fills on 2026-11-03), so the engine also matches fills by remembered order id. Rows have `cloid`, `fee`, `feeToken`. Buys pay the fee in the base token (for example `HYPE`), so the adapter converts to USDC at the fill price. |
+| `scheduleCancel` volume gate | **Confirmed live 2026-11-03** (testnet): refused with `Cannot set scheduled cancel time until enough volume traded. Required: $1000000. Traded: $0.` Same rule expected on mainnet. Handled by IOC-only mode (ADR-0005). |
 | `scheduleCancel` trigger counting | **Not verified** (needs a signed action). Remains an ADR **[verify]** item: do not rely on 180 s refreshes every tick before checking on testnet. |
 | HL UI accepts an external API wallet address | **Not verified** (needs the master wallet in a browser). Fallback D4 stays in the plan. |
 | Order response shape | From the library types: `statuses[0]` is `{ resting: { oid } }`, `{ filled: { totalSz, avgPx, oid } }` or `{ error }`. The library **throws `ApiRequestError`** for any status carrying `error`, so "IOC found nothing" arrives as an exception with message "Order could not immediately match against any resting orders". The adapter maps it to `unfilled`. The exact live wording is **not verified**. |
@@ -406,3 +407,14 @@ order or exchange action was sent. Active accounts used for shape checks were ta
 takes the wallet as an argument; the code that builds the API-wallet account from the stored private key
 (`wallet.ts`) must add `viem` (`privateKeyToAccount`) to `package.json`, or implement the small `AbstractViemLocalAccount`
 interface itself (`address` + `signTypedData`).
+
+## Live testnet trade (2026-11-03)
+
+First real bot order on HL testnet (account `0x072994…ab0d`, API wallet `0x3B83…96e1`, rules hash `bb49a14c0945f933…`):
+IOC buy 3 PURR/USDC with limit 4.6252 (band edge) filled at **4.5795** (best ask). `userFillsByTime` returns
+`cloid: 0xbb49a14c0945f9330000000000000001` (rules-hash prefix + counter) and `oid`, so fill attribution by cloid works
+live. The spot buy fee is charged in the base token (`fee 0.0021`, `feeToken PURR`), so the position is 2.9979 PURR.
+Other live findings that day: `scheduleCancel` requires $1M traded volume ("Cannot set scheduled cancel time until
+enough volume traded"), so the engine runs IOC-only without the dead-man switch; PURR has `szDecimals 0`, so a
+12 USDC order at ≈4.6 rounds to 2 PURR = 9.25 USDC, below the 10 USDC minimum; the HL API page accepts an external
+API-wallet address and takes `valid_until` from the name only when typed exactly, otherwise the default is 180 days.

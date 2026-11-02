@@ -3,7 +3,10 @@ import { Hash } from "@/kit";
 import { fireNow, midsOf } from "@/lib/tradingGuide";
 import { alwaysSentence, ruleSentences } from "@/lib/tradingSentences";
 import { describeBlocks, type RuleSetV1 } from "@/lib/tradingRules";
+import type { LastDecision } from "@/lib/tradingSkips";
 import { fmtDec } from "@/lib/tradingView";
+import { relativeTime } from "@/lib/relativeTime";
+import { useNow } from "@/lib/useNow";
 import { Sentence } from "./Sentence";
 
 /**
@@ -12,8 +15,9 @@ import { Sentence } from "./Sentence";
  * `mids`: mid prices of the pairs the account holds (from the status); they feed the "would it fire right now?" line.
  * Everything is rendered as text; React escapes it.
  */
-export function RulesView({ rules, hash, mids }: { rules: RuleSetV1; hash?: string; mids?: Readonly<Record<string, string>> }) {
+export function RulesView({ rules, hash, mids, decisions }: { rules: RuleSetV1; hash?: string; mids?: Readonly<Record<string, string>>; decisions?: Readonly<Record<string, LastDecision>> }) {
   const t = useT();
+  const now = useNow(30_000);
   const b = describeBlocks(rules);
   const sentences = ruleSentences(rules);
   const known = mids ?? midsOf(null);
@@ -24,7 +28,8 @@ export function RulesView({ rules, hash, mids }: { rules: RuleSetV1; hash?: stri
       <div className="text-[15px] font-semibold break-words">{rules.name}</div>
       <ol className="m-0 flex list-none flex-col gap-2 p-0">
         {sentences.map((s, i) => {
-          const now = fires[i] ?? null;
+          const fire = fires[i] ?? null;
+          const d = decisions?.[s.id];
           return (
             <li key={s.id} className="rounded-tile border border-tile-line bg-surface-sunken px-3 py-2.5">
               <div className="text-xs text-ink-muted">
@@ -33,8 +38,13 @@ export function RulesView({ rules, hash, mids }: { rules: RuleSetV1; hash?: stri
               <p className="m-0 mt-1 text-sm leading-relaxed text-ink-secondary">
                 <Sentence segs={s.segs} />
               </p>
-              {now?.kind === "interval" && <p className="m-0 mt-1 text-xs text-ink-muted">{t("trading.now.interval")}</p>}
-              {now?.kind === "price" && <p className="m-0 mt-1 text-xs text-ink-muted">{t(now.fires ? "trading.now.priceYes" : "trading.now.priceNo", { pair: now.pair, mid: fmtDec(now.mid, 4) })}</p>}
+              {fire?.kind === "interval" && <p className="m-0 mt-1 text-xs text-ink-muted">{t("trading.now.interval")}</p>}
+              {decisions && (
+                <p className="m-0 mt-1 text-xs text-ink-muted">
+                  {d ? t("trading.rules.lastDecision", { when: relativeTime(d.at_ms, now), text: t(d.kind === "skip" ? "trading.rules.skippedText" : "trading.rules.orderPlaced", { text: d.text }) }) : t("trading.rules.noDecision")}
+                </p>
+              )}
+              {fire?.kind === "price" && <p className="m-0 mt-1 text-xs text-ink-muted">{t(fire.fires ? "trading.now.priceYes" : "trading.now.priceNo", { pair: fire.pair, mid: fmtDec(fire.mid, 4) })}</p>}
             </li>
           );
         })}

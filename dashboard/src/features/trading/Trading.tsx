@@ -11,7 +11,7 @@ import { useNow } from "@/lib/useNow";
 import { useAgents, usePendingApprovals } from "@/lib/useVault";
 import { GuideLinks } from "./Intro";
 import { KillSwitch } from "./KillSwitch";
-import { RulesCard } from "./RulesCard";
+import { RulesBody, RulesCard } from "./RulesCard";
 import { RulesHelp } from "./RulesHelp";
 import { pendingTrader, SetupCard } from "./SetupCard";
 import { SetupRow, Stepper } from "./Steps";
@@ -75,7 +75,8 @@ export function Trading() {
       setMaster={setMaster}
       setup={showSetup ? <SetupCard created={recoveredNow ? recovered : null} onCreated={() => setCreating(true)} onDone={() => { setCreating(false); setDismissed(true); }} master={master} ready={formAddress !== null} /> : null}
       pendingTopups={pendingTopups}
-      rules={live?.active_rules ? { name: live.active_rules.name, hash: live.active_rules.hash } : null}
+      rules={live?.active_rules ? { name: live.active_rules.name, hash: live.active_rules.hash, confirmedAtMs: live.active_rules.confirmed_at_ms } : null}
+      rulesBody={live?.active_rules ? <RulesBody status={live} rules={details.rules} verified={details.rulesVerified} signedIn={details.signedIn} signingIn={details.signingIn} signIn={() => void details.signIn()} error={details.authError ?? details.error} log={details.log} /> : null}
       rulesHelp={help}
       onChangeRules={AI_ENABLED ? () => openWith(t("trading.rules.prefillChange")) : null}
       now={now}
@@ -128,7 +129,7 @@ export function Trading() {
               )
             }
           />
-          <RulesCard status={live} rules={details.rules} verified={details.rulesVerified} signedIn={details.signedIn} signingIn={details.signingIn} signIn={() => void details.signIn()} error={details.authError ?? details.error} pair={pair} help={help} />
+          <RulesCard status={live} rules={details.rules} verified={details.rulesVerified} signedIn={details.signedIn} signingIn={details.signingIn} signIn={() => void details.signIn()} error={details.authError ?? details.error} pair={pair} help={help} log={details.log} />
         </>
       )}
 

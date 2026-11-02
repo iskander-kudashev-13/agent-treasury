@@ -2,14 +2,15 @@ import { useT, rich } from "@/i18n";
 import { Button, Callout, Card, CardHeader, Hash, Icons } from "@/kit";
 import { AI_ENABLED } from "@/lib/config";
 import { formatTime } from "@/lib/format";
-import type { ConfirmedRules, TradingStatus } from "@/lib/tradingClient";
+import type { ConfirmedRules, LogEntry, TradingStatus } from "@/lib/tradingClient";
 import { midsOf } from "@/lib/tradingGuide";
 import type { ReactNode } from "react";
 import { useAssistantPanel } from "@/features/layout/AssistantContext";
+import { lastDecisions } from "@/lib/tradingSkips";
 import { RulesView } from "./RulesView";
 
 /** The rules the bot runs: name, hash and who confirmed them from the status; the full text after the owner signs in. */
-export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn, error, pair, help }: { status: TradingStatus; rules: ConfirmedRules | null; verified: boolean; signedIn: boolean; signingIn: boolean; signIn: () => void; error: string | null; pair: string; help: ReactNode }) {
+export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn, error, pair, help, log = [] }: { status: TradingStatus; rules: ConfirmedRules | null; verified: boolean; signedIn: boolean; signingIn: boolean; signIn: () => void; error: string | null; pair: string; help: ReactNode; log?: LogEntry[] }) {
   const t = useT();
   const { openWith } = useAssistantPanel();
   const a = status.active_rules;
@@ -41,23 +42,7 @@ export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn
             <span>{t("trading.rules.hash")}</span>
             <Hash value={a.hash} />
           </div>
-          {rules ? (
-            <>
-              <RulesView rules={rules.rules} mids={midsOf(status)} />
-              {rules.hash !== a.hash && <Callout accent="warn">{t("trading.rules.hashMismatch")}</Callout>}
-            </>
-          ) : !verified ? (
-            <Callout accent="danger">{t("trading.rules.unverified")}</Callout>
-          ) : signedIn ? (
-            <p className="m-0 text-[13px] text-ink-muted">{t("trading.rules.loading")}</p>
-          ) : (
-            <div>
-              <Button size="sm" loading={signingIn} onClick={signIn}>
-                {t("trading.rules.signInShow")}
-              </Button>
-            </div>
-          )}
-          {error && <Callout accent="danger">{error}</Callout>}
+          <RulesBody status={status} rules={rules} verified={verified} signedIn={signedIn} signingIn={signingIn} signIn={signIn} error={error} log={log} />
           {AI_ENABLED && (
             <div>
               <Button size="sm" variant="ghost" onClick={() => openWith(t("trading.rules.prefillChange"))}>
@@ -72,5 +57,35 @@ export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn
         </>
       )}
     </Card>
+  );
+}
+
+/**
+ * The signed rules in plain sentences with the last decision per rule. Owner-only data: without a session it offers a
+ * one-click sign-in (never a wallet prompt on load). The rules are shown only if they hash to what the owner signed.
+ */
+export function RulesBody({ status, rules, verified, signedIn, signingIn, signIn, error, log }: { status: TradingStatus; rules: ConfirmedRules | null; verified: boolean; signedIn: boolean; signingIn: boolean; signIn: () => void; error: string | null; log: LogEntry[] }) {
+  const t = useT();
+  const a = status.active_rules;
+  return (
+    <>
+      {rules ? (
+        <>
+          <RulesView rules={rules.rules} mids={midsOf(status)} decisions={signedIn ? lastDecisions(log) : undefined} />
+          {a && rules.hash !== a.hash && <Callout accent="warn">{t("trading.rules.hashMismatch")}</Callout>}
+        </>
+      ) : !verified ? (
+        <Callout accent="danger">{t("trading.rules.unverified")}</Callout>
+      ) : signedIn ? (
+        <p className="m-0 text-[13px] text-ink-muted">{t("trading.rules.loading")}</p>
+      ) : (
+        <div>
+          <Button size="sm" loading={signingIn} onClick={signIn}>
+            {t("trading.rules.signInShow")}
+          </Button>
+        </div>
+      )}
+      {error && <Callout accent="danger">{error}</Callout>}
+    </>
   );
 }
