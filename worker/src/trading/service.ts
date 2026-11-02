@@ -125,7 +125,9 @@ const budgetRaw = z.looseObject({
 });
 
 /** `get_agent_budget` (raw contract JSON, ADR-0003) -> the engine's `VaultView`. Throws on an unexpected shape (fail closed). */
-export function vaultViewFromBudget(raw: unknown): VaultView {
+export function vaultViewFromBudget(raw: unknown, agentId = "hl-trader"): VaultView {
+  // `get_agent_budget` returns null for an unknown agent: say so plainly instead of a schema error.
+  if (raw === null) throw new Error(`agent '${agentId}' not found in the vault: create it on the Trading page (Setup)`);
   const b = budgetRaw.parse(raw);
   return {
     vaultPaused: b.vault_paused,

@@ -351,3 +351,10 @@ describe("review suggestion: price and size are asserted before signing", () => 
     expect(ex.order).not.toHaveBeenCalled();
   });
 });
+
+describe("vaultViewFromBudget: unknown agent", () => {
+  it("explains a missing hl-trader agent instead of a schema error", async () => {
+    const { vaultViewFromBudget } = await import("../../src/trading/service.js");
+    expect(() => vaultViewFromBudget(null, "hl-trader")).toThrow(/agent 'hl-trader' not found in the vault/);
+  });
+});

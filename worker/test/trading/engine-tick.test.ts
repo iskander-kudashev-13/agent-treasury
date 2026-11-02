@@ -262,7 +262,6 @@ describe("perp alarm", () => {
   const perpCases: [string, Partial<HlPerpState>][] = [
     ["a perp position", { positions: [{ coin: "BTC", size: "0.001" }] }],
     ["an open perp order", { openPerpOrders: 1 }],
-    ["perp account value above 1 USDC", { accountValueUsdc: "1.01" }],
   ];
   for (const [name, patch] of perpCases) {
     it(`${name} halts, cancels all spot orders, places nothing`, async () => {
@@ -278,6 +277,14 @@ describe("perp alarm", () => {
       expect(r.entries.some((e) => e.kind === "state" && e.detail.includes("ALARM"))).toBe(true);
     });
   }
+  it("USDC in the perp account without positions or orders is a warning, not a halt", async () => {
+    hl.perp.accountValueUsdc = "1451.04";
+    const r = await tick(T0, active());
+    expect(r.tradingState).toBe("running");
+    expect(r.state.halt).toBeNull();
+    expect(r.status.perp_check.ok).toBe(true);
+    expect(r.status.warnings.some((w) => w.includes("perp account holds 1451.04 USDC"))).toBe(true);
+  });
   it("exactly 1 USDC of perp value is tolerated", async () => {
     hl.perp.accountValueUsdc = "1";
     const r = await tick(T0, active());

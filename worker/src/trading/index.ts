@@ -128,7 +128,7 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
     wallet,
     store,
     confirmCtx,
-    readVault: async () => vaultViewFromBudget(await ai.view("get_agent_budget", { agent_id: config.TRADER_AGENT_ID })),
+    readVault: async () => vaultViewFromBudget(await ai.view("get_agent_budget", { agent_id: config.TRADER_AGENT_ID }), config.TRADER_AGENT_ID),
     funder,
     watchPayment: client ? (id) => client.watchPayment(id) : undefined,
     paymentStatus: client ? (id) => client.getPaymentStatus(id) : undefined,

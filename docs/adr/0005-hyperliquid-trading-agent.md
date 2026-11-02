@@ -129,7 +129,7 @@ Code facts checked for this ADR:
   not clamped.
 - Never-overridable invariants:
   - **Spot only.** The order builder refuses any asset id below 10000. The code has no perp order path.
-  - **Perp alarm.** Any perp position, any open perp order, or perp account value above 1 USDC (standard mode) sets
+  - **Perp alarm.** Any perp position or any open perp order (owner decision 2026-11-03: USDC merely held in the perp account above 1 USDC is a status warning, not a halt) sets
     `halted` with `PERP_POSITION_DETECTED` and cancels all spot orders. The bot does not close the perp; the owner does
     that in the HL app and revokes the API wallet.
   - **Price band.** A buy price must be at most `mid·(1+band)` and a sell price at least `mid·(1−band)`.

@@ -356,9 +356,14 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       }
     };
 
-    // 2. Perp alarm. Any perp position, open perp order, or perp account value above 1 USDC halts the engine for good.
-    const perpBad = perp.positions.length > 0 || perp.openPerpOrders > 0 || fx(perp.accountValueUsdc) > fx(PERP_VALUE_ALARM);
+    // 2. Perp alarm. Any perp position or open perp order halts the engine for good (owner decision 2026-11-03).
+    // USDC merely sitting in the perp account opens nothing by itself (only a signed order can), so it is a warning,
+    // not a halt: the owner is told to move it to spot. Orders and positions are what the alarm must catch.
+    const perpBad = perp.positions.length > 0 || perp.openPerpOrders > 0;
     perpOk = !perpBad;
+    if (!perpBad && fx(perp.accountValueUsdc) > fx(PERP_VALUE_ALARM)) {
+      warnings.push(`perp account holds ${perp.accountValueUsdc} USDC with no positions; move it to spot`);
+    }
     if (perpBad && st.halt === null) {
       const detail = `perp positions ${perp.positions.length}, open perp orders ${perp.openPerpOrders}, perp account value ${perp.accountValueUsdc}`;
       st.halt = { reason: "PERP_POSITION_DETECTED", atMs: now, detail };
