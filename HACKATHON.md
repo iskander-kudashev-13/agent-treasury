@@ -216,6 +216,7 @@ Partner tools and their documentation. Read the docs before integrating anything
 | GoMining | Bitcoin mining superapp | https://docs.gomining.com/ | https://gomining.com/ |  |
 | Agent Market | Marketplace for AI agents | https://docs.market.near.ai/ | https://market.near.ai/ |  |
 | NEAR Builders | Builder community | https://nearbuilders.org/build | https://nearbuilders.org/ | https://github.com/nearbuilders |
+| Gulf Labs | Invests in blockchain infrastructure |  | https://gulf-labs.com/ |  |
 
 ### Partner notes
 

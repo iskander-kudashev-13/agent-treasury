@@ -35,7 +35,7 @@ const envSchema = z
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     /** Bearer token for POST /run. Unset = the endpoint is disabled. */
     WORKER_ADMIN_TOKEN: optionalString,
-    DASHBOARD_ORIGIN: z.string().default("http://localhost:3001"),
+    DASHBOARD_ORIGIN: z.string().default("http://localhost:5173"),
     HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
     /** Max time to wait for a terminal 1Click status before leaving the payout `Sent` for the next run. */
     STATUS_POLL_TIMEOUT_MIN: z.coerce.number().positive().default(20),

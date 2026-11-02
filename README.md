@@ -63,7 +63,8 @@ dashboard/    Vite + React SPA for the owner: Treasury, Agents (+ wizard), Payme
 design-kit/   design package (tokens, prototypes) the dashboard is built from
 docs/         architecture.md, comparison.md, demo-script.md, adr/ (0001–0004), security/audit-2026-11-01.md,
               commands.md (every command used), deployments.md
-skills/       empty for now (agent skill example not written yet)
+skills/       empty for now (agent skill example not written yet; git does not track empty dirs, so absent in a clone)
+third_party/  upstream LICENSE + NOTICE of NearDeFi/shade-agent-template and the list of files derived from it
 CLAUDE.md, AGENT_ACCESS.md, UI_PLAN.md, DESIGN_AGENTS.md, UI_UPDATES.md   specs the code was built from
 HACKATHON.md  copy of the hackathon rules
 ```
@@ -73,8 +74,8 @@ Each package has its own `pnpm-lock.yaml`; there is no root workspace.
 ## Quickstart
 
 Requirements (versions used): Rust stable (1.99.1) with `cargo`, Node.js ≥ 22 (tested with 23.11.0), pnpm 11.22.0,
-`near-cli-rs` 0.30.1 (`cargo install --locked near-cli-rs`, binary `near`) for path B. Paths A–D need no NEAR account,
-no keys and send no transactions.
+`near-cli-rs` 0.30.1 (`cargo install --locked near-cli-rs`, binary `near`) for path B. Paths A, B, C and D1 need no NEAR
+account, no keys and send no transactions (D2 and E send testnet transactions from your own accounts; nothing needs mainnet).
 
 ### A. Run all tests offline
 
@@ -85,7 +86,7 @@ cd contract
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
-Expected: `test result: ok. 165 passed; 0 failed` (count on 2026-11-02; it grows as tests are added).
+Expected: `test result: ok. 174 passed; 0 failed` (count on 2026-11-02; it grows as tests are added).
 
 TypeScript packages. Build `sdk` before `mcp`, because `mcp` links `../sdk` by path:
 
@@ -101,8 +102,8 @@ Expected (2026-11-02), no network used by the tests (fake vault, fake 1Click, fa
 |---|---|---|
 | sdk | `Tests  80 passed (80)` | `sdk/dist/` |
 | mcp | `Tests  17 passed (17)` | `mcp/dist/index.js` |
-| worker | `Tests  110 passed (110)` | `worker/dist/` |
-| dashboard | `Tests  234 passed (234)` | `dashboard/dist/` (`✓ built in …`) |
+| worker | `Tests  128 passed (128)` | `worker/dist/` |
+| dashboard | `Tests  237 passed (237)` | `dashboard/dist/` (`✓ built in …`) |
 
 Optional, read-only, mainnet 1Click (no key, no funds): `cd worker && pnpm dry-quote` → prints
 `token ok: USDC on near, 6 decimals`, `token ok: USDC on base, 6 decimals`, then a quote JSON with `"dry": true`,
@@ -249,7 +250,7 @@ What was run and verified (testnet, 2026-11-01/02, local mode, simulated 1Click)
 | Key agent: address not in allowlist | `Rejected RECIPIENT_NOT_ALLOWED` (by the contract) | `get_rejections` |
 | Key agent: 2.5 USDC (threshold 2) | `pending_approval ABOVE_THRESHOLD` → owner approved in dashboard → payout 2 `Confirmed` | `get_payout 2` |
 | Dashboard quote check on a simulated deposit address | Approve blocked ("1Click has no quote for this deposit address"); testnet-only simulated mode added with explicit acknowledgement | `dashboard/src/features/payouts/QuoteCheckPanel.tsx`; 404 from 1Click (path B) |
-| Offline tests | contract 165, sdk 80, mcp 17, worker 110, dashboard 234, all passing | path A |
+| Offline tests | contract 174, sdk 80, mcp 17, worker 128, dashboard 237, all passing | path A |
 
 "Confirmed" in simulated mode means the worker/MCP reported success after USDC moved on NEAR testnet to a random
 64-hex deposit account. Nothing was delivered on Base, Solana or Arbitrum.
@@ -292,7 +293,9 @@ not exist on another chain.
 ## Disclosures
 
 Templates and adapted code:
-- [NearDeFi/shade-agent-template](https://github.com/NearDeFi/shade-agent-template) @816b75b (Apache-2.0): TEE attestation parts of `contract/src/agent.rs` (from `agent-contract/src/{lib,owner,views}.rs`, `internal/{attestation,helpers}.rs`), worker registration plumbing, `Dockerfile`, `docker-compose.yaml`, `deployment.yaml`. Attribution in file headers.
+- [NearDeFi/shade-agent-template](https://github.com/NearDeFi/shade-agent-template) @816b75b (Apache-2.0): TEE attestation parts of `contract/src/agent.rs` (from `agent-contract/src/{lib,owner,views}.rs`, `internal/{attestation,helpers}.rs`), worker registration plumbing, `Dockerfile`, `docker-compose.yaml`, `deployment.yaml`. Attribution in file headers;
+  upstream `LICENSE` and `NOTICE.txt` copied verbatim with the list of derived files in
+  [`third_party/shade-agent-template/`](third_party/shade-agent-template/).
 - NEAR agent skills from [near/agent-skills](https://github.com/near/agent-skills), used locally by Claude Code, not committed.
 
 Main libraries (exact versions in `Cargo.toml` / `package.json`):
@@ -302,15 +305,21 @@ Main libraries (exact versions in `Cargo.toml` / `package.json`):
 - MCP: `@modelcontextprotocol/server` 2.4.0 (`@modelcontextprotocol/client` 2.4.0 for tests), `zod` 4.6.7.
 - Dashboard: `react` / `react-dom` 19.3.1, `react-router-dom` 7.18.5, `@tanstack/react-query` 5.105.1, `@near-wallet-selector/{core,modal-ui,meteor-wallet,my-near-wallet}` 10.1.4, `@near-js/crypto` 2.5.1, `tailwindcss` 4.3.3, `vite` 8.3.5, `vite-plugin-node-polyfills` 0.28.0.
 - Tooling: TypeScript 5.9.3, vitest 5.0.5, eslint, tsx, cargo-near, near-cli-rs.
+- Fonts: Inter and JetBrains Mono (SIL Open Font License 1.1), loaded from Google Fonts by `dashboard/index.html` and
+  the design-kit prototypes; not committed.
 
 External services: NEAR testnet RPC (FastNEAR), NEAR Intents 1Click API (`https://1click.chaindefuser.com`), NEAR AI
 Cloud (`https://cloud-api.near.ai/v1`, optional), Circle testnet USDC faucet.
 
 AI-generated code: the code, tests and documentation in this repository were written with Claude Code agents (Anthropic
 Claude), directed and reviewed by the human author. Specs (`CLAUDE.md`, `AGENT_ACCESS.md`, `UI_*.md`, `DESIGN_AGENTS.md`)
-were provided by the author. `design-kit/` is the design handoff (tokens, HTML prototypes) the dashboard was built from.
+were provided by the author. `design-kit/` is the design handoff (tokens, HTML prototypes) the dashboard was built from;
+it was produced with Claude Design (Anthropic) from the author's specs, and its `.dc.html` files are exported canvas
+artboards (see `design-kit/agent-treasury-design/README.md`).
 
 ## License
 
-MIT ([`LICENSE`](LICENSE)). Files in `worker/` and `contract/src/agent.rs` derived from shade-agent-template keep the
-template's Apache-2.0 license (`worker/package.json` declares Apache-2.0).
+MIT ([`LICENSE`](LICENSE)). The files derived from shade-agent-template (listed in
+[`third_party/shade-agent-template/README.md`](third_party/shade-agent-template/README.md)) keep the template's
+Apache-2.0 license; the rest of `worker/` and of `contract/` is MIT. `worker/package.json` declares `Apache-2.0` for
+the package as a whole; the per-file split above is the accurate one.
