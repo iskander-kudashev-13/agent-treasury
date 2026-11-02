@@ -70,10 +70,10 @@ function makeEx(over: Record<string, unknown> = {}) {
     ...over,
   };
 }
-function setup(infoOver: Record<string, unknown> = {}, exOver: Record<string, unknown> = {}) {
+function setup(infoOver: Record<string, unknown> = {}, exOver: Record<string, unknown> = {}, deadManAvailable?: () => boolean) {
   const info = makeInfo(infoOver);
   const ex = makeEx(exOver);
-  const hl = new NktkasHl({ info: info as unknown as HlInfoApi, exchange: ex as unknown as HlExchangeApi, now: () => 4242 });
+  const hl = new NktkasHl({ info: info as unknown as HlInfoApi, exchange: ex as unknown as HlExchangeApi, now: () => 4242, ...(deadManAvailable ? { deadManAvailable } : {}) });
   return { info, ex, hl };
 }
 function ord(over: Partial<HlPlaceOrder> = {}): HlPlaceOrder {
@@ -149,12 +149,17 @@ describe("account state", () => {
   });
   it("maps spot fills only, converts base-token fees to USDC, ignores rebates", async () => {
     const { hl, info } = setup();
-    const f = await hl.getUserFills(MASTER, 99);
-    expect(info.userFillsByTime).toHaveBeenCalledWith({ user: MASTER.toLowerCase(), startTime: 99 });
+    const f = await hl.getUserFills(MASTER, 4);
+    expect(info.userFillsByTime).toHaveBeenCalledWith({ user: MASTER.toLowerCase(), startTime: 4 });
     expect(f).toHaveLength(3);
     expect(f[0]).toEqual({ oid: 1, cloid: CLOID, pair: "HYPE/USDC", side: "buy", price: "84", size: "0.5", feeUsdc: "0.0252", timeMs: 5 });
     expect(f[1]).toMatchObject({ side: "sell", feeUsdc: "0.02", cloid: null });
     expect(f[2]?.feeUsdc).toBe("0");
+  });
+  it("fails closed on a full page of fills that comes back newest first", async () => {
+    const rows = Array.from({ length: 2000 }, (_, i) => ({ coin: "@107", px: "84", sz: "1", side: "B", time: 9000 - i, oid: i, tid: i, fee: "0", feeToken: "USDC" }));
+    const { hl } = setup({ userFillsByTime: vi.fn(() => Promise.resolve(rows)) });
+    await expect(hl.getUserFills(MASTER, 0)).rejects.toMatchObject({ code: "FILLS_TRUNCATED" });
   });
   it("maps ledger flows of USDC only", async () => {
     const { hl } = setup();
@@ -163,6 +168,7 @@ describe("account state", () => {
       { timeMs: 2, kind: "withdraw", usdc: "5" },
       { timeMs: 3, kind: "transfer_in", usdc: "20.5" },
       { timeMs: 4, kind: "transfer_out", usdc: "7" },
+      { timeMs: 6, kind: "class_out", usdc: "50" },
       { timeMs: 7, kind: "transfer_in", usdc: "2" },
     ]);
   });
@@ -203,8 +209,31 @@ describe("placeSpotOrder", () => {
     expect(ex.order).not.toHaveBeenCalled();
   });
   it("maps resting", async () => {
-    const { hl } = setup({}, { order: vi.fn(() => Promise.resolve({ status: "ok", response: { type: "order", data: { statuses: [{ resting: { oid: 91 } }] } } })) });
+    const { hl } = setup({}, { order: vi.fn(() => Promise.resolve({ status: "ok", response: { type: "order", data: { statuses: [{ resting: { oid: 91 } }] } } })) }, () => true);
     expect(await hl.placeSpotOrder(ord({ tif: "Gtc" }))).toEqual({ status: "resting", oid: 91 });
+  });
+  it("refuses a resting order unless the dead-man switch is available (default: IOC only)", async () => {
+    const a = setup();
+    await expect(a.hl.placeSpotOrder(ord({ tif: "Gtc" }))).rejects.toThrow(/dead-man/);
+    expect(a.ex.order).not.toHaveBeenCalled();
+    let on = false;
+    const b = setup({}, {}, () => on);
+    await expect(b.hl.placeSpotOrder(ord({ tif: "Gtc" }))).rejects.toThrow(/dead-man/);
+    on = true;
+    await expect(b.hl.placeSpotOrder(ord({ tif: "Gtc" }))).resolves.toBeDefined();
+    expect(b.ex.order).toHaveBeenCalledTimes(1);
+  });
+  it("maps an accountClassTransfer to class_in / class_out", async () => {
+    const { hl } = setup({
+      userNonFundingLedgerUpdates: vi.fn(() => Promise.resolve([
+        { time: 1, hash: "0x", delta: { type: "accountClassTransfer", usdc: "5", toPerp: false } },
+        { time: 2, hash: "0x", delta: { type: "accountClassTransfer", usdc: "6", toPerp: true } },
+      ])),
+    });
+    expect(await hl.getLedger(MASTER, 0)).toEqual([
+      { timeMs: 1, kind: "class_in", usdc: "5" },
+      { timeMs: 2, kind: "class_out", usdc: "6" },
+    ]);
   });
   it("maps an IOC without liquidity to unfilled and other API errors to rejected", async () => {
     const noMatch = new ApiRequestError({}, "order 0: Order could not immediately match against any resting orders. asset=10107");

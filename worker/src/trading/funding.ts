@@ -103,9 +103,12 @@ interface Persisted {
   creditCheckSinceMs: number | null;
   /** Set when a Confirmed top-up never showed up in the HL balance. Blocks until the owner checks (`clearInFlight`). */
   notCredited: string | null;
+  /** Confirmed top-ups (request time and requested amount), newest last, bounded. Used to tell vault funding from other inflows. */
+  topups: { atMs: number; amountUsdc: string }[];
 }
 
-const EMPTY: Persisted = { inflight: null, lastFailureAtMs: null, lastFailureReason: null, lastConfirmedAtMs: null, creditCheckSinceMs: null, notCredited: null };
+const MAX_TOPUP_RECORDS = 200;
+const EMPTY: Persisted = { inflight: null, lastFailureAtMs: null, lastFailureReason: null, lastConfirmedAtMs: null, creditCheckSinceMs: null, notCredited: null, topups: [] };
 const TERMINAL_OK = new Set(["Confirmed"]);
 const TERMINAL_BAD = new Set(["Failed", "Refunded", "Rejected"]);
 /** Funding may run in these engine states only. Everything else (halted, stopped_today, paused_onchain, error, ...) blocks. */
@@ -164,6 +167,7 @@ export class Funder {
       lastConfirmedAtMs: j.lastConfirmedAtMs ?? null,
       creditCheckSinceMs: j.creditCheckSinceMs ?? null,
       notCredited: j.notCredited ?? null,
+      topups: Array.isArray(j.topups) ? j.topups : [],
     };
   }
 
@@ -180,6 +184,15 @@ export class Funder {
       return this.load().inflight;
     } catch {
       return { kind: "attempt", atMs: 0, amountUsdc: this.cfg.topupUsdc };
+    }
+  }
+
+  /** Confirmed vault top-ups, for the P&L status. Never throws. */
+  confirmedTopups(): { atMs: number; amountUsdc: string }[] {
+    try {
+      return this.load().topups;
+    } catch {
+      return [];
     }
   }
 
@@ -282,7 +295,13 @@ export class Funder {
           st = null; // cannot tell: stay blocked, unless the safety valve fires below
         }
         if (st !== null && TERMINAL_OK.has(st)) {
-          p = { ...p, inflight: null, lastConfirmedAtMs: t, creditCheckSinceMs: p.creditCheckSinceMs };
+          p = {
+            ...p,
+            inflight: null,
+            lastConfirmedAtMs: t,
+            creditCheckSinceMs: p.creditCheckSinceMs,
+            topups: [...p.topups, { atMs: inf.atMs, amountUsdc: inf.amountUsdc }].slice(-MAX_TOPUP_RECORDS),
+          };
           this.save(p);
         } else if (st !== null && TERMINAL_BAD.has(st)) {
           p = { ...p, inflight: null, lastFailureAtMs: t, lastFailureReason: `payout ${inf.payoutId} ended as ${st}`, creditCheckSinceMs: null };

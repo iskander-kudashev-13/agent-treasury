@@ -100,6 +100,8 @@ export interface ConfirmDeps {
   store: Pick<RulesStore, "save">;
   /** Live `spotMeta` data (HL call). */
   getPairInfo: () => Promise<PairInfoMap>;
+  /** Absent = available. False: limit orders are only a warning in the challenge. */
+  deadManAvailable?: (() => boolean) | undefined;
   now?: () => number;
 }
 
@@ -141,7 +143,7 @@ export class RulesConfirmer {
   async challenge(rulesInput: unknown): Promise<Challenge> {
     const parsed = parseRuleSet(rulesInput);
     if (!parsed.ok) throw new ConfirmError(400, "RULES_INVALID", `Invalid rules: ${parsed.issues.map((i) => `${i.code} ${i.path}`).join(", ")}`);
-    const v = validate(parsed.value, this.d.ctx.hard, await this.pairInfo());
+    const v = validate(parsed.value, this.d.ctx.hard, await this.pairInfo(), { deadManAvailable: this.d.deadManAvailable?.() ?? true });
     if (!v.ok) throw new ConfirmError(400, "RULES_INVALID", `Rules rejected: ${v.errors.map((i) => `${i.code} ${i.path}`).join(", ")}`);
     const t = this.now();
     for (const [k, p] of this.pending) if (p.expiresAt <= t) this.pending.delete(k);

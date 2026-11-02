@@ -181,7 +181,7 @@ export function createAiRouter(d: AiDeps): Hono {
       const send = (ev: ChatEvent) => stream.writeSSE({ event: ev.type, data: toJson(ev) });
       try {
         if (!cfg.apiKey) {
-          await send({ type: "error", message: "The AI assistant is not configured: set NEARAI_API_KEY in the worker environment." });
+          await send({ type: "error", message: "The AI assistant is not configured: set NEARAI_API_KEY in the worker environment.", code: "AI_NOT_CONFIGURED" });
           return;
         }
         const events = runChat(

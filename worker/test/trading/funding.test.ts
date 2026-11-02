@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Funder, checkFundingConfig, toMicroLenient } from "../../src/trading/funding.js";
 import type { FundingClient, FundingConfig } from "../../src/trading/funding.js";
 import type { TradingState } from "../../src/trading/types.js";
@@ -278,8 +278,9 @@ describe("crash safety and ambiguity", () => {
     let release!: () => void;
     client.gate = new Promise<void>((r) => (release = r));
     const p = funder().maybeTopUp(low);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(persisted()["inflight"]).toMatchObject({ kind: "attempt", amountUsdc: "20" });
+    await vi.waitFor(() => {
+      expect(persisted()["inflight"]).toMatchObject({ kind: "attempt", amountUsdc: "20" });
+    });
     // "restart": a new Funder (the process died, the call result was lost)
     expect(await funder().maybeTopUp(low)).toMatchObject({ reason: "in_flight" });
     release();

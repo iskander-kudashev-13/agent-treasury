@@ -14,7 +14,7 @@ export function createPairInfoProvider(getHl: () => HlPort, opts: { ttlMs?: numb
         .getSpotPairs()
         .then((pairs) => {
           const map: PairInfoMap = Object.fromEntries(
-            pairs.map((p) => [p.name, { name: p.name, assetId: p.assetId, szDecimals: p.szDecimals, volume24hUsdc: p.volume24hUsdc }]),
+            pairs.map((p) => [p.name, { name: p.name, assetId: p.assetId, szDecimals: p.szDecimals, volume24hUsdc: p.volume24hUsdc, ...(p.midUsdc ? { mid: p.midUsdc } : {}) }]),
           );
           cache = { at: now(), map };
           return map;

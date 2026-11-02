@@ -293,12 +293,38 @@ function tradingTool(t: TradingAuthoring): Tool {
     }
     if (!r.card.validation.ok) ctx.state.tradingFailures = MAX_TRADING_FIX_ROUNDS;
     ctx.state.proposals.push(r.card);
-    return toResult({ proposal: r.card }, { hash: r.card.hash, rules_in_plain_english: r.card.lines });
+    const tooSmall = r.card.validation.warnings.some((w) => w.startsWith("ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE"));
+    return toResult(
+      { proposal: r.card },
+      {
+        hash: r.card.hash,
+        rules_in_plain_english: r.card.lines,
+        ...(tooSmall
+          ? { note: "At the current price some rule's USDC size rounds down to less than Hyperliquid's 10 USDC minimum, so it would never fire. Tell the owner and suggest the larger size from the warning (raising max_order_usdc if needed); propose again if they agree." }
+          : {}),
+      },
+    );
   });
   // The model gets the real DSL as JSON Schema; arguments are parsed by `validate`, which reports stable error codes.
-  const rules = z.toJSONSchema(ruleSetSchema, { io: "input" }) as Record<string, unknown>;
+  const rules = providerSafeSchema(z.toJSONSchema(ruleSetSchema, { io: "input" })) as Record<string, unknown>;
   delete rules.$schema;
   return { ...base, parameters: { type: "object", properties: { rules }, required: ["rules"] } };
+}
+
+/**
+ * NEAR AI validates tool schemas with a Python JSON-Schema validator whose `format: regex` check rejects ECMAScript
+ * Unicode property escapes (`\p{Cc}`), so the whole request fails with HTTP 400. Such patterns are dropped from the
+ * schema the model sees; the worker still enforces them with zod in `validate()`.
+ */
+export function providerSafeSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(providerSafeSchema);
+  if (node === null || typeof node !== "object") return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (k === "pattern" && typeof v === "string" && /\\[pP]\{/.test(v)) continue;
+    out[k] = providerSafeSchema(v);
+  }
+  return out;
 }
 
 export interface BuildToolsOptions {

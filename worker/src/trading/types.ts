@@ -81,6 +81,8 @@ export interface PairInfo {
   szDecimals: number;
   /** 24 h notional volume in USDC. */
   volume24hUsdc: Dec;
+  /** Current mid when known (optional; used only for advisory warnings). */
+  mid?: Dec;
 }
 export type PairInfoMap = Readonly<Record<string, PairInfo | undefined>>;
 
@@ -132,6 +134,8 @@ export interface HlMids {
   mids: Readonly<Record<string, Dec | undefined>>;
   /** When the adapter fetched this snapshot (the engine rejects it when older than 2 ticks). */
   atMs: number;
+  /** Optional per-pair age: when this pair's mid was last known to be current. Absent = `atMs` for every pair. */
+  pairAtMs?: Readonly<Record<string, number | undefined>>;
 }
 
 export interface HlBook {
@@ -177,6 +181,8 @@ export interface HlOpenOrder {
 
 export interface HlFill {
   oid: number;
+  /** HL trade id; unique per fill. Absent in older fixtures (then `fillKey` falls back to oid/time/side/price/size). */
+  tid?: number;
   cloid: string | null;
   pair: string;
   side: "buy" | "sell";
@@ -190,7 +196,11 @@ export interface HlFill {
 /** Non-funding ledger movement, for `net_inflow` in the loss stop. Field mapping is an open [verify] item in the ADR. */
 export interface HlLedgerEntry {
   timeMs: number;
-  kind: "deposit" | "withdraw" | "transfer_in" | "transfer_out";
+  /**
+   * `class_in` / `class_out` = accountClassTransfer perp->spot / spot->perp inside the account. They are not external flows
+   * (netFunded ignores them) but they move the spot USDC the equity backstop watches, so the backstop counts them.
+   */
+  kind: "deposit" | "withdraw" | "transfer_in" | "transfer_out" | "class_in" | "class_out";
   usdc: Dec;
 }
 
@@ -228,6 +238,10 @@ export interface HlPort {
   getSpotBalances(account: string): Promise<HlSpotBalance[]>;
   getPerpState(account: string): Promise<HlPerpState>;
   getOpenOrders(account: string): Promise<HlOpenOrder[]>;
+  /**
+   * ALL spot fills with timeMs >= startMs, oldest first. HL caps a response at 2000 rows and keeps only the 10000 newest, so
+   * implementations paginate (hl/pagination.ts) and THROW `FillsTruncatedError` when the answer cannot be proven complete.
+   */
   getUserFills(account: string, startMs: number): Promise<HlFill[]>;
   getLedger(account: string, startMs: number): Promise<HlLedgerEntry[]>;
   getApprovedAgents(account: string): Promise<HlApprovedAgent[]>;
@@ -275,7 +289,29 @@ export interface TradingStatus {
     equity_usdc: Dec;
     positions: { pair: string; base: string; size: Dec; mid: Dec; value_usdc: Dec }[];
   };
-  pnl: { today_usdc: SDec; total_usdc: SDec; net_funded_usdc: Dec; day_start_equity_usdc: Dec };
+  /** Ticks spent in the current state/reason since its state entry was logged (the log has one entry per change). */
+  state_repeats: number;
+  pnl: {
+    /**
+     * SEMANTICS CHANGED 2026-11-03: today_usdc / total_usdc are TRADING P&L (bot fills + fees + mark-to-market of the bot's
+     * position), not equity deltas. total_usdc used to be equity - net_funded.
+     */
+    today_usdc: SDec;
+    total_usdc: SDec;
+    /** Deposits minus withdrawals since TRADING_START_MS, floored at 0. Includes non-vault inflows (faucet): do not label it "sent by the vault". */
+    net_funded_usdc: Dec;
+    day_start_equity_usdc: Dec;
+    /** Inflows matched to confirmed vault top-ups. */
+    funded_by_vault_usdc: Dec;
+    /** Inflows not matched to a vault top-up (faucet, manual deposit). */
+    external_inflow_usdc: Dec;
+    /** Withdrawals / transfers out since TRADING_START_MS. Not trading loss; a warning is added while it is > 0. */
+    external_outflow_usdc: Dec;
+    /** Bot trading fees since TRADING_START_MS (already inside total_usdc). */
+    fees_usdc: Dec;
+    /** equity - net flow - total_usdc: HL activation fee and anything else that is neither a flow nor a bot fill. May be negative. */
+    untracked_delta_usdc: SDec;
+  };
   limits: {
     effective: RuleLimits & { price_band_bps: number };
     today: { orders: number; loss_usdc: Dec };
@@ -300,7 +336,12 @@ export interface TradingStatus {
     rule_id: string | null;
   }[];
   active_rules: { hash: string; name: string; confirmed_at_ms: number; confirmed_by: string } | null;
-  dead_man: { cancel_at_ms: number | null };
+  dead_man: {
+    cancel_at_ms: number | null;
+    /** False while HL refuses scheduleCancel for volume (DEADMAN_VOLUME_GATED): the engine places IOC orders only. */
+    available: boolean;
+    reason: "DEADMAN_VOLUME_GATED" | null;
+  };
   perp_check: { ok: boolean; at_ms: number };
   last_tick_ms: number | null;
   next_tick_ms: number | null;

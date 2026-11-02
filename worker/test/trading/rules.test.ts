@@ -61,7 +61,7 @@ suite("shared vectors", () => {
     for (const c of used) expect(ISSUE_CODES).toContain(c);
     // Codes that are only warnings or unreachable through plain vectors are exempt.
     const uncovered = ISSUE_CODES.filter((c) => !used.has(c));
-    expect(uncovered).toEqual(["PAIR_UNKNOWN", "SIZE_NEAR_HL_MINIMUM"]);
+    expect(uncovered).toEqual(["PAIR_UNKNOWN", "SIZE_NEAR_HL_MINIMUM", "ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE", "LIMIT_NEEDS_DEADMAN"]);
   });
 });
 
@@ -178,6 +178,20 @@ suite("parseRuleSet", () => {
   });
 });
 
+suite("validate() still enforces name characters that providerSafeSchema hides from the model", () => {
+  it.each([
+    ["BEL control character", "bell\u0007name"],
+    ["right-to-left override", "evil\u202Ename"],
+    ["line separator", "a\u2028b"],
+  ])("BAD_NAME for %s", (_label, name) => {
+    const rs = base();
+    rs.name = name;
+    const r = validate(rs, hard, pairs);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.code)).toContain("BAD_NAME");
+  });
+});
+
 suite("validate against hard limits", () => {
   it("accepts a rule set exactly at every hard limit", () => {
     const rs = base();
@@ -248,6 +262,25 @@ suite("validate against hard limits", () => {
     R0(rs).action.size = { usdc: "11" };
     rs.limits.max_order_usdc = "12";
     expect(validate(rs, hard, pairs).warnings.some((w) => w.code === "SIZE_NEAR_HL_MINIMUM")).toBe(false);
+  });
+  it("warns when lot rounding pushes the notional under 10 USDC at the current price (PURR, szDecimals 0)", () => {
+    const rs = base();
+    R0(rs).action.size = { usdc: "12" };
+    rs.limits.max_order_usdc = "12";
+    const info = must(pairs[rs.pairs[0] as string]);
+    const coarse: PairInfoMap = { ...pairs, [info.name]: { ...info, szDecimals: 0, mid: "4.62" } };
+    const w = validate(rs, hard, coarse).warnings.find((x) => x.code === "ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE");
+    expect(w?.path).toBe("rules.0.action.size.usdc");
+    expect(w?.message).toContain("2 coins");
+    expect(w?.message).toContain("use at least 15 USDC");
+    expect(w?.message).toContain("exceeds max order 12");
+    // enough size, no mid, or fine lots: no warning
+    R0(rs).action.size = { usdc: "20" };
+    rs.limits.max_order_usdc = "20";
+    expect(validate(rs, hard, coarse).warnings.some((x) => x.code === "ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE")).toBe(false);
+    R0(rs).action.size = { usdc: "12" };
+    const noMid: PairInfoMap = { ...pairs, [info.name]: { ...info, szDecimals: 0 } };
+    expect(validate(rs, hard, noMid).warnings.some((x) => x.code === "ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE")).toBe(false);
   });
   it("warns when a buy is larger than max_position", () => {
     const rs = base();

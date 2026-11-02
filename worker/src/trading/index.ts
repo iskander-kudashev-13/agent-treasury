@@ -48,7 +48,9 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
   }
 
   const wallet = new ApiWalletManager({ stateDir: config.TRADING_STATE_DIR, envKey: config.HL_API_WALLET_PRIVATE_KEY });
-  const createHl = (w: ApiWallet) => createNktkasHl({ network: hlNetwork, wallet: w.signer() });
+  // `service` is created below; the adapter only calls this when an order is signed, long after the constructor returned.
+  const serviceRef: { current?: { deadManAvailable(): boolean } } = {};
+  const createHl = (w: ApiWallet) => createNktkasHl({ network: hlNetwork, wallet: w.signer(), deadManAvailable: () => serviceRef.current?.deadManAvailable() ?? false });
   const hl = createHl(wallet.load());
 
   const reader = new VaultReader(ai.view);
@@ -133,10 +135,11 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
     watchPayment: client ? (id) => client.watchPayment(id) : undefined,
     paymentStatus: client ? (id) => client.getPaymentStatus(id) : undefined,
   });
+  serviceRef.current = service;
 
   const pairs = createPairInfoProvider(() => service.hlPort());
-  const authoring: TradingAuthoring = { hard, pairs };
-  const confirmer = new RulesConfirmer({ ctx: confirmCtx, store, getPairInfo: () => pairs.getPairInfo() });
+  const authoring: TradingAuthoring = { hard, pairs, deadManAvailable: () => service.deadManAvailable() };
+  const confirmer = new RulesConfirmer({ ctx: confirmCtx, store, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable() });
   const secret = config.AI_SESSION_SECRET;
   if (!secret) throw new Error("AI_SESSION_SECRET is required"); // config validation already guarantees it
   const routeDeps: TradingRouteDeps = {

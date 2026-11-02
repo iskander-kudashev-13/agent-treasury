@@ -247,8 +247,26 @@ describe("guards", () => {
     model.status = 401;
     const r = await chat(makeAi(chain, model), "hi");
     expect(r.events.at(-1)).toMatchObject({ event: "error" });
-    expect(String(r.events.at(-1)?.data.message)).toContain("HTTP 401");
+    expect(r.events.at(-1)?.data).toMatchObject({ code: "AI_BAD_KEY" });
     expect(JSON.stringify(r.events)).not.toContain("test-key");
+  });
+
+  it.each([
+    [400, "AI_BAD_REQUEST", "malformed"],
+    [402, "AI_NO_CREDITS", "no credits or spending limit (cloud.near.ai → Billing)"],
+    [401, "AI_BAD_KEY", "NEARAI_API_KEY"],
+    [429, "AI_RATE_LIMITED", "rate limiting"],
+    [500, "AI_UNAVAILABLE", "HTTP 500"],
+    [503, "AI_UNAVAILABLE", "HTTP 503"],
+  ])("provider HTTP %i maps to %s", async (status, code, text) => {
+    model.status = status;
+    const r = await chat(makeAi(chain, model), "hi");
+    expect(r.events.at(-1)).toMatchObject({ event: "error", data: { type: "error", code, message: expect.stringContaining(text) } });
+  });
+
+  it("missing key carries AI_NOT_CONFIGURED", async () => {
+    const r = await chat(makeAi(chain, model, { apiKey: undefined }), "hi");
+    expect(r.events[0]?.data).toMatchObject({ code: "AI_NOT_CONFIGURED" });
   });
 
   it("caps messages, length and roles", async () => {

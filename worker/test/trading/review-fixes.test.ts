@@ -32,7 +32,9 @@ describe("review fix 1: kill during a running tick", () => {
       release = r;
     });
     const tick = h.service.tick(); // parked inside getMids
-    await new Promise((r) => setTimeout(r, 5));
+    await vi.waitFor(() => {
+      expect(h.hl.midsCalls).toBeGreaterThan(0);
+    });
     expect(h.service.isTicking()).toBe(true);
 
     const killP = h.service.kill("test");
@@ -142,12 +144,14 @@ describe("review suggestions: status text, rotate, config", () => {
       release = r;
     });
     const t = h.service.tick();
-    await new Promise((r) => setTimeout(r, 5));
+    await vi.waitFor(() => {
+      expect(h.service.isTicking()).toBe(true);
+    });
     let done = false;
     const rot = h.service.rotateApiWallet().then(() => {
       done = true;
     });
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setImmediate(r)); // a full macrotask turn: every pending microtask has run
     expect(done).toBe(false);
     h.hl.gate = null;
     release();
@@ -356,5 +360,24 @@ describe("vaultViewFromBudget: unknown agent", () => {
   it("explains a missing hl-trader agent instead of a schema error", async () => {
     const { vaultViewFromBudget } = await import("../../src/trading/service.js");
     expect(() => vaultViewFromBudget(null, "hl-trader")).toThrow(/agent 'hl-trader' not found in the vault/);
+  });
+});
+
+describe("dead-man volume gate through the service (FakeHl returns HL's refusal)", () => {
+  const GATE = new Error("Cannot set scheduled cancel time until enough volume traded. Required: $1000000. Traded: $0.");
+  it("trades with IOC, reports dead_man.available=false, and limit orders only warn in the challenge", async () => {
+    const h = harness({ topup: false });
+    h.hl.scheduleCancelError = GATE;
+    await h.confirmDirect(dcaRules());
+    expect(h.hl.placed).toHaveLength(1);
+    expect(h.hl.placed[0]?.tif).toBe("Ioc");
+    const st = h.service.status();
+    expect(st.state).toBe("running");
+    expect(st.dead_man).toMatchObject({ available: false, reason: "DEADMAN_VOLUME_GATED" });
+    expect(h.service.deadManAvailable()).toBe(false);
+    const limit = dcaRules();
+    limit.rules[0] = { id: "lim", pair: "HYPE/USDC", when: { type: "interval", every: "1h" }, action: { side: "buy", size: { usdc: "12" }, order: { type: "limit", offset_pct: "0.5", ttl: "1h" } } };
+    const ch = await h.confirmer.challenge(limit);
+    expect(ch.warnings.some((w) => w.startsWith("LIMIT_NEEDS_DEADMAN"))).toBe(true);
   });
 });

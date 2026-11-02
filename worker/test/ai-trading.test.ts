@@ -194,3 +194,16 @@ describe("hypercore recipient chain", () => {
     expect(systemPrompt({ nowMs: NOW, vault: VAULT, ownerAccount: OWNER, network: "testnet" })).toContain("propose_trading_rules");
   });
 });
+
+describe("provider-safe tool schema", () => {
+  it("drops Unicode-property regex patterns that NEAR AI's validator rejects, keeps the rest", async () => {
+    const { providerSafeSchema, buildTools } = await import("../src/ai/tools.js");
+    expect(providerSafeSchema({ a: { pattern: "^[^\\p{Cc}]{1,60}$", type: "string" }, b: { pattern: "^\\d+$" } })).toEqual({
+      a: { type: "string" },
+      b: { pattern: "^\\d+$" },
+    });
+    const hard = { maxPositionUsdc: "50", maxOrderUsdc: "20", dailyLossUsdc: "10", maxOrdersPerDay: 20, allowedPairs: ["PURR/USDC"], minPairVolumeUsdc: "5000", priceBandBps: 150 };
+    const t = buildTools({ trading: { hard, pairs: { getPairInfo: () => Promise.resolve({}) } } }).find((x) => x.name === "propose_trading_rules");
+    expect(JSON.stringify(t?.parameters)).not.toMatch(/\\\\p\{/);
+  });
+});

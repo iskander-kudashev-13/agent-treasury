@@ -94,6 +94,31 @@ const engineStateSchema = z.looseObject({
   firedAt: z.record(z.string(), z.number()),
   orders: z.record(z.string(), z.looseObject({ ruleId: z.string(), expiresAtMs: z.number().nullable() })),
   recent: z.array(z.looseObject({})),
+  // Added 2026-11-03 (absent in older files; the defaults come from initialEngineState).
+  botPrefixes: z.array(z.string().regex(/^0x[0-9a-f]{16}$/)).optional(),
+  botOids: z.array(z.number().int().nonnegative()).optional(),
+  prefixesDropped: z.number().int().nonnegative().optional(),
+  filledOrdersToday: z.number().int().nonnegative().optional(),
+  filledOidsToday: z.array(z.number().int().nonnegative()).optional(),
+  deadManGatedAtMs: z.nullable(z.number()).optional(),
+  stopReason: z.nullable(z.enum(["DAILY_LOSS_STOP", "EQUITY_DROP"])).optional(),
+  fills: z
+    .nullable(
+      z.looseObject({
+        cursorMs: z.number(),
+        seen: z.array(z.looseObject({ k: z.string(), t: z.number() })),
+        totalComplete: z.boolean(),
+        completeFromMs: z.number().optional(),
+        botOidsToday: z.array(z.number().int().nonnegative()).optional(),
+        basis: z.record(z.string(), z.record(z.string(), z.looseObject({ size: z.string(), cost: z.string() }))).optional(),
+        todayFromMs: z.nullable(z.number()),
+        total: z.record(z.string(), z.looseObject({ cash: z.string(), dq: z.string(), fees: z.string(), lastPx: z.string() })),
+        today: z.record(z.string(), z.looseObject({ cash: z.string(), dq: z.string(), fees: z.string(), lastPx: z.string() })),
+        botFillsToday: z.number().int().nonnegative(),
+        foreignFills: z.number().int().nonnegative(),
+      }),
+    )
+    .optional(),
 });
 
 /** HL needs scheduleCancel at least 5 s in the future; "now" for the kill switch is the earliest allowed moment plus margin. */
@@ -181,6 +206,11 @@ export class TradingService {
     this.metaFile = join(dir, "meta.json");
     this.state = this.loadState();
     this.startMs = d.settings.startMs ?? this.loadStartMs();
+  }
+
+  /** False while HL refuses the dead-man switch for volume: limit orders get a warning when proposed or confirmed. */
+  deadManAvailable(): boolean {
+    return this.state.deadManGatedAtMs == null;
   }
 
   /** The current HL adapter (changes after `rotate`). Read-only uses only (pair metadata for validation). */
@@ -346,6 +376,9 @@ export class TradingService {
           config: { account: s.account, apiWalletAddress: apiAddress, hard: s.hard, tickSec: s.tickSec, deadmanSec: s.deadmanSec, fundedSinceMs: this.startMs },
           // A kill that arrived after this tick started (or a KILLED halt that is still in force) stops every order and
           // every dead-man refresh of this tick.
+          vaultTopups: () => this.d.funder?.confirmedTopups() ?? [],
+          // Stamps the day snapshot's balance read (outflow window of the equity backstop).
+          clock: this.now,
           shouldStop: () => this.killEpoch !== epoch || this.state.halt?.reason === "KILLED",
           // Write-ahead: order counter / cooldown / daily count reach the disk before the order can reach HL.
           beforeOrder: (st) => {
@@ -484,9 +517,20 @@ export class TradingService {
       state_reason: "NO_TICK_YET",
       state_detail: "the worker has not completed a trading tick yet",
       api_wallet: { address: this.safeAddress(), approved: false, name: null, valid_until_ms: null },
+      state_repeats: 0,
       other_approved_agents: [],
       balances: { usdc_free: "0", usdc_total: "0", equity_usdc: "0", positions: [] },
-      pnl: { today_usdc: "0", total_usdc: "0", net_funded_usdc: "0", day_start_equity_usdc: "0" },
+      pnl: {
+        today_usdc: "0",
+        total_usdc: "0",
+        net_funded_usdc: "0",
+        day_start_equity_usdc: "0",
+        funded_by_vault_usdc: "0",
+        external_inflow_usdc: "0",
+        external_outflow_usdc: "0",
+        fees_usdc: "0",
+        untracked_delta_usdc: "0",
+      },
       limits: {
         effective: effectiveLimitsStatus(eff, this.d.settings.hard.priceBandBps),
         today: { orders: 0, loss_usdc: "0" },
@@ -494,7 +538,7 @@ export class TradingService {
         vault: { status: "Paused", remaining_today_usdc: "0", per_tx_limit_usdc: "0", payments_today: 0, max_payments_per_day: 0, expires_at_ms: null },
       },
       open_orders: [],
-      dead_man: { cancel_at_ms: this.state.deadManAtMs },
+      dead_man: { cancel_at_ms: this.state.deadManAtMs, available: true, reason: null },
       perp_check: { ok: true, at_ms: 0 },
       last_tick_ms: null,
       next_tick_ms: null,
@@ -545,7 +589,7 @@ export class TradingService {
       vault: s.vault,
       agent_id: s.agentId,
       api_wallet: { ...pieces.api_wallet, address: this.safeAddress() || pieces.api_wallet.address },
-      dead_man: { cancel_at_ms: this.state.deadManAtMs },
+      dead_man: { ...pieces.dead_man, cancel_at_ms: this.state.deadManAtMs },
       active_rules: rules ? { hash: rules.hash, name: rules.rules.name, confirmed_at_ms: rules.confirmed_at_ms, confirmed_by: rules.account_id } : null,
       warnings: [...pieces.warnings, ...this.extraWarnings.values()].map((w) => publicText(w) ?? ""),
     };

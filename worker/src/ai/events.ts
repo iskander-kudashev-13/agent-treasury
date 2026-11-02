@@ -7,7 +7,8 @@ export type ChatEvent =
   | { type: "question"; text: string; options?: string[] }
   | { type: "data"; kind: "table" | "number" | "upcoming"; payload: unknown }
   | { type: "done" }
-  | { type: "error"; message: string };
+  /** `code` is stable (AI_NO_CREDITS, AI_BAD_REQUEST, AI_BAD_KEY, AI_RATE_LIMITED, AI_UNAVAILABLE, AI_NOT_CONFIGURED, AI_TIMEOUT, AI_ERROR); `message` is English. */
+  | { type: "error"; message: string; code?: string };
 
 /** JSON.stringify that turns bigint into decimal strings (U128 convention). */
 export function toJson(v: unknown): string {

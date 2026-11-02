@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TradingService, vaultViewFromBudget } from "../../src/trading/service.js";
 import { dcaRules, harness, T0 } from "./harness.js";
 import { HL_ACCOUNT } from "./fixtures.js";
@@ -120,11 +120,13 @@ describe("service: single flight", () => {
     const a = h.service.tick();
     const b = h.service.tick();
     expect(b).toBe(a);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(h.hl.midsCalls).toBe(1);
+    await vi.waitFor(() => {
+      expect(h.hl.midsCalls).toBe(1);
+    });
     expect(h.service.isTicking()).toBe(true);
     release();
     await a;
+    expect(h.hl.midsCalls).toBe(1); // the second tick() call never read HL
     expect(h.service.isTicking()).toBe(false);
     h.hl.gate = null;
     await h.service.tick();
@@ -139,8 +141,9 @@ describe("service: single flight", () => {
     });
     const a = h.service.tick();
     const f = h.service.tickFresh();
-    await new Promise((r) => setTimeout(r, 10));
-    expect(h.hl.midsCalls).toBe(1);
+    await vi.waitFor(() => {
+      expect(h.hl.midsCalls).toBe(1);
+    });
     h.hl.gate = null;
     release();
     await Promise.all([a, f]);
@@ -154,7 +157,9 @@ describe("service: single flight", () => {
       release = r;
     });
     const t = h.service.tick();
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => {
+      expect(h.hl.midsCalls).toBe(1);
+    }); // parked inside getMids
     const k = await h.service.kill("during tick");
     expect(k.state).toBe("halted");
     release();
@@ -171,8 +176,9 @@ describe("service: single flight", () => {
     const h = harness();
     const svc = new TradingService({ ...restartDeps(h), settings: { ...restartDeps(h).settings, tickSec: 15 } });
     svc.start();
-    await new Promise((r) => setTimeout(r, 50));
-    expect(svc.status().last_tick_ms).toBe(T0);
+    await vi.waitFor(() => {
+      expect(svc.status().last_tick_ms).toBe(T0);
+    });
     svc.stop();
   });
 });
@@ -223,6 +229,36 @@ describe("service: persistence across restart", () => {
     expect(st.state).toBe("error");
     expect(st.state_reason).toBe("STATE_CORRUPT");
     expect(h.hl.placed).toHaveLength(1);
+  });
+
+  it.each([
+    ["a malformed bot prefix", { botPrefixes: ["not-a-prefix"] }],
+    ["an upper-case bot prefix", { botPrefixes: ["0xABABABABABABABAB"] }],
+    ["bot oids that are not numbers", { botOids: ["x"] }],
+    ["a fill tracker of the wrong shape", { fills: { cursorMs: "now" } }],
+  ])("engine-state.json with %s is refused (fail closed)", async (_label, patch) => {
+    const h = harness();
+    await h.confirmDirect(dcaRules());
+    const file = join(h.dir, "engine-state.json");
+    const good = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    writeFileSync(file, JSON.stringify({ ...good, ...patch }));
+    const s2 = new TradingService(restartDeps(h));
+    h.clock.t += 2 * 3_600_000;
+    await s2.tick();
+    expect(s2.status().state_reason).toBe("STATE_CORRUPT");
+    expect(h.hl.placed).toHaveLength(1);
+  });
+
+  it("a persisted state with valid botPrefixes and fill tracker loads", async () => {
+    const h = harness();
+    await h.confirmDirect(dcaRules());
+    const s2 = new TradingService(restartDeps(h));
+    const saved = JSON.parse(readFileSync(join(h.dir, "engine-state.json"), "utf8")) as { botPrefixes: string[]; fills: { cursorMs: number } };
+    expect(saved.botPrefixes.length).toBeGreaterThan(0);
+    expect(typeof saved.fills.cursorMs).toBe("number");
+    h.clock.t += 2 * 3_600_000;
+    await s2.tick();
+    expect(s2.status().state_reason).not.toBe("STATE_CORRUPT");
   });
 
   it("the funded-since baseline is the first tick and is persisted", async () => {

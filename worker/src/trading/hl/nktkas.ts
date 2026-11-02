@@ -32,6 +32,7 @@ import type {
   Window,
 } from "../types.js";
 import { isDecimal, isValidPrice, mulDec, normalizeDec, cmpDec } from "./format.js";
+import { readAllFills } from "./pagination.js";
 
 export const SPOT_ASSET_ID_BASE = 10000;
 const CLOID_RE = /^0x[0-9a-fA-F]{32}$/;
@@ -59,6 +60,11 @@ export interface NktkasHlOptions {
   info: HlInfoApi;
   exchange: HlExchangeApi;
   now?: () => number;
+  /**
+   * Defence in depth: a resting (Gtc) order is only signed while this returns true (the dead-man switch works). Absent = false,
+   * i.e. IOC only. The engine already refuses limit orders without the switch; this is the second lock.
+   */
+  deadManAvailable?: () => boolean;
 }
 
 export interface CreateNktkasHlOptions {
@@ -67,6 +73,7 @@ export interface CreateNktkasHlOptions {
   wallet: AbstractWallet;
   timeoutMs?: number;
   now?: () => number;
+  deadManAvailable?: () => boolean;
 }
 
 export function createNktkasHl(opts: CreateNktkasHlOptions): NktkasHl {
@@ -75,6 +82,7 @@ export function createNktkasHl(opts: CreateNktkasHlOptions): NktkasHl {
     info: new InfoClient({ transport }),
     exchange: new ExchangeClient({ transport, wallet: opts.wallet }),
     ...(opts.now ? { now: opts.now } : {}),
+    ...(opts.deadManAvailable ? { deadManAvailable: opts.deadManAvailable } : {}),
   });
 }
 
@@ -92,6 +100,7 @@ export class NktkasHl implements HlPort {
   private readonly info: HlInfoApi;
   private readonly exchange: HlExchangeApi;
   private readonly now: () => number;
+  private readonly deadManAvailable: () => boolean;
   private byName = new Map<string, PairMeta>();
   private byCoin = new Map<string, PairMeta>();
   private byAssetId = new Map<number, PairMeta>();
@@ -101,6 +110,7 @@ export class NktkasHl implements HlPort {
     this.info = opts.info;
     this.exchange = opts.exchange;
     this.now = opts.now ?? Date.now;
+    this.deadManAvailable = opts.deadManAvailable ?? (() => false);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -262,19 +272,29 @@ export class NktkasHl implements HlPort {
 
   async getUserFills(account: string, startMs: number): Promise<HlFill[]> {
     await this.ensureMeta();
-    const fills = await this.info.userFillsByTime({ user: asAddress(account), startTime: startMs });
-    return fills
-      .filter((f) => NktkasHl.isSpotCoin(f.coin))
-      .map((f) => ({
-        oid: f.oid,
-        cloid: f.cloid ?? null,
-        pair: this.displayOf(f.coin),
-        side: f.side === "B" ? "buy" : "sell",
-        price: normalizeDec(f.px),
-        size: normalizeDec(f.sz),
-        feeUsdc: feeInUsdc(f.fee, f.feeToken, f.px),
-        timeMs: f.time,
-      }));
+    const user = asAddress(account);
+    return readAllFills(async (start, end) => {
+      const rows = await this.info.userFillsByTime(end === undefined ? { user, startTime: start } : { user, startTime: start, endTime: end });
+      return {
+        rawCount: rows.length,
+        maxTimeMs: rows.reduce<number | null>((m, f) => (m === null || f.time > m ? f.time : m), null),
+        minTimeMs: rows.reduce<number | null>((m, f) => (m === null || f.time < m ? f.time : m), null),
+        ascending: rows.every((f, i) => i === 0 || (rows[i - 1]?.time ?? 0) <= f.time),
+        fills: rows
+          .filter((f) => NktkasHl.isSpotCoin(f.coin))
+          .map((f) => ({
+            oid: f.oid,
+            tid: f.tid,
+            cloid: f.cloid ?? null,
+            pair: this.displayOf(f.coin),
+            side: f.side === "B" ? ("buy" as const) : ("sell" as const),
+            price: normalizeDec(f.px),
+            size: normalizeDec(f.sz),
+            feeUsdc: feeInUsdc(f.fee, f.feeToken, f.px),
+            timeMs: f.time,
+          })),
+      };
+    }, startMs);
   }
 
   /**
@@ -283,7 +303,9 @@ export class NktkasHl implements HlPort {
    * - `deposit` (Arbitrum bridge) -> deposit; `withdraw` -> withdraw;
    * - `spotTransfer` / `send` of USDC and `internalTransfer`: transfer_in when `destination` is the account, else
    *   transfer_out when `user` is the account (fee not included).
-   * `accountClassTransfer` (spot <-> perp inside the account), vault and reward entries are not external flows.
+   * - `accountClassTransfer`: `class_in` (perp -> spot) / `class_out` (spot -> perp). Not external flows (netFunded skips them),
+   *   but the equity backstop counts them as flows.
+   * Vault and reward entries are not external flows.
    */
   async getLedger(account: string, startMs: number): Promise<HlLedgerEntry[]> {
     const user = asAddress(account);
@@ -306,6 +328,10 @@ export class NktkasHl implements HlPort {
           if (kind) out.push({ timeMs: r.time, kind, usdc: normalizeDec(d.amount) });
           break;
         }
+        case "accountClassTransfer":
+          // Spot <-> perp inside the account: not an external flow, but it moves the spot USDC the equity backstop watches.
+          out.push({ timeMs: r.time, kind: d.toPerp ? "class_out" : "class_in", usdc: normalizeDec(d.usdc) });
+          break;
         case "internalTransfer": {
           const kind = flowKind(me, d.user, d.destination);
           if (kind) out.push({ timeMs: r.time, kind, usdc: normalizeDec(d.usdc) });
@@ -348,6 +374,8 @@ export class NktkasHl implements HlPort {
       throw new Error(`refused: size ${order.size} violates the lot size of ${meta.name} (${meta.szDecimals} decimals)`);
     const tif: string = order.tif; // runtime guard: callers may bypass the type (JSON, casts)
     if (tif !== "Ioc" && tif !== "Gtc") throw new Error(`unsupported tif ${tif}`);
+    // A resting order outlives a dead worker; only the dead-man switch cancels it. No switch, no resting orders.
+    if (tif !== "Ioc" && !this.deadManAvailable()) throw new Error(`refused: ${tif} order without a working dead-man switch (IOC only)`);
 
     let res;
     try {
@@ -412,7 +440,6 @@ export class NktkasHl implements HlPort {
 
 /** Ledger delta types that are known not to be external USDC flows (or are not USDC). */
 const KNOWN_NON_FLOW = new Set([
-  "accountClassTransfer",
   "vaultCreate",
   "vaultDeposit",
   "vaultWithdraw",

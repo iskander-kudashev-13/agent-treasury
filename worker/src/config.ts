@@ -48,7 +48,7 @@ const baseEnvShape = z.object({
     ALLOW_INSECURE_LOCAL_MODE: boolFlag(false),
     /** AI assistant (src/ai). Without a key, POST /ai/chat answers with an `error` event. */
     NEARAI_API_KEY: optionalString,
-    NEARAI_MODEL: z.string().min(1).default("z-ai/glm-5.3-flash"),
+    NEARAI_MODEL: z.string().min(1).default("Qwen/Qwen3.6-35B-A3B-FP8"),
     NEARAI_BASE_URL: z.url().default("https://cloud-api.near.ai/v1"),
     /** HMAC secret for assistant session tokens (>= 32 chars). Unset = /ai routes are not mounted. */
     AI_SESSION_SECRET: z.preprocess(emptyToUndefined, z.string().min(32).optional()),

@@ -9,7 +9,7 @@ describe("pair info provider", () => {
     const p = createPairInfoProvider(() => hl, { ttlMs: 30_000, now: () => t });
     const [a, b] = await Promise.all([p.getPairInfo(), p.getPairInfo()]);
     expect(a).toEqual(b);
-    expect(a["HYPE/USDC"]).toEqual({ name: "HYPE/USDC", assetId: 10107, szDecimals: 2, volume24hUsdc: "5000000" });
+    expect(a["HYPE/USDC"]).toEqual({ name: "HYPE/USDC", assetId: 10107, szDecimals: 2, volume24hUsdc: "5000000", mid: "40" });
     expect(hl.callLog().filter((c) => c === "read:getSpotPairs")).toHaveLength(1);
     t += 29_000;
     await p.getPairInfo();

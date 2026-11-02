@@ -20,6 +20,8 @@ export interface PairInfoProvider {
 export interface TradingAuthoring {
   hard: HardLimits;
   pairs: PairInfoProvider;
+  /** Absent = available. False while HL refuses the dead-man switch: limit orders then only get a warning. */
+  deadManAvailable?: (() => boolean) | undefined;
 }
 
 /** The card the browser receives: the ADR payload plus the deterministic English lines for the review screen. */
@@ -42,7 +44,7 @@ export async function buildTradingRulesCard(deps: TradingAuthoring, state: TurnS
   } catch {
     return { errors: ["Could not load Hyperliquid pair data; tell the owner to try again shortly. Do not guess."] };
   }
-  const v = validate(rules, deps.hard, info);
+  const v = validate(rules, deps.hard, info, { deadManAvailable: deps.deadManAvailable?.() ?? true });
   const parsed = parseRuleSet(rules);
   const msgs = toProposalValidation(v);
   // Structurally broken input has no canonical form, so there is nothing to hash or show.

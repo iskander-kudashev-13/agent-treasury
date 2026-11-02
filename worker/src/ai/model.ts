@@ -30,7 +30,28 @@ export interface ModelClientConfig {
   model: string;
 }
 
-export class ModelError extends Error {}
+/** Stable codes the dashboard translates. The message is the English fallback. */
+export type ModelErrorCode = "AI_NO_CREDITS" | "AI_BAD_REQUEST" | "AI_BAD_KEY" | "AI_RATE_LIMITED" | "AI_UNAVAILABLE" | "AI_ERROR";
+
+export class ModelError extends Error {
+  constructor(
+    message: string,
+    readonly code: ModelErrorCode = "AI_ERROR",
+  ) {
+    super(message);
+  }
+}
+
+/** Maps a provider HTTP status to a code and an English message. Never includes the provider body (it may echo request details). */
+export function modelErrorFromStatus(status: number): ModelError {
+  if (status === 402) return new ModelError("NEAR AI account has no credits or spending limit (cloud.near.ai → Billing)", "AI_NO_CREDITS");
+  // 400: the request itself was refused (e.g. a tool schema the provider cannot validate). The provider body is not echoed.
+  if (status === 400) return new ModelError("The AI provider refused the request as malformed (HTTP 400); this is a worker bug, not a key or credit problem", "AI_BAD_REQUEST");
+  if (status === 401 || status === 403) return new ModelError("The NEAR AI key was rejected: check NEARAI_API_KEY in the worker environment", "AI_BAD_KEY");
+  if (status === 429) return new ModelError("The AI provider is rate limiting requests: try again in a minute", "AI_RATE_LIMITED");
+  if (status >= 500) return new ModelError(`The AI provider is unavailable right now (HTTP ${status}): try again later`, "AI_UNAVAILABLE");
+  return new ModelError(`The AI provider answered HTTP ${status}`, "AI_ERROR");
+}
 
 const chunkSchema = z.looseObject({
   choices: z
@@ -73,12 +94,10 @@ export async function* streamChat(
     });
   } catch (e) {
     if (signal.aborted) throw e;
-    throw new ModelError(`Could not reach the AI provider (${e instanceof Error ? e.message : "network error"})`);
+    throw new ModelError(`Could not reach the AI provider (${e instanceof Error ? e.message : "network error"})`, "AI_UNAVAILABLE");
   }
   if (!res.ok || !res.body) {
-    // Never echo the provider body verbatim: it may contain request details. Status code only.
-    const hint = res.status === 401 || res.status === 403 ? " (check NEARAI_API_KEY)" : res.status === 429 ? " (rate limited or out of credits)" : "";
-    throw new ModelError(`The AI provider answered HTTP ${res.status}${hint}`);
+    throw modelErrorFromStatus(res.status);
   }
 
   const acc = new Map<number, { id: string; name: string; args: string }>();

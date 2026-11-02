@@ -20,6 +20,7 @@ import type {
   Window,
 } from "../types.js";
 import { addDec, cmpDec, isValidPrice, mulDec, subDec } from "./format.js";
+import { FILLS_PAGE_CAP, FILLS_RETAIN, readAllFills } from "./pagination.js";
 
 export const SPOT_ASSET_ID_BASE = 10000;
 
@@ -63,6 +64,16 @@ export class FakeHl implements HlPort {
   account = "0x00000000000000000000000000000000000000aa";
   /** Override the `atMs` of getMids/getBook to simulate stale data; null = now(). */
   staleAtMs: number | null = null;
+  /** Per-pair age of a mid (getMids().pairAtMs), to simulate one stale pair. */
+  pairAtMs: Record<string, number | undefined> | null = null;
+  /** Simulated HL caps for userFillsByTime: rows per response and rows retained (newest). */
+  fillsPageCap = FILLS_PAGE_CAP;
+  fillsRetain = FILLS_RETAIN;
+  /** Simulate an HL that answers newest first (the docs do not say which order userFillsByTime uses). */
+  fillsNewestFirst = false;
+  private nextTid = 1;
+  /** When set, every scheduleCancel rejects with it (e.g. HL's volume-gate refusal). */
+  scheduleCancelError: Error | null = null;
 
   readonly calls: FakeCall[] = [];
   readonly placed: HlPlaceOrder[] = [];
@@ -143,7 +154,7 @@ export class FakeHl implements HlPort {
     return this.read("getMids", () => {
       const mids: Record<string, string> = {};
       for (const [k, v] of Object.entries(this.mids)) if (v !== undefined) mids[k] = v;
-      return { mids, atMs: this.staleAtMs ?? this.now() };
+      return { mids, atMs: this.staleAtMs ?? this.now(), ...(this.pairAtMs ? { pairAtMs: { ...this.pairAtMs } } : {}) };
     });
   }
 
@@ -177,7 +188,26 @@ export class FakeHl implements HlPort {
   }
 
   getUserFills(account: string, startMs: number): Promise<HlFill[]> {
-    return this.read("getUserFills", () => (this.fills[account.toLowerCase()] ?? []).filter((f) => f.timeMs >= startMs).map((f) => ({ ...f })));
+    this.calls.push({ kind: "read", method: "getUserFills" });
+    const err = this.takeFailure("getUserFills");
+    if (err) return Promise.reject(err);
+    // Behaves like HL: only the newest `fillsRetain` rows exist, a response holds the oldest `fillsPageCap` rows from startTime.
+    const all = [...(this.fills[account.toLowerCase()] ?? [])].sort((a, b) => a.timeMs - b.timeMs).slice(-this.fillsRetain);
+    return readAllFills(
+      (start, end) => {
+        const rows = all.filter((f) => f.timeMs >= start && (end === undefined || f.timeMs <= end)).slice(0, this.fillsPageCap);
+        const ordered = this.fillsNewestFirst ? [...rows].reverse() : rows;
+        return Promise.resolve({
+          fills: ordered.map((f) => ({ ...f })),
+          rawCount: ordered.length,
+          maxTimeMs: rows.at(-1)?.timeMs ?? null,
+          minTimeMs: rows[0]?.timeMs ?? null,
+          ascending: ordered.every((f, i) => i === 0 || (ordered[i - 1]?.timeMs ?? 0) <= f.timeMs),
+        });
+      },
+      startMs,
+      { pageCap: this.fillsPageCap, retain: this.fillsRetain },
+    );
   }
 
   getLedger(account: string, startMs: number): Promise<HlLedgerEntry[]> {
@@ -241,7 +271,7 @@ export class FakeHl implements HlPort {
   }
 
   scheduleCancel(timeMs: number | null): Promise<void> {
-    const injected = this.takeFailure("scheduleCancel");
+    const injected = this.takeFailure("scheduleCancel") ?? this.scheduleCancelError;
     if (injected) return Promise.reject(injected);
     this.calls.push({ kind: "scheduleCancel", timeMs });
     this.scheduleCancelCalls.push(timeMs);
@@ -290,6 +320,7 @@ export class FakeHl implements HlPort {
       size: order.size,
       feeUsdc: "0",
       timeMs: this.now(),
+      tid: this.nextTid++,
     });
     return { status: "filled", oid, filledSize: order.size, avgPx: px };
   }

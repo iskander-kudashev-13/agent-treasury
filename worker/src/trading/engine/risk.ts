@@ -146,6 +146,51 @@ export type SizedOrder =
   | { ok: true; price: Fx; size: Fx; tif: "Ioc" | "Gtc"; ttl: string | null }
   | { ok: false; code: "NO_PRICE" | "SIZE_ZERO"; reason: string };
 
+/** Order price for a rule action at `mid` (band edge for ioc, offset for limit), rounded to the safe side; null when unusable. */
+export function orderPrice(action: Action, mid: Fx, priceBandBps: number, szDecimals: number): Fx | null {
+  if (mid <= 0n) return null;
+  const buy = action.side === "buy";
+  const bps = BigInt(priceBandBps);
+  const o = action.order;
+  let raw: Fx;
+  if (o.type === "ioc") {
+    raw = buy ? (mid * (10_000n + bps)) / 10_000n : (mid * (10_000n - bps)) / 10_000n;
+  } else {
+    // offset_pct has up to 6 decimals; 100% = 100 * 1e6 micro-percent.
+    const off = fx(o.offset_pct) / 10n ** 6n; // fx scale 1e12 -> micro-percent scale 1e6
+    raw = buy ? (mid * (100_000_000n - off)) / 100_000_000n : (mid * (100_000_000n + off)) / 100_000_000n;
+  }
+  const price = roundPrice(raw, szDecimals, buy ? "down" : "up");
+  return price <= 0n ? null : price;
+}
+
+export interface MinOrderAdvice {
+  /** Coins a `usdc` order buys/sells after rounding down to szDecimals. */
+  coins: Fx;
+  notional: Fx;
+  belowMin: boolean;
+  /** Smallest whole-USDC size that clears the minimum at this price (next lot, +2% margin). */
+  suggestedUsdc: bigint;
+}
+
+/** What a `size.usdc` order amounts to at `price` after lot rounding, and the smallest size that would clear 10 USDC. */
+export function minOrderAdvice(usdc: Fx, price: Fx, szDecimals: number): MinOrderAdvice {
+  const coins = roundSizeDown((usdc * SCALE) / price, szDecimals);
+  const notional = fxMul(price, coins);
+  const lot = SCALE / 10n ** BigInt(Math.min(Math.max(szDecimals, 0), DEC_DIGITS));
+  const lotValue = fxMul(price, lot);
+  const lots = lotValue <= 0n ? 1n : (MIN_NOTIONAL + lotValue - 1n) / lotValue;
+  const withMargin = (lots * lotValue * 102n) / 100n;
+  const suggestedUsdc = (withMargin + SCALE - 1n) / SCALE;
+  return { coins, notional, belowMin: notional < MIN_NOTIONAL, suggestedUsdc };
+}
+
+/** Human text for the advice, used by the validator warning and the engine skip detail. */
+export function describeMinOrder(a: MinOrderAdvice, maxOrder: Fx): string {
+  const over = a.suggestedUsdc * SCALE > maxOrder;
+  return `${fxStr(a.coins, 8)} coins = ${fxStr(a.notional, 4)} USDC, below the 10 USDC minimum; use at least ${a.suggestedUsdc} USDC${over ? ` (this exceeds max order ${fxStr(maxOrder)}, so raise max_order_usdc too, within the hard limit)` : ""}`;
+}
+
 /**
  * Price and size of the order a rule asks for. Prices round to the safe side (buy down, sell up), sizes round DOWN to
  * szDecimals so the notional never exceeds what the rule says.
@@ -156,20 +201,9 @@ export type SizedOrder =
  * is almost always just under 10, and the guard rejects it. Use a size a little above 10.
  */
 export function sizeOrder(i: SizeInput): SizedOrder {
-  if (i.mid <= 0n) return { ok: false, code: "NO_PRICE", reason: "mid price is not positive" };
-  const buy = i.action.side === "buy";
-  const bps = BigInt(i.priceBandBps);
   const o = i.action.order;
-  let raw: Fx;
-  if (o.type === "ioc") {
-    raw = buy ? (i.mid * (10_000n + bps)) / 10_000n : (i.mid * (10_000n - bps)) / 10_000n;
-  } else {
-    // offset_pct has up to 6 decimals; 100% = 100 * 1e6 micro-percent.
-    const off = fx(o.offset_pct) / 10n ** 6n; // fx scale 1e12 -> micro-percent scale 1e6
-    raw = buy ? (i.mid * (100_000_000n - off)) / 100_000_000n : (i.mid * (100_000_000n + off)) / 100_000_000n;
-  }
-  const price = roundPrice(raw, i.szDecimals, buy ? "down" : "up");
-  if (price <= 0n) return { ok: false, code: "NO_PRICE", reason: "order price rounds to zero" };
+  const price = orderPrice(i.action, i.mid, i.priceBandBps, i.szDecimals);
+  if (price === null) return { ok: false, code: "NO_PRICE", reason: i.mid <= 0n ? "mid price is not positive" : "order price rounds to zero" };
   const size =
     "usdc" in i.action.size
       ? roundSizeDown((fx(i.action.size.usdc) * SCALE) / price, i.szDecimals)
@@ -198,6 +232,7 @@ export const RISK_CODES = [
   "INSUFFICIENT_USDC",
   "INSUFFICIENT_BASE",
   "BAD_ORDER",
+  "LIMIT_NEEDS_DEADMAN",
 ] as const;
 export type RiskCode = (typeof RISK_CODES)[number];
 
@@ -207,9 +242,13 @@ export interface OrderCandidate {
   side: "buy" | "sell";
   price: Fx;
   size: Fx;
+  /** Absent = Ioc. A Gtc order rests on the book and is only allowed while the dead-man switch works. */
+  tif?: "Ioc" | "Gtc";
 }
 
 export interface RiskContext {
+  /** False while HL refuses scheduleCancel (volume gate): resting orders could not be cancelled by the dead-man. Absent = true. */
+  deadManAvailable?: boolean;
   nowMs: number;
   /** One tick in ms; market data older than 2 ticks is stale. */
   tickMs: number;
@@ -241,6 +280,8 @@ export function checkOrder(o: OrderCandidate, c: RiskContext): RiskResult {
   if (!c.allowedPairs.includes(o.pair)) return no("PAIR_NOT_ALLOWED", `${o.pair} is not in TRADING_ALLOWED_PAIRS`);
   if (!c.rulePairs.includes(o.pair)) return no("PAIR_NOT_IN_RULES", `${o.pair} is not in the active rule set's pairs`);
   if (o.price <= 0n || o.size <= 0n || c.mid <= 0n) return no("BAD_ORDER", "price, size and mid must be positive");
+  if (o.tif === "Gtc" && c.deadManAvailable === false)
+    return no("LIMIT_NEEDS_DEADMAN", "a resting limit order needs the dead-man switch, which Hyperliquid refuses on this account (volume gate); only IOC orders are placed");
   if (cooldownActive(c.nowMs, c.lastFiredAtMs, c.cooldownMs)) return no("COOLDOWN", "rule is in cooldown");
 
   // Market sanity: fresh, two-sided, tight book.

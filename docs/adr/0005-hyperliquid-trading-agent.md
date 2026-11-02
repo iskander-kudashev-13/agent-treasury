@@ -150,7 +150,7 @@ Code facts checked for this ADR:
 2. Read HL state for the **master** address: spot balances, perp state, open orders, mids, approved agents, and
    candles if a rule needs them.
 3. Safety checks: perp alarm, API wallet approved, data freshness, on-chain status.
-4. Refresh `scheduleCancel`.
+4. Refresh `scheduleCancel`. If HL refuses it with the volume-gate error (`/enough volume traded/i`), set `deadManGatedAtMs`, report `dead_man.available=false` / `DEADMAN_VOLUME_GATED` and continue with **IOC orders only** (see "scheduleCancel volume gate 2026-11-03"); any other failure stays `error: SCHEDULE_CANCEL_FAILED` and blocks trading.
 5. UTC day rollover. Loss stop: `loss_today = day_start_equity + net_inflow_today − equity_now`.
    - `net_inflow` = HL non-funding ledger deposits − withdrawals/sends **[verify fields]**.
    - If `loss_today >= daily_loss_stop`, cancel all and enter `stopped_today`, which auto-clears at 00:00 UTC.
@@ -205,7 +205,7 @@ limits only how much is sent there per day."
 | T7 | Off-market fills on a thin book | Pair allowlist with minimum volume, ±1% band, skip on a wide spread, IOC by default |
 | T8 | Bot crash leaves orders | `scheduleCancel` refreshed every tick before any order |
 | T9 | Rule fires every tick | Required cooldown, `max_orders_per_day`, 2 orders per tick |
-| T10 | Top-ups hide losses | Loss stop subtracts net inflows. A manual outflow counts as a loss, which errs toward stopping |
+| T10 | Top-ups hide losses; a leaked API key wash-trades | The loss stop measures the bot's own trading P&L (fills + fees + mark-to-market), so deposits cannot hide a loss and cannot fake one. Two backstops cover what fill accounting cannot see: the equity backstop (start equity + inflows today - outflows today - equity now >= stop => `stopped_today`, reason `EQUITY_DROP`; the one-time 1 USDC HL activation fee is excused only on the UTC day of the first ledger entry, if that entry is an inflow), and a warning for every spot fill since `TRADING_START_MS` that is not the bot's (cloid prefix or remembered oid). Withdrawals are shown (`external_outflow_usdc`, warning for outflows today) but are neither trading loss nor equity drop |
 | T11 | Stale or failed HL data | No orders when data is stale; `error` state with backoff |
 | T12 | Owner trades on the same account | Dedicated master address required in setup |
 | T13 | Unauthenticated HTTP abuse | `propose`, `kill`, `rotate`, `rules` and `log` require an owner bearer token; `confirm` requires a NEP-413 signature; rate limits reused from `/ai` |
@@ -534,3 +534,51 @@ Status of the findings in `docs/security/audit-2026-11-03-trading.md` (H = high,
 lists (`extraAgents`) for the master account other than the bot's current one (empty when none; capped at 20). The dashboard
 shows a warning when it is not empty and also reads `extraAgents` itself from the Hyperliquid info API. The worker now takes an
 exclusive pid lock `TRADING_STATE_DIR/lock` and refuses to start trading when another live process holds it.
+
+## Accounting change 2026-11-03
+
+Found in a live testnet run: a fresh HL account funded by the faucet (1000 mock USDC, 1 USDC taken as HL account activation fee) showed `pnl.total = -1.00` and counted 1.00 against the daily loss stop. Equity deltas cannot tell a trading loss from a fee or an outside transfer.
+
+Decision (implemented in `worker/src/trading/engine/pnl.ts`, header comment is normative):
+
+- The loss stop and `pnl.today_usdc` / `pnl.total_usdc` measure trading P&L only: the bot's own fills (cloid prefix of any rule set it activated, kept in `EngineState.botPrefixes`) + their fees + mark-to-market of the bot's position (day snapshot stores `startPositions`).
+- Activation fee, faucet/manual deposits, withdrawals and transfers move equity but not the loss stop. Supersedes the 2026-11-02 reading of T10 ("a manual outflow counts as a loss"). T10's intent, that a manual withdrawal stays visible, is kept: `pnl.external_outflow_usdc` plus a status warning while any outflow exists since TRADING_START_MS.
+- New `pnl` fields: `funded_by_vault_usdc` (ledger inflows matched to confirmed vault top-ups recorded by the funder: within 5% of the amount, 6 h window, one inflow per top-up), `external_inflow_usdc` (all other inflows), `external_outflow_usdc`, `fees_usdc`, `untracked_delta_usdc` (equity - net flow - total P&L; the activation fee lands here).
+- `total_usdc` changed meaning (was equity - net_funded); `net_funded_usdc` is unchanged (deposits minus withdrawals, floored at 0) and now includes non-vault inflows.
+- Residual risk accepted: a loss that is neither a bot fill nor a mark of the bot's position (someone else sells the bot's coins by hand) is not seen by the stop; it shows in `untracked_delta_usdc`.
+- Fills are now read every tick (failure = `HL_READ_FAILED`, no trading), not only for `position_pnl` rules.
+- The state log appends a `state` entry only when state or reason changes (`lastStateKey`, `lastStateRepeats`).
+
+### Review fixes 2026-11-03 (loss stop must only err toward stopping)
+
+- **Fills window.** HL returns at most 2000 fills per `userFillsByTime` response and keeps only the 10000 newest. `getUserFills` now paginates by last timestamp (`hl/pagination.ts`) and throws `FILLS_TRUNCATED` if it cannot prove the answer complete (a full page ending inside one millisecond, or 10000 rows or more); the engine then stops trading (`state: error`). The engine no longer re-reads history each tick: `EngineState.fills` holds per-pair running sums (`today`, `total`), a cursor and the fill keys inside a 120 s overlap (late-indexed fills are still picked up, duplicates are ignored). The first read goes back to `TRADING_START_MS`; if HL no longer has that far back it falls back to today's window and marks `total` partial (warning). `position_pnl` rules use the tracker's incremental cost basis (see the re-review fixes below).
+- **Unpriced coins.** A held allowed-pair coin, start position or bot position without a current mid (per-pair age when the adapter supplies `HlMids.pairAtMs`, else the snapshot age) is valued at 0 by the stop (display keeps the last known price), blocks new orders (`NO_MID_FOR_POSITION`) and postpones the UTC day snapshot (it would drop the coin from `startPositions`). A snapshot written before `startPositions` was always recorded, with coins held now, gives `NO_DAY_SNAPSHOT` until the next rollover.
+- **Attribution.** Fills are the bot's on cloid prefix OR a remembered order id (`botOids`, 500 newest, persisted), because the cloid on live fills is not verified yet (testnet account had no fills when checked). If orders reported as filled today exist but no bot fill is found, `FILLS_NOT_ATTRIBUTED` blocks new orders. `botPrefixes` is seeded from `rulesHash` and the cloids of resting orders on upgrade, validated in the state schema, and dropping the oldest (limit 64) is counted in `prefixesDropped` and warned.
+- **Status.** `state_repeats` = ticks spent in the current state since its log entry; the state log re-logs once per UTC day.
+
+**Re-review fixes (same day, rule: the loss stop only errs toward stopping).**
+
+- **B1 equity backstop.** The backstop no longer uses the all-coin equity. `backstopEquity` = USDC + allowed-pair coins, the same definition at the snapshot (`DaySnapshot.startBackstop`; older snapshots fall back to `startEquity`, which can only make the drop larger) and now. A foreign buy of a junk coin at an inflated mid, or dust of a pumped token, no longer hides a loss; `equity_usdc` in the status stays all-coin and is display only.
+- **H3 gains on the start holding.** For the stop, the mark of a coin held at the snapshot is `min(0, eff_start * (mid - start_mid))` with `eff_start = min(start_size, held_now - bought + sold)`: only negative marks count, and a start holding sold or withdrawn by hand cannot produce a phantom loss (what the bot itself sold is added back so its realised result is still measured against the start mid). Bot gains from today's trades do count. The display P&L keeps the full signed mark. The backstop applies the same idea: the value of `min(start_size, size_now)` of a start holding is clipped at the start mid when the mid rose.
+- **H1 cursor.** The fill cursor is the latest fill time seen (HL's clock) and never the local `now`; reads start `OVERLAP_MS` before it. A fast local clock can therefore not skip fills. A warning appears when fill timestamps are more than 60 s ahead of the local clock. Cost: with no fill at all the read starts at the initial window start each tick and returns nothing; non-spot rows do not move the cursor.
+- **H2 ordering of `userFillsByTime`.** The docs say only "at most 2000 fills per response, only the 10000 most recent available"; the order is not stated. A live read-only check on testnet (2026-11-03, account with exactly one fill) cannot show the order. So a full page is accepted only if it is ascending and begins at the cursor (first page: at or after the start; later pages: exactly at the previous page's last timestamp). Otherwise `FILLS_TRUNCATED`. Short pages are the whole answer in any order.
+- **H4 position_pnl.** The cost basis per (rule-set prefix, pair) is kept incrementally in the fill tracker (`basis`); the rule no longer re-reads history from `confirmedAtMs`. If the persisted cursor is so old that the read since it is truncated (long downtime), the tracker restarts from today's window, flagged partial (`completeFromMs` = restart point, warning in the status) instead of failing for ever. `position_pnl` rules of a rule set confirmed before `completeFromMs` are skipped (`COST_BASIS_PARTIAL`), never guessed; a newly confirmed rule set works again. Operator reset: stop the worker and set `"fills": null` in `engine-state.json`.
+- **H5 attribution.** The engine keeps the order ids it got back as filled today (`filledOidsToday`); each must appear among the distinct order ids of the attributed fills of today (`FillTracker.botOidsToday`). Any missing one gives `FILLS_NOT_ATTRIBUTED` (also when the fill is merely not indexed yet; it clears by itself).
+- **Snapshot stamps.** `snapshotAtMs` is the tick start; `balanceAtMs` is read from the injected clock right after the HL state reads. Inflows count from `snapshotAtMs`, outflows from `balanceAtMs`: an entry inside that gap may already be in the snapshot balance, and a double-counted inflow only raises the drop while a double-counted outflow would hide it.
+- **Class transfers.** `accountClassTransfer` is mapped to ledger kinds `class_in` (perp to spot) and `class_out` (spot to perp). The equity backstop counts them as flows; `netFunded` and the external-flow figures ignore them.
+- **Defence in depth.** The engine refuses a non-IOC order right before placing it when the dead-man switch is unavailable (second lock after `checkOrder`), and `NktkasHl.placeSpotOrder` refuses any non-IOC order unless its `deadManAvailable()` callback says true (default: false = IOC only; `index.ts` wires it to the service state, so on the one tick where the switch comes back the adapter still refuses a limit order and the rule is retried on the next tick).
+- **Known limits (documented, accepted).** The 1 USDC activation-fee allowance is excused once per account on the UTC day of the first ledger entry, so a leaked key could hide at most 1 USDC once. More than 2000 fills inside one 120 s overlap window could be counted twice (`MAX_SEEN`); the bot cannot place that many. A held allowed-pair coin that HL stops pricing postpones the day snapshot for ever (`NO_DAY_SNAPSHOT`): the operator must sell or move the coin or remove the pair.
+
+### Finding: scheduleCancel volume gate 2026-11-03
+
+Observed on HL testnet (and the rule is the same on mainnet): `scheduleCancel` is refused for accounts without trading volume. HL error: `Cannot set scheduled cancel time until enough volume traded. Required: $1000000. Traded: $0.` Before this change the engine stayed in `error / SCHEDULE_CANCEL_FAILED` for every account under $1M volume, so a fresh account could never trade.
+
+Decision (fail-safe, `engine/tick.ts`, `engine/risk.ts`):
+
+- Only this refusal (match `/enough volume traded/i`) is non-fatal. Any other `scheduleCancel` error still blocks trading.
+- The engine then persists `deadManGatedAtMs`, sets `status.dead_man = { cancel_at_ms: null, available: false, reason: "DEADMAN_VOLUME_GATED" }` (additive field `available`/`reason`) and adds a warning every tick.
+- Only IOC orders are placed: nothing rests, so nothing needs the switch. The risk guard rejects any order with `tif = Gtc` (rules with `order.type = "limit"`) with code `LIMIT_NEEDS_DEADMAN`. Resting bot orders found at the start of step 6 are cancelled.
+- `scheduleCancel` is re-tried at most once per hour (persisted, `DEADMAN_RETRY_MS`); when HL accepts it the engine switches back and limit orders work again.
+- Kill switch: `kill()` cancels all orders; its `scheduleCancel` step may report `failed` under the gate, which is harmless because everything was cancelled directly.
+- Proposing / confirming a rule set with limit orders while the switch is unavailable gives a **warning** `LIMIT_NEEDS_DEADMAN` (not an error): the rule would be skipped at run time until the switch works.
+- Residual risk: a worker crash cannot cancel orders, but with IOC-only there are no resting bot orders to leave behind. Orders placed by hand are outside the bot.

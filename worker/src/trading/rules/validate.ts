@@ -3,6 +3,7 @@
  * The same function runs when the worker compiles a proposal and again at `POST /trading/rules/confirm`.
  */
 import type { HardLimits, PairInfoMap, RuleSetV1, ValidationIssue } from "../types.js";
+import { describeMinOrder, fx, minOrderAdvice, orderPrice } from "../engine/risk.js";
 import { issue, parseRuleSet, toMicro } from "./schema.js";
 
 export interface ValidateResult {
@@ -20,8 +21,10 @@ const MIN_RELIABLE_ORDER_MICRO = 11_000_000n;
  * @param input    untrusted rule set (parsed here; structural and static errors come back as issues)
  * @param hard     env hard limits
  * @param pairInfo live `spotMeta` data keyed by display name; a pair missing here is unknown
+ * @param opts     `deadManAvailable: false` (HL refuses scheduleCancel for volume) turns limit orders into a warning: they
+ *                 would be rejected at run time (LIMIT_NEEDS_DEADMAN) while only IOC orders are allowed
  */
-export function validate(input: unknown, hard: HardLimits, pairInfo: PairInfoMap): ValidateResult {
+export function validate(input: unknown, hard: HardLimits, pairInfo: PairInfoMap, opts: { deadManAvailable?: boolean } = {}): ValidateResult {
   const parsed = parseRuleSet(input);
   if (!parsed.ok) return { ok: false, errors: parsed.issues, warnings: [] };
   const rs: RuleSetV1 = parsed.value;
@@ -60,11 +63,27 @@ export function validate(input: unknown, hard: HardLimits, pairInfo: PairInfoMap
   if (toMicro(rs.limits.max_position_usdc) < toMicro(rs.limits.max_order_usdc))
     warnings.push(issue("LIMIT_MAX_POSITION", "limits.max_position_usdc", "max_position_usdc is below max_order_usdc, so a full-size buy would be skipped"));
   rs.rules.forEach((r, i) => {
+    if (opts.deadManAvailable === false && r.action.order.type === "limit")
+      warnings.push(issue("LIMIT_NEEDS_DEADMAN", `rules.${i}.action.order`, "limit orders rest on the book and need the dead-man switch, which Hyperliquid currently refuses for this account (it needs $1M traded volume); this rule will be skipped until it works. Use an IOC order instead"));
     // HL's minimum order value is 10 USDC and sizes round down to szDecimals, so an order of exactly 10 ends up below it.
     if ("usdc" in r.action.size && toMicro(r.action.size.usdc) < MIN_RELIABLE_ORDER_MICRO)
       warnings.push(
         issue("SIZE_NEAR_HL_MINIMUM", `rules.${i}.action.size.usdc`, `size ${r.action.size.usdc} USDC is below 11: Hyperliquid needs 10 USDC per order and size rounding can drop it under, so this rule may never fire`),
       );
+    // Lot rounding: coarse szDecimals (e.g. 0 for PURR) can push a 12 USDC order under 10 USDC at the real price.
+    const info = pairInfo[r.pair];
+    if ("usdc" in r.action.size && info?.mid !== undefined && info.assetId >= SPOT_ASSET_ID_MIN) {
+      const price = orderPrice(r.action, fx(info.mid), hard.priceBandBps, info.szDecimals);
+      if (price !== null) {
+        const adv = minOrderAdvice(fx(r.action.size.usdc), price, info.szDecimals);
+        if (adv.belowMin) {
+          const maxOrder = fx(toMicro(rs.limits.max_order_usdc) < toMicro(hard.maxOrderUsdc) ? rs.limits.max_order_usdc : hard.maxOrderUsdc);
+          warnings.push(
+            issue("ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE", `rules.${i}.action.size.usdc`, `at the current price ${r.pair} ${r.action.size.usdc} USDC becomes ${describeMinOrder(adv, maxOrder)}; the rule would be skipped (MIN_NOTIONAL) until then`),
+          );
+        }
+      }
+    }
     if ("usdc" in r.action.size && r.action.side === "buy" && toMicro(r.action.size.usdc) > toMicro(rs.limits.max_position_usdc))
       warnings.push(issue("LIMIT_MAX_POSITION", `rules.${i}.action.size.usdc`, `buy size ${r.action.size.usdc} is above max_position_usdc, so this rule can never fire`));
   });

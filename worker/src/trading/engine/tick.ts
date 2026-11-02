@@ -14,6 +14,7 @@ import type {
   AgentStatus,
   Dec,
   HaltReason,
+  HlFill,
   HlOpenOrder,
   HlOrderResult,
   HlPort,
@@ -23,11 +24,15 @@ import type {
   TradingState,
   TradingStatus,
 } from "../types.js";
-import { type DaySnapshot, type Equity, computeEquity, costBasis, pnlSummary, rollDay, utcDayIndex } from "./pnl.js";
+import { isFillsTruncated } from "../hl/pagination.js";
+import { type FillTracker, applyFills, basisOf, completeFrom, emptyTracker, readFrom, rollToday } from "./fills.js";
+import { type DaySnapshot, type Equity, type VaultTopup, backstopEquity, computeEquity, pnlSummary, rollDay, utcDayIndex } from "./pnl.js";
 import {
   type EffectiveLimits,
   type Fx,
   checkOrder,
+  describeMinOrder,
+  minOrderAdvice,
   cloidPrefix,
   cooldownActive,
   effectiveLimits,
@@ -59,6 +64,16 @@ export const MIN_API_WALLET_VALIDITY_MS = 3_600_000;
 export const MAX_ORDERS_PER_TICK = 2;
 /** Perp account value above this (USDC) counts as a perp position. */
 const PERP_VALUE_ALARM = "1";
+/** Rule sets remembered for fill attribution. */
+const MAX_BOT_PREFIXES = 64;
+/** Order ids remembered for fill attribution (fallback when the cloid on a fill is missing or foreign). */
+const MAX_BOT_OIDS = 500;
+/** Fill timestamps this far ahead of the local clock mean the clocks disagree (HL stamps fills with its own clock). */
+const CLOCK_SKEW_WARN_MS = 60_000;
+const BOT_PREFIX = /^0x[0-9a-f]{16}$/;
+/** HL's refusal text: "Cannot set scheduled cancel time until enough volume traded. Required: $1000000. Traded: $0." */
+export const VOLUME_GATE_RE = /enough volume traded/i;
+export const DEADMAN_RETRY_MS = 3_600_000;
 
 /** Everything the engine persists between ticks. JSON-serializable. */
 export interface EngineState {
@@ -81,9 +96,33 @@ export interface EngineState {
   /** rule id -> last logged skip code, to avoid logging the same rejection every tick. */
   lastSkip: Record<string, string>;
   deadManAtMs: number | null;
+  /**
+   * Set (ms of the last refusal) while HL refuses scheduleCancel because the account has not traded enough volume
+   * ("Cannot set scheduled cancel time until enough volume traded"). Then only IOC orders are placed, resting bot orders are
+   * cancelled, and the switch is tried again at most once per DEADMAN_RETRY_MS.
+   */
+  deadManGatedAtMs: number | null;
   lastTickMs: number | null;
   /** Bounded in-memory log (MAX_RECENT), newest last. */
   recent: LogEntry[];
+  /** Cloid prefixes of every rule set the bot activated (bounded). Fills carrying one are the bot's own, for the loss stop. */
+  botPrefixes: string[];
+  /** Order ids HL returned for orders the bot placed (bounded, newest last). Fills are the bot's on cloid prefix OR oid. */
+  botOids: number[];
+  /** How many old prefixes fell off `botPrefixes`: their fills are no longer attributed to the bot. */
+  prefixesDropped: number;
+  /** Running per-pair sums of the bot's fills + read cursor (engine/fills.ts). Null until the first successful read. */
+  fills: FillTracker | null;
+  /** Why the loss stop fired on `stoppedDayIndex`. */
+  stopReason: "DAILY_LOSS_STOP" | "EQUITY_DROP" | null;
+  /** Orders placed on `day` that HL reported as filled; if > 0 while no bot fill is found, attribution is broken. */
+  filledOrdersToday: number;
+  /** Order ids of those orders (bounded): every one must show up among the attributed fills, else FILLS_NOT_ATTRIBUTED. */
+  filledOidsToday: number[];
+  /** `state|reason` of the last state entry written to the log; a state entry is appended only when it changes. */
+  lastStateKey: string | null;
+  /** Ticks spent in `lastStateKey` since it was logged (the repeats that were not logged). */
+  lastStateRepeats: number;
 }
 
 export function initialEngineState(): EngineState {
@@ -99,8 +138,18 @@ export function initialEngineState(): EngineState {
     orders: {},
     lastSkip: {},
     deadManAtMs: null,
+    deadManGatedAtMs: null,
     lastTickMs: null,
     recent: [],
+    botPrefixes: [],
+    botOids: [],
+    prefixesDropped: 0,
+    fills: null,
+    stopReason: null,
+    filledOrdersToday: 0,
+    filledOidsToday: [],
+    lastStateKey: null,
+    lastStateRepeats: 0,
   };
 }
 
@@ -153,6 +202,13 @@ export interface TickDeps {
    * new order counter / `firedAt` / `ordersToday`. If it throws the order is NOT placed (the state cannot be saved).
    */
   beforeOrder?: (st: EngineState) => void;
+  /** Confirmed vault top-ups, to tell vault funding from other inflows in the status. Absent = none known. */
+  vaultTopups?: () => VaultTopup[];
+  /**
+   * Local clock, read right after the HL state reads of a tick. Stamps `DaySnapshot.balanceAtMs` (upper bound of when the
+   * snapshot balance was read, see engine/pnl.ts). Absent = the tick's `nowMs`.
+   */
+  clock?: () => number;
 }
 
 export interface ActiveRules {
@@ -207,11 +263,24 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
 
   const stopped = (): boolean => deps.shouldStop?.() === true;
   /** `safeSchedule` that never runs after a kill. */
-  const schedule = async (atMs: number): Promise<boolean> => (stopped() ? false : safeSchedule(hl, atMs, st, warnings));
+  const schedErr = { msg: null as string | null };
+  const schedule = async (atMs: number): Promise<boolean> => (stopped() ? false : safeSchedule(hl, atMs, st, warnings, schedErr));
 
   const finish = (tradingState: TradingState, reason: string | null = null, detail: string | null = null): TickResult => {
     st.lastTickMs = now;
-    if (tradingState !== "running") log("state", `${tradingState}${reason ? `: ${reason}` : ""}${detail ? ` (${detail})` : ""}`);
+    if (st.deadManGatedAtMs !== null) warnings.push("DEADMAN_VOLUME_GATED: Hyperliquid refuses the dead-man switch until the account has traded $1M; only IOC orders are placed");
+    // One state entry per change of state or reason, not one per tick (the status always shows the current one).
+    const key = `${tradingState}|${reason ?? ""}`;
+    if (tradingState === "running") {
+      st.lastStateKey = key;
+      st.lastStateRepeats = 0;
+    } else if (st.lastStateKey !== key) {
+      log("state", `${tradingState}${reason ? `: ${reason}` : ""}${detail ? ` (${detail})` : ""}`);
+      st.lastStateKey = key;
+      st.lastStateRepeats = 0;
+    } else {
+      st.lastStateRepeats += 1;
+    }
     st.recent = [...st.recent, ...entries].slice(-MAX_RECENT);
     const eq = equity;
     const positionValue = eq === null ? 0n : eq.positions.filter((p) => cfg.hard.allowedPairs.includes(p.pair)).reduce((a, p) => a + p.value, 0n);
@@ -229,6 +298,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       state: tradingState,
       state_reason: reason,
       state_detail: detail,
+      state_repeats: st.lastStateRepeats,
       api_wallet: apiWallet,
       other_approved_agents: otherAgents,
       balances: {
@@ -242,6 +312,11 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
         total_usdc: pnl ? dec(pnl.total) : "0",
         net_funded_usdc: pnl ? dec(pnl.netFunded < 0n ? 0n : pnl.netFunded) : "0",
         day_start_equity_usdc: pnl ? dec(pnl.dayStartEquity) : "0",
+        funded_by_vault_usdc: pnl ? dec(pnl.fundedByVault) : "0",
+        external_inflow_usdc: pnl ? dec(pnl.externalInflow) : "0",
+        external_outflow_usdc: pnl ? dec(pnl.externalOutflow) : "0",
+        fees_usdc: pnl ? dec(pnl.fees) : "0",
+        untracked_delta_usdc: pnl ? dec(pnl.untrackedDelta) : "0",
       },
       limits: {
         effective: effectiveLimitsStatus(eff, cfg.hard.priceBandBps),
@@ -268,7 +343,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
           placed_at_ms: o.placedAtMs,
           rule_id: st.orders[o.cloid ?? ""]?.ruleId ?? null,
         })),
-      dead_man: { cancel_at_ms: st.deadManAtMs },
+      dead_man: { cancel_at_ms: st.deadManAtMs, available: st.deadManGatedAtMs === null, reason: st.deadManGatedAtMs === null ? null : "DEADMAN_VOLUME_GATED" },
       perp_check: { ok: perpOk, at_ms: now },
       last_tick_ms: now,
       next_tick_ms: now + tickMs,
@@ -278,7 +353,25 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
   };
 
   try {
-    // 0. A different rule set starts with a clean per-rule slate (cooldowns, skip dedupe).
+    // Attribution memory. States written before `botPrefixes` existed carry the active hash in `rulesHash` and the cloids of
+    // resting orders in `orders`: seed from both so an upgrade does not forget the rule set that is running.
+    const addPrefix = (p: string): void => {
+      const pre = p.toLowerCase();
+      if (!BOT_PREFIX.test(pre) || st.botPrefixes.includes(pre)) return;
+      st.botPrefixes.push(pre);
+      if (st.botPrefixes.length > MAX_BOT_PREFIXES) {
+        const n = st.botPrefixes.length - MAX_BOT_PREFIXES;
+        st.botPrefixes = st.botPrefixes.slice(n);
+        st.prefixesDropped += n;
+        log("state", `${n} old rule-set prefix(es) forgotten (limit ${MAX_BOT_PREFIXES}): their fills are no longer attributed to the bot`);
+      }
+    };
+    if (st.rulesHash !== null) addPrefix(cloidPrefix(st.rulesHash));
+    for (const c of Object.keys(st.orders)) addPrefix(c.slice(0, 18));
+    if (input.rules !== null) addPrefix(cloidPrefix(input.rules.hash));
+    if (st.prefixesDropped > 0) warnings.push(`${st.prefixesDropped} old rule-set prefix(es) were forgotten: fills of those rule sets are not attributed to the bot`);
+
+    // 0b. A different rule set starts with a clean per-rule slate (cooldowns, skip dedupe).
     if (input.rules !== null && st.rulesHash !== input.rules.hash) {
       st.rulesHash = input.rules.hash;
       st.firedAt = {};
@@ -293,6 +386,11 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
     let perp: Awaited<ReturnType<HlPort["getPerpState"]>>;
     let agents: Awaited<ReturnType<HlPort["getApprovedAgents"]>>;
     let ledger: Awaited<ReturnType<HlPort["getLedger"]>>;
+    let newFills: HlFill[];
+    /** Set only when there is no persisted tracker yet. */
+    let freshTracker: FillTracker | null = null;
+    let readsDoneMs = now;
+    let fellBack = false;
     try {
       [spotPairs, mids, openOrders, balances, perp, agents] = await Promise.all([
         hl.getSpotPairs(),
@@ -302,8 +400,46 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
         hl.getPerpState(cfg.account),
         hl.getApprovedAgents(cfg.account),
       ]);
-      ledger = await hl.getLedger(cfg.account, Math.min(cfg.fundedSinceMs, st.day?.snapshotAtMs ?? now, now));
+      readsDoneMs = Math.max(now, deps.clock?.() ?? now);
+      const since = Math.min(cfg.fundedSinceMs, st.day?.snapshotAtMs ?? now, now);
+      ledger = await hl.getLedger(cfg.account, since);
+      // Fills: only what is newer than the persisted cursor (complete or an error, see hl/pagination.ts). The first read
+      // reaches back to the earliest window; if HL no longer has that far back, fall back to today's window and mark the
+      // total as partial. The same fallback applies when a persisted cursor is so old (long downtime) that the rows since it
+      // exceed what HL keeps: the sums restart from today's window, flagged partial (a gap cannot be repaired), instead of
+      // failing for ever. If even today's window cannot be proven complete the error stands (fail closed).
+      // OPERATOR RESET: set "fills" to null in engine-state.json (worker stopped) to rebuild the sums from scratch.
+      const todayFrom = st.day?.snapshotAtMs ?? null;
+      const fallback = async (): Promise<{ fills: HlFill[]; tracker: FillTracker }> => {
+        const from = Math.min(todayFrom ?? now, now);
+        return { fills: await hl.getUserFills(cfg.account, from), tracker: emptyTracker(from, todayFrom, false) };
+      };
+      if (st.fills !== null) {
+        try {
+          newFills = await hl.getUserFills(cfg.account, readFrom(st.fills));
+        } catch (e) {
+          if (!isFillsTruncated(e)) throw e;
+          const fb = await fallback();
+          newFills = fb.fills;
+          freshTracker = fb.tracker;
+          fellBack = true;
+        }
+      } else {
+        try {
+          newFills = await hl.getUserFills(cfg.account, since);
+          freshTracker = emptyTracker(since, todayFrom, true);
+        } catch (e) {
+          if (!isFillsTruncated(e)) throw e;
+          const fb = await fallback();
+          newFills = fb.fills;
+          freshTracker = fb.tracker;
+        }
+      }
     } catch (e) {
+      if (isFillsTruncated(e)) {
+        warnings.push("fill history truncated");
+        return finish("error", "FILLS_TRUNCATED", errMsg(e));
+      }
       warnings.push("HL read failed");
       return finish("error", "HL_READ_FAILED", errMsg(e));
     }
@@ -321,20 +457,90 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
     }
 
     const fresh = now - mids.atMs <= 2 * tickMs;
+    const allowed = new Set(cfg.hard.allowedPairs);
     equity = computeEquity(balances, mids.mids);
+    // Skew between the local clock and HL's fill clock: the day window uses local time, fills carry HL time.
+    const newest = newFills.reduce((m, f) => Math.max(m, f.timeMs), 0);
+    if (newest > now + CLOCK_SKEW_WARN_MS) warnings.push(`HL fill timestamps are ${Math.round((newest - now) / 1000)} s ahead of the local clock; day windows may be off`);
     if (equity.unpriced.length > 0) warnings.push(`no mid for held ${equity.unpriced.join(", ")} (valued at 0)`);
     if (!fresh) warnings.push("market data older than 2 ticks");
 
-    // Day rollover (needs fresh mids for a trustworthy equity snapshot).
-    if (fresh) {
-      const r = rollDay(st.day, now, equity.equity);
-      st.day = r.day;
-      if (r.rolled) {
+    /** A mid counts only if it is positive and current for THAT pair (per-pair age when the adapter has one). */
+    const priced = (pair: string): boolean => {
+      const m = mids.mids[pair];
+      return m !== undefined && fx(m) > 0n && now - (mids.pairAtMs?.[pair] ?? mids.atMs) <= 2 * tickMs;
+    };
+    const heldBalancePairs = balances.filter((b) => b.coin !== "USDC" && fx(b.total) > 0n).map((b) => `${b.coin}/USDC`).filter((p) => allowed.has(p));
+
+    // Day rollover. Needs fresh mids for a trustworthy equity snapshot, and a mid for EVERY held allowed-pair coin: a coin
+    // without a mid would be missing from startPositions and its later losses would be invisible to the loss stop.
+    let rolled = false;
+    if (fresh && (st.day === null || st.day.dayIndex !== utcDayIndex(now))) {
+      const missing = heldBalancePairs.filter((p) => !priced(p));
+      if (missing.length > 0) {
+        warnings.push(`day snapshot postponed: no current mid for held ${missing.join(", ")}`);
+      } else {
+        // Note: an allowed coin without a mid keeps the snapshot postponed (above) until HL prices it again; if HL never does
+        // (delisted pair), NO_DAY_SNAPSHOT is permanent and needs operator action: sell or move the coin, or remove the pair.
+        const r = rollDay(st.day, now, equity.equity, equity.positions.filter((p) => allowed.has(p.pair)), {
+          backstop: backstopEquity(equity, allowed),
+          balanceAtMs: readsDoneMs,
+        });
+        st.day = r.day;
+        rolled = r.rolled;
         st.ordersToday = 0;
+        st.filledOrdersToday = 0;
+        st.filledOidsToday = [];
+        st.lastStateKey = null; // the state log re-logs the current state once per day
         log("state", `new UTC day ${r.day.dayIndex}, start equity ${r.day.startEquity}`);
       }
     }
-    if (st.day !== null) pnl = pnlSummary(st.day, equity.equity, ledger, cfg.fundedSinceMs);
+    // A snapshot written before startPositions existed cannot value coins that are held now: no trading until the next one.
+    const legacyDay = st.day !== null && st.day.startPositions === undefined && heldBalancePairs.length > 0;
+
+    // Fills: fold the new ones into the persisted running sums (the bot's own: cloid prefix OR a remembered oid).
+    let trk = fellBack ? freshTracker : (st.fills ?? freshTracker);
+    if (trk === null) throw new Error("fill tracker missing"); // unreachable: either persisted or just created
+    if (fellBack) warnings.push("fill history gap after a long pause: pnl.total and position_pnl cost bases restart from today's window (partial)");
+    if (rolled && st.day !== null) trk = rollToday(trk, st.day.snapshotAtMs);
+    for (const o of openOrders) {
+      if (o.market === "spot" && o.cloid !== null && st.botPrefixes.some((p) => (o.cloid as string).toLowerCase().startsWith(p)) && !st.botOids.includes(o.oid)) {
+        st.botOids = [...st.botOids, o.oid].slice(-MAX_BOT_OIDS);
+      }
+    }
+    trk = applyFills(trk, newFills, { prefixes: st.botPrefixes, oids: new Set(st.botOids), fundedSinceMs: cfg.fundedSinceMs });
+    st.fills = trk;
+    if (st.day !== null && trk.todayFromMs !== st.day.snapshotAtMs) {
+      st.fills = null; // out of sync with the day snapshot (hand-edited state?): rebuild from scratch next tick
+      return finish("error", "FILLS_RESYNC", "fill tracker does not match the day snapshot; rebuilding");
+    }
+
+    // Held allowed-pair coins and bot positions that have no current mid: valued at 0 by the stop, and no new orders.
+    const held = new Set<string>(heldBalancePairs);
+    for (const m of [trk.today, trk.total]) for (const [pair, a] of Object.entries(m)) if (fx(a.dq) !== 0n) held.add(pair);
+    for (const [pair, sp] of Object.entries(st.day?.startPositions ?? {})) if (fx(sp.size) !== 0n) held.add(pair);
+    const unpricedHeld = [...held].filter((p) => !priced(p));
+
+    // Loss stop and P&L: the bot's own fills + mark-to-market only; external flows and fees are reported, not counted.
+    if (st.day !== null) {
+      pnl = pnlSummary({
+        day: st.day,
+        equityNow: equity.equity,
+        equityBackstopNow: backstopEquity(equity, allowed, st.day.startPositions ?? {}),
+        held: Object.fromEntries(balances.filter((b) => b.coin !== "USDC" && fx(b.total) > 0n).map((b) => [`${b.coin}/USDC`, fx(b.total)])),
+        ledger,
+        fundedSinceMs: cfg.fundedSinceMs,
+        todayAgg: trk.today,
+        totalAgg: trk.total,
+        mids: mids.mids,
+        topups: deps.vaultTopups?.() ?? [],
+      });
+      if (pnl.unpriced.length > 0) warnings.push(`no mid for traded ${pnl.unpriced.join(", ")} (loss stop values it at 0)`);
+      if (pnl.outflowToday > 0n) warnings.push(`${dec(pnl.outflowToday)} USDC left the account today outside the bot (withdrawal or transfer); not counted as trading loss`);
+    }
+    if (trk.foreignFills > 0) warnings.push(`${trk.foreignFills} spot fill(s) since start are not from the bot (manual trades, or an API key trading without the bot's order ids)`);
+    if (!trk.totalComplete) warnings.push("pnl.total is partial: fill history before today was not retrievable");
+    if (legacyDay) warnings.push("day snapshot predates position tracking while coins are held: no trading until the next UTC day");
 
     // Orders of this account on spot markets, resolved to asset ids.
     const cancelAllSpot = async (why: string): Promise<boolean> => {
@@ -397,27 +603,67 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
     eff = effectiveLimits(rules, cfg.hard);
 
     if (!fresh) return finish("error", "STALE_DATA", `mids are ${now - mids.atMs} ms old`);
-    if (st.day === null || pnl === null) return finish("error", "NO_DAY_SNAPSHOT");
+    if (st.day === null || pnl === null || st.day.dayIndex !== utcDayIndex(now)) return finish("error", "NO_DAY_SNAPSHOT", st.day === null ? null : "today's snapshot could not be taken yet");
+    if (legacyDay) return finish("error", "NO_DAY_SNAPSHOT", "day snapshot predates position tracking; waiting for the next UTC day");
 
     // The daily loss stop holds for the rest of the UTC day, also across a rule change (only 00:00 UTC clears it).
     if (st.stoppedDayIndex === st.day.dayIndex) {
       await cancelAllSpot("stopped_today");
-      return finish("stopped_today", "DAILY_LOSS_STOP", `loss today ${dec(pnl.lossToday)} USDC`);
+      const why = st.stopReason ?? "DAILY_LOSS_STOP";
+      return finish("stopped_today", why, why === "EQUITY_DROP" ? `equity down ${dec(pnl.equityDrop)} USDC` : `loss today ${dec(pnl.lossToday)} USDC`);
     }
-    if (st.stoppedDayIndex !== null && st.stoppedDayIndex !== st.day.dayIndex) st.stoppedDayIndex = null;
+    if (st.stoppedDayIndex !== null && st.stoppedDayIndex !== st.day.dayIndex) {
+      st.stoppedDayIndex = null;
+      st.stopReason = null;
+    }
+    // Fail closed on what the stop cannot see.
+    if (unpricedHeld.length > 0) return finish("error", "NO_MID_FOR_POSITION", `no current mid for held ${unpricedHeld.join(", ")}`);
+    // Every bot order reported filled today must have at least one fill attributed to the bot. A single misattributed order
+    // would otherwise hide its P&L from the stop as long as some OTHER fill was attributed.
+    const attributedOids = new Set(trk.botOidsToday ?? []);
+    const unattributed = st.filledOidsToday.filter((o) => !attributedOids.has(o));
+    if (unattributed.length > 0 || (st.filledOrdersToday > 0 && trk.botFillsToday === 0)) {
+      return finish(
+        "error",
+        "FILLS_NOT_ATTRIBUTED",
+        `${st.filledOrdersToday} order(s) filled today, ${unattributed.length > 0 ? `order id(s) ${unattributed.slice(0, 5).join(", ")} have` : "no fill is attributed to the bot; none has"} no fill attributed to the bot (cloid/oid mismatch, or the fill is not indexed yet)`,
+      );
+    }
 
     // 4. Dead-man switch BEFORE any order. If it cannot be set, no order is placed.
     if (stopped()) return finish("halted", "KILLED", "kill switch pulled while the tick was running");
-    if (!(await schedule(now + cfg.deadmanSec * 1000))) {
+    // HL refuses scheduleCancel for accounts under $1M traded volume. That is the one refusal that is not fatal: the engine
+    // then trades with IOC orders only (nothing rests, so nothing needs the switch) and re-tries once per hour. Any other
+    // scheduleCancel failure still blocks trading.
+    if (st.deadManGatedAtMs !== null && now - st.deadManGatedAtMs < DEADMAN_RETRY_MS) {
+      st.deadManAtMs = null;
+    } else if (await schedule(now + cfg.deadmanSec * 1000)) {
+      if (st.deadManGatedAtMs !== null) log("state", "dead-man switch accepted again: limit orders are allowed");
+      st.deadManGatedAtMs = null;
+    } else {
       if (stopped()) return finish("halted", "KILLED", "kill switch pulled while the tick was running");
-      return finish("error", "SCHEDULE_CANCEL_FAILED", "refusing to trade without the dead-man switch");
+      if (schedErr.msg === null || !VOLUME_GATE_RE.test(schedErr.msg)) {
+        return finish("error", "SCHEDULE_CANCEL_FAILED", "refusing to trade without the dead-man switch");
+      }
+      if (st.deadManGatedAtMs === null) log("state", "DEADMAN_VOLUME_GATED: HL refuses scheduleCancel until $1M volume is traded; IOC orders only");
+      st.deadManGatedAtMs = now;
+      st.deadManAtMs = null;
     }
+    const deadManOk = st.deadManGatedAtMs === null;
 
     // 5. Loss stop.
     if (pnl.lossToday >= eff.dailyLossStop) {
       st.stoppedDayIndex = st.day.dayIndex;
+      st.stopReason = "DAILY_LOSS_STOP";
       await cancelAllSpot("daily loss stop");
       return finish("stopped_today", "DAILY_LOSS_STOP", `loss today ${dec(pnl.lossToday)} USDC >= stop ${dec(eff.dailyLossStop)} USDC`);
+    }
+    // Backstop for losses the fill accounting cannot see (a leaked API key trading without the bot's ids).
+    if (pnl.equityDrop >= eff.dailyLossStop) {
+      st.stoppedDayIndex = st.day.dayIndex;
+      st.stopReason = "EQUITY_DROP";
+      await cancelAllSpot("equity drop");
+      return finish("stopped_today", "EQUITY_DROP", `equity down ${dec(pnl.equityDrop)} USDC >= stop ${dec(eff.dailyLossStop)} USDC (not explained by flows)`);
     }
 
     // 6. Cancel orders past their ttl, and orders that belong to another rule set.
@@ -429,6 +675,8 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       const meta = st.orders[o.cloid];
       if (!o.cloid.toLowerCase().startsWith(prefix)) toCancel.push(o);
       else if (meta?.expiresAtMs != null && meta.expiresAtMs <= now) toCancel.push(o);
+      // Without the dead-man switch no bot order may rest: nothing would cancel it if the worker dies.
+      else if (!deadManOk) toCancel.push(o);
     }
     if (toCancel.length > 0) {
       const targets = toCancel.flatMap((o) => {
@@ -453,15 +701,11 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
 
     // 7. Evaluate rules in array order. At most 1 order per rule and 2 per tick. Free balances are decremented as we go,
     //    conservatively assuming each attempted order fills, so a second order in the same tick cannot overspend.
-    const needFills = rules.rules.some((r) => r.when.type === "position_pnl");
-    let fills: Awaited<ReturnType<HlPort["getUserFills"]>> = [];
-    if (needFills) {
-      try {
-        fills = await hl.getUserFills(cfg.account, active.confirmedAtMs);
-      } catch (e) {
-        warnings.push("fills unavailable");
-        log("skip", `fills unavailable: ${errMsg(e)}`);
-      }
+    // position_pnl: cost basis per rule set from the incremental tracker (no history re-read). It is exact only for rule sets
+    // confirmed at or after `completeFrom(trk)`; for an older one (history gap) those rules are skipped, never guessed.
+    const basisPartial = completeFrom(trk) > active.confirmedAtMs;
+    if (basisPartial && rules.rules.some((r) => r.when.type === "position_pnl")) {
+      warnings.push("position_pnl cost basis is partial (fill history gap); those rules are skipped until a new rule set is confirmed");
     }
     let freeUsdc = equity.usdcFree;
     const freeBase = new Map(equity.positions.map((p) => [p.pair, p.free]));
@@ -492,9 +736,13 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       const cdMs = cdName === undefined ? undefined : DURATION_MS[cdName];
       if (cooldownActive(now, st.firedAt[rule.id], cdMs)) continue;
 
+      if (rule.when.type === "position_pnl" && basisPartial) {
+        skip(st, log, rule.id, "COST_BASIS_PARTIAL", "fill history before the gap is unknown, so the cost basis of this rule set is unreliable");
+        continue;
+      }
       let fired: boolean;
       try {
-        const cost = costBasis(fills, rule.pair, prefix);
+        const cost = basisOf(trk, prefix, rule.pair);
         fired = (await evalTrigger(rule.when, { nowMs: now, pair: rule.pair, mid, lastFiredAtMs: st.firedAt[rule.id], cost, getCandles: (p, i, s, e) => hl.getCandles(p, i, s, e) })).fired;
       } catch (e) {
         skip(st, log, rule.id, "TRIGGER_ERROR", `trigger failed: ${errMsg(e)}`);
@@ -519,10 +767,11 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
         continue;
       }
       const verdict = checkOrder(
-        { pair: rule.pair, assetId: info.assetId, side: rule.action.side, price: sized.price, size: sized.size },
+        { pair: rule.pair, assetId: info.assetId, side: rule.action.side, price: sized.price, size: sized.size, tif: sized.tif },
         {
           nowMs: now,
           tickMs,
+          deadManAvailable: deadManOk,
           allowedPairs: cfg.hard.allowedPairs,
           rulePairs: rules.pairs,
           priceBandBps: cfg.hard.priceBandBps,
@@ -539,10 +788,20 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
         },
       );
       if (!verdict.ok) {
-        skip(st, log, rule.id, verdict.code, verdict.reason);
+        let reason = verdict.reason;
+        if (verdict.code === "MIN_NOTIONAL") {
+          const adv = "usdc" in rule.action.size ? minOrderAdvice(fx(rule.action.size.usdc), sized.price, info.szDecimals) : undefined;
+          reason += `; order is ${fxStr(sized.size, 8)} coins at ${fxStr(sized.price, 8)}${adv ? `, ${describeMinOrder(adv, eff.maxOrder)}` : ""}`;
+        }
+        skip(st, log, rule.id, verdict.code, reason);
         continue;
       }
 
+      // Second lock (checkOrder rejects this already): a resting order never goes out without the dead-man switch.
+      if (sized.tif !== "Ioc" && !deadManOk) {
+        skip(st, log, rule.id, "LIMIT_NEEDS_DEADMAN", "a resting order needs the dead-man switch, which is unavailable");
+        continue;
+      }
       // Place. From here the rule is "fired" whatever HL answers (a rejected order still starts the cooldown).
       if (stopped()) {
         log("skip", "kill switch pulled while the tick was running: no further orders", { rule_id: rule.id });
@@ -578,6 +837,11 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       } catch (e) {
         result = { status: "rejected", error: errMsg(e) };
       }
+      if ("oid" in result) st.botOids = [...st.botOids, result.oid].slice(-MAX_BOT_OIDS);
+      if (result.status === "filled" && fx(result.filledSize) > 0n) {
+        st.filledOrdersToday += 1;
+        if ("oid" in result) st.filledOidsToday = [...st.filledOidsToday, result.oid].slice(-MAX_BOT_OIDS);
+      }
       log("order", `${rule.action.side} ${dec(sized.size, 8)} ${rule.pair} @ ${dec(sized.price, 8)} ${sized.tif}: ${result.status}${result.status === "rejected" ? ` (${result.error})` : ""}`, {
         rule_id: rule.id,
         cloid,
@@ -611,13 +875,16 @@ function skip(st: EngineState, log: (k: LogEntry["kind"], d: string, x?: Partial
   log("skip", `${code}: ${reason}`, { rule_id: ruleId });
 }
 
-async function safeSchedule(hl: HlPort, atMs: number, st: EngineState, warnings: string[]): Promise<boolean> {
+async function safeSchedule(hl: HlPort, atMs: number, st: EngineState, warnings: string[], err: { msg: string | null }): Promise<boolean> {
   try {
     await hl.scheduleCancel(atMs);
     st.deadManAtMs = atMs;
+    err.msg = null;
     return true;
-  } catch {
-    warnings.push("scheduleCancel failed");
+  } catch (e) {
+    err.msg = errMsg(e);
+    // The volume gate is reported by its own warning (DEADMAN_VOLUME_GATED), not as a failure.
+    if (!VOLUME_GATE_RE.test(err.msg)) warnings.push("scheduleCancel failed");
     return false;
   }
 }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DAY_MS } from "../../src/trading/engine/pnl.js";
 import { cloidPrefix } from "../../src/trading/engine/risk.js";
+import { FillsTruncatedError } from "../../src/trading/hl/pagination.js";
 import {
   type ActiveRules,
   type EngineState,
@@ -70,18 +71,24 @@ class Fake implements HlPort {
   cancelled: { assetId: number; oid: number }[] = [];
   scheduled: (number | null)[] = [];
   failSchedule = false;
+  scheduleError: Error | null = null;
   failCancel = false;
   failReads = false;
   placeResult: ((o: HlPlaceOrder) => HlOrderResult) | null = null;
   nextOid = 1;
+  /** Like HL: an order that fills leaves a fill row (at the mid, so P&L stays 0 until tests move the price). */
+  autoFills = true;
+  nextTid = 1;
 
   getSpotPairs() {
     this.calls.push("getSpotPairs");
     return this.read(this.pairs);
   }
+  /** Mids of other pairs (not tradable here): lets a test price a coin outside the allowed pairs. */
+  extraMids: Record<string, string> = {};
   getMids(): Promise<HlMids> {
     this.calls.push("getMids");
-    return this.read({ mids: this.mid === undefined ? {} : { "HYPE/USDC": this.mid }, atMs: this.midsAtMs ?? this.now });
+    return this.read({ mids: { ...this.extraMids, ...(this.mid === undefined ? {} : { "HYPE/USDC": this.mid }) }, atMs: this.midsAtMs ?? this.now, ...(this.pairAtMs ? { pairAtMs: this.pairAtMs } : {}) });
   }
   getBook(): Promise<HlBook> {
     this.calls.push("getBook");
@@ -103,8 +110,15 @@ class Fake implements HlPort {
     this.calls.push("getOpenOrders");
     return this.read([...this.orders]);
   }
-  getUserFills() {
+  fillsFrom: number[] = [];
+  /** Called with the requested start; a returned error rejects the read. */
+  fillsError: ((startMs: number) => Error | null) | null = null;
+  pairAtMs: Record<string, number> | null = null;
+  getUserFills(_a?: string, startMs = 0) {
     this.calls.push("getUserFills");
+    this.fillsFrom.push(startMs);
+    const err = this.fillsError?.(startMs) ?? null;
+    if (err) return Promise.reject(err);
     return this.read(this.fills);
   }
   getLedger(_a: string, startMs: number) {
@@ -124,6 +138,9 @@ class Fake implements HlPort {
       this.orders.push({ oid, cloid: o.cloid, market: "spot", pair: "HYPE/USDC", side: o.isBuy ? "buy" : "sell", price: o.price, size: o.size, placedAtMs: this.now });
       return Promise.resolve({ status: "resting", oid });
     }
+    if (this.autoFills) {
+      this.fills.push({ oid, tid: this.nextTid++, cloid: o.cloid, pair: "HYPE/USDC", side: o.isBuy ? "buy" : "sell", price: this.mid ?? o.price, size: o.size, feeUsdc: "0", timeMs: this.now });
+    }
     return Promise.resolve({ status: "filled", oid, filledSize: o.size, avgPx: o.price });
   }
   cancelOrders(orders: { assetId: number; oid: number }[]) {
@@ -137,6 +154,7 @@ class Fake implements HlPort {
   scheduleCancel(t: number | null) {
     this.calls.push("scheduleCancel");
     if (this.failSchedule) return Promise.reject(new Error("schedule down"));
+    if (this.scheduleError) return Promise.reject(this.scheduleError);
     this.scheduled.push(t);
     return Promise.resolve();
   }
@@ -465,6 +483,7 @@ describe("risk rejections (reject, never resize)", () => {
     const r = await tick(T0, active([buyRule("small", { action: { side: "buy", size: { usdc: "10" }, order: { type: "ioc" } } })]));
     expect(hl.placed).toHaveLength(0);
     expect(r.entries.find((e) => e.kind === "skip")?.detail).toContain("MIN_NOTIONAL");
+    expect(r.entries.find((e) => e.kind === "skip")?.detail).toMatch(/coins at .*use at least \d+ USDC/);
     expect(r.state.firedAt.small).toBeUndefined(); // no attempt, no cooldown
     expect(r.state.ordersToday).toBe(0);
   });
@@ -589,7 +608,6 @@ describe("triggers inside the tick", () => {
   it("candles are only fetched for price_change rules", async () => {
     await tick(T0, active());
     expect(hl.calls).not.toContain("getCandles");
-    expect(hl.calls).not.toContain("getUserFills");
   });
   it("position_pnl uses fills of this rule set only and is false when flat", async () => {
     const rule = buyRule("tp", {
@@ -660,20 +678,67 @@ describe("limit orders and ttl", () => {
   });
 });
 
+describe("state log", () => {
+  it("logs a state entry only when the state or reason changes", async () => {
+    let r = await tick(T0, null);
+    expect(r.entries.filter((e) => e.kind === "state" && e.detail === "no_rules")).toHaveLength(1);
+    for (let k = 1; k <= 3; k++) r = await tick(T0 + k * 60_000, null, r.state);
+    expect(r.entries.filter((e) => e.kind === "state")).toHaveLength(0);
+    expect(r.state.recent.filter((e) => e.kind === "state" && e.detail === "no_rules")).toHaveLength(1);
+    expect(r.state.lastStateRepeats).toBe(3);
+    // a different reason is logged again
+    hl.agents = [];
+    r = await tick(T0 + 5 * 60_000, null, r.state);
+    expect(r.entries.filter((e) => e.kind === "state").map((e) => e.detail)).toEqual(["awaiting_api_wallet: API_WALLET_NOT_APPROVED"]);
+    // and so is returning to the earlier state
+    hl.agents = [{ address: API, name: "agent-treasury valid_until", validUntilMs: null }];
+    r = await tick(T0 + 6 * 60_000, null, r.state);
+    expect(r.entries.filter((e) => e.kind === "state").map((e) => e.detail)).toEqual(["no_rules"]);
+  });
+});
+
 describe("loss stop and day rollover", () => {
   const rs = () => active([buyRule("r", { cooldown: "15m" })], { daily_loss_stop_usdc: "5" });
+  /** A rule set whose rule never fires: the first tick places nothing. */
+  const quiet = () => active([buyRule("r", { when: { type: "price", op: "lte", usdc: "1" } })], { daily_loss_stop_usdc: "5" });
+  /** A bot fill (cloid of the active rule set). */
+  const botFill = (timeMs: number, side: "buy" | "sell", price: string, size: string, feeUsdc = "0", cloid: string | null = `${cloidPrefix(HASH)}0000000000000001`): HlFill => ({
+    oid: 1,
+    cloid,
+    pair: "HYPE/USDC",
+    side,
+    price,
+    size,
+    feeUsdc,
+    timeMs,
+  });
+  /** The bot bought 1 HYPE at 40 shortly after the snapshot; the price is now `mid`. */
+  const holdOneAt = (mid: string, cash = "60", at = T0 + 1000) => {
+    hl.fills = [botFill(at, "buy", "40", "1")];
+    hl.balances = [{ coin: "USDC", total: cash, hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }];
+    hl.mid = mid;
+  };
 
   it("takes a start-of-day snapshot on the first fresh tick", async () => {
     const r = await tick(T0, rs());
-    expect(r.state.day).toEqual({ dayIndex: Math.floor(T0 / DAY_MS), startEquity: "100", snapshotAtMs: T0 });
-    expect(r.status.pnl).toEqual({ today_usdc: "0", total_usdc: "100", net_funded_usdc: "0", day_start_equity_usdc: "100" });
+    expect(r.state.day).toEqual({ dayIndex: Math.floor(T0 / DAY_MS), startEquity: "100", snapshotAtMs: T0, startPositions: {}, startBackstop: "100", balanceAtMs: T0 });
+    expect(r.status.pnl).toEqual({
+      today_usdc: "0",
+      total_usdc: "0",
+      net_funded_usdc: "0",
+      day_start_equity_usdc: "100",
+      funded_by_vault_usdc: "0",
+      external_inflow_usdc: "0",
+      external_outflow_usdc: "0",
+      fees_usdc: "0",
+      untracked_delta_usdc: "100",
+    });
   });
 
-  it("stops when equity falls by the stop amount (unrealized included), cancels everything, places nothing", async () => {
+  it("stops when the bot's position loses the stop amount (unrealized included), cancels everything, places nothing", async () => {
     let r = await tick(T0, rs());
-    hl.balances = [{ coin: "USDC", total: "50", hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }]; // equity 90 -> -10
-    hl.orders = [{ oid: 4, cloid: `${cloidPrefix(HASH)}0000000000000001`, market: "spot", pair: "HYPE/USDC", side: "buy", price: "39", size: "0.3", placedAtMs: T0 }];
-    hl.mid = "45"; // equity 95 -> loss exactly 5
+    holdOneAt("35"); // bought at 40, now 35 -> -5
+    hl.orders = [{ oid: 4, cloid: `${cloidPrefix(HASH)}0000000000000001`, market: "spot", pair: "HYPE/USDC", side: "buy", price: "34", size: "0.3", placedAtMs: T0 }];
     const before = hl.placed.length;
     r = await tick(T0 + 20 * 60_000, rs(), r.state);
     expect(r.tradingState).toBe("stopped_today");
@@ -685,44 +750,105 @@ describe("loss stop and day rollover", () => {
     expect(r.state.stoppedDayIndex).toBe(Math.floor(T0 / DAY_MS));
   });
 
+  it("fees of the bot's fills count as loss", async () => {
+    let r = await tick(T0, rs());
+    hl.fills = [botFill(T0 + 1000, "buy", "40", "1", "5")];
+    hl.balances = [{ coin: "USDC", total: "55", hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }];
+    r = await tick(T0 + 20 * 60_000, rs(), r.state);
+    expect(r.tradingState).toBe("stopped_today");
+    expect(r.status.pnl.fees_usdc).toBe("5");
+  });
+
   it("just under the stop keeps trading", async () => {
     let r = await tick(T0, rs());
-    hl.balances = [{ coin: "USDC", total: "95.01", hold: "0" }];
+    holdOneAt("35.01");
     r = await tick(T0 + 20 * 60_000, rs(), r.state);
     expect(r.tradingState).toBe("running");
   });
 
+  it("a balance drop without bot fills (activation fee, manual withdrawal) is NOT a trading loss", async () => {
+    let r = await tick(T0, rs());
+    hl.balances = [{ coin: "USDC", total: "89", hold: "0" }]; // -11, more than the hard stop of 10
+    hl.ledger = [{ timeMs: T0 + 60_000, kind: "withdraw", usdc: "10" }];
+    r = await tick(T0 + 20 * 60_000, rs(), r.state);
+    expect(r.tradingState).toBe("running");
+    expect(r.status.limits.today.loss_usdc).toBe("0");
+    expect(r.status.pnl.external_outflow_usdc).toBe("10");
+    expect(r.status.warnings.some((w) => w.includes("left the account today outside the bot"))).toBe(true);
+  });
+
+  it("fills of manual orders (no cloid or a foreign cloid) are ignored by the P&L stop and warned about", async () => {
+    let r = await tick(T0, rs());
+    hl.fills = [
+      ...hl.fills,
+      { ...botFill(T0 + 1000, "buy", "40", "1", "0", null), oid: 91, tid: 91 },
+      { ...botFill(T0 + 1000, "buy", "40", "1", "0", "0x" + "11".repeat(16)), oid: 92, tid: 92 },
+    ];
+    hl.balances = [{ coin: "USDC", total: "20", hold: "0" }, { coin: "HYPE", total: "2", hold: "0" }]; // 20 + 2*40 = 100: no value lost
+    r = await tick(T0 + 20 * 60_000, rs(), r.state);
+    expect(r.tradingState).toBe("running");
+    expect(r.status.limits.today.loss_usdc).toBe("0");
+    expect(r.status.warnings.some((w) => w.includes("2 spot fill(s) since start are not from the bot"))).toBe(true);
+  });
+
+  it("T10: a wash trade with a foreign cloid that loses value is caught by the equity backstop (EQUITY_DROP)", async () => {
+    let r = await tick(T0, quiet());
+    hl.fills = [...hl.fills, { ...botFill(T0 + 1000, "buy", "40", "1", "0", "0x" + "11".repeat(16)), oid: 91, tid: 91 }];
+    hl.balances = [{ coin: "USDC", total: "20", hold: "0" }, { coin: "HYPE", total: "2", hold: "0" }];
+    hl.mid = "10"; // 20 + 2*10 = 40: equity down 60, no flow explains it
+    r = await tick(T0 + 20 * 60_000, quiet(), r.state);
+    expect(r.tradingState).toBe("stopped_today");
+    expect(r.status.state_reason).toBe("EQUITY_DROP");
+    expect(r.state.stopReason).toBe("EQUITY_DROP");
+    // sticky for the day, with the same reason
+    hl.mid = "40";
+    hl.balances = [{ coin: "USDC", total: "100", hold: "0" }];
+    r = await tick(T0 + 40 * 60_000, quiet(), r.state);
+    expect(r.tradingState).toBe("stopped_today");
+    expect(r.status.state_reason).toBe("EQUITY_DROP");
+  });
+
   it("stays stopped for the rest of the UTC day, even after the price recovers", async () => {
     let r = await tick(T0, rs());
-    hl.balances = [{ coin: "USDC", total: "90", hold: "0" }];
+    holdOneAt("34");
     r = await tick(T0 + 60_000, rs(), r.state);
     expect(r.tradingState).toBe("stopped_today");
-    hl.balances = [{ coin: "USDC", total: "120", hold: "0" }];
+    hl.mid = "60";
     r = await tick(T0 + 11 * H, rs(), r.state);
     expect(r.tradingState).toBe("stopped_today");
     expect(hl.placed).toHaveLength(1); // only the very first order of the first tick
   });
 
   it("a top-up the same day neither triggers nor hides the stop", async () => {
-    let r = await tick(T0, rs());
+    let r = await tick(T0, quiet());
     // top-up of 20 lands, bot is flat: equity 120 -> no loss
     hl.balances = [{ coin: "USDC", total: "120", hold: "0" }];
     hl.ledger = [{ timeMs: T0 + 60_000, kind: "deposit", usdc: "20" }];
-    r = await tick(T0 + 20 * 60_000, rs(), r.state);
+    r = await tick(T0 + 20 * 60_000, quiet(), r.state);
     expect(r.tradingState).toBe("running");
     expect(r.status.limits.today.loss_usdc).toBe("0");
     expect(r.status.pnl.net_funded_usdc).toBe("20");
-    // later equity 113: it is down 7 in real terms even though 113 > 100
-    hl.balances = [{ coin: "USDC", total: "113", hold: "0" }];
-    r = await tick(T0 + 40 * 60_000, rs(), r.state);
+    expect(r.status.pnl.external_inflow_usdc).toBe("20");
+    // the bot then loses 7 on a position: stop, although equity (113 + ...) is above the start
+    holdOneAt("33", "100", T0 + 30 * 60_000);
+    r = await tick(T0 + 40 * 60_000, quiet(), r.state);
     expect(r.tradingState).toBe("stopped_today");
     expect(r.status.limits.today.loss_usdc).toBe("7");
+  });
+
+  it("a confirmed vault top-up is reported as funded by the vault", async () => {
+    hl.ledger = [{ timeMs: T0 + 60_000, kind: "deposit", usdc: "19.97" }];
+    const state = (await tick(T0, rs())).state;
+    hl.now = T0 + 120_000;
+    const r = await runTick({ hl, vault, config: cfg, vaultTopups: () => [{ atMs: T0 + 30_000, amountUsdc: "20" }] }, { nowMs: T0 + 120_000, rules: rs(), state });
+    expect(r.status.pnl.funded_by_vault_usdc).toBe("19.97");
+    expect(r.status.pnl.external_inflow_usdc).toBe("0");
   });
 
   it("the stop is the tighter of rule and hard limit", async () => {
     const loose = active([buyRule("r")], { daily_loss_stop_usdc: "500" });
     let r = await tick(T0, loose);
-    hl.balances = [{ coin: "USDC", total: "89", hold: "0" }]; // -11 >= hard 10
+    holdOneAt("29"); // -11 >= hard 10
     r = await tick(T0 + 60_000, loose, r.state);
     expect(r.tradingState).toBe("stopped_today");
   });
@@ -730,7 +856,9 @@ describe("loss stop and day rollover", () => {
   it("UTC rollover clears stopped_today and resets the counters and the snapshot", async () => {
     const lateDay = Date.UTC(2026, 10, 5, 23, 50, 0);
     let r = await tick(lateDay - H, rs());
-    hl.balances = [{ coin: "USDC", total: "90", hold: "0" }];
+    hl.fills = [botFill(lateDay - H + 1000, "buy", "40", "1")];
+    hl.balances = [{ coin: "USDC", total: "60", hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }];
+    hl.mid = "34";
     r = await tick(lateDay, rs(), r.state);
     expect(r.tradingState).toBe("stopped_today");
     const midnight = Date.UTC(2026, 10, 6, 0, 0, 0);
@@ -739,7 +867,14 @@ describe("loss stop and day rollover", () => {
     r = await tick(midnight, rs(), r.state);
     expect(r.tradingState).toBe("running");
     expect(r.state.stoppedDayIndex).toBeNull();
-    expect(r.state.day).toEqual({ dayIndex: Math.floor(midnight / DAY_MS), startEquity: "90", snapshotAtMs: midnight });
+    expect(r.state.day).toEqual({
+      dayIndex: Math.floor(midnight / DAY_MS),
+      startEquity: "94",
+      snapshotAtMs: midnight,
+      startPositions: { "HYPE/USDC": { size: "1", mid: "34" } },
+      startBackstop: "94",
+      balanceAtMs: midnight,
+    });
     expect(r.state.ordersToday).toBe(1);
     expect(r.status.pnl.today_usdc).toBe("0");
   });
@@ -766,5 +901,393 @@ describe("log", () => {
     expect(e).toMatchObject({ rule_id: "dip", oid: 1 });
     expect(e?.cloid).toBe(hl.placed[0]?.cloid);
     expect(r.state.recent).toEqual(expect.arrayContaining(r.entries));
+  });
+});
+
+
+describe("fills window, unpriced coins and attribution (review 2026-11-03)", () => {
+  const rs = () => active([buyRule("r", { cooldown: "15m" })], { daily_loss_stop_usdc: "5" });
+  const quiet = () => active([buyRule("r", { when: { type: "price", op: "lte", usdc: "1" } })], { daily_loss_stop_usdc: "5" });
+  const holding = (): HlSpotBalance[] => [{ coin: "USDC", total: "60", hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }];
+  const botFill = (timeMs: number, extra: Partial<HlFill> = {}): HlFill => ({
+    oid: 1,
+    tid: 500 + timeMs,
+    cloid: `${cloidPrefix(HASH)}0000000000000001`,
+    pair: "HYPE/USDC",
+    side: "buy",
+    price: "40",
+    size: "1",
+    feeUsdc: "0",
+    timeMs,
+    ...extra,
+  });
+
+  it("fails closed with FILLS_TRUNCATED and does not move the cursor", async () => {
+    hl.fillsError = () => new FillsTruncatedError("10000 rows");
+    const r = await tick(T0, rs());
+    expect(r.tradingState).toBe("error");
+    expect(r.status.state_reason).toBe("FILLS_TRUNCATED");
+    expect(hl.placed).toHaveLength(0);
+    expect(r.state.fills).toBeNull();
+  });
+
+  it("when the long history is truncated, falls back to today's window and marks the total partial", async () => {
+    hl.fillsError = (start) => (start < T0 ? new FillsTruncatedError("history") : null);
+    const r = await tick(T0, rs());
+    expect(r.tradingState).toBe("running");
+    expect(r.state.fills?.totalComplete).toBe(false);
+    expect(r.status.warnings.some((w) => w.includes("pnl.total is partial"))).toBe(true);
+  });
+
+  it("reads only past the persisted cursor after the first tick (no re-reading of history)", async () => {
+    let r = await tick(T0, quiet());
+    hl.fills = [botFill(T0 + 5_000)];
+    r = await tick(T0 + 60_000, quiet(), r.state);
+    r = await tick(T0 + 120_000, quiet(), r.state);
+    expect(hl.fillsFrom[0]).toBeLessThan(T0);
+    expect(hl.fillsFrom[1]).toBe(T0 - 10 * DAY_MS - 120_000); // cursor stays at the initial window start until a fill moves it
+    expect(hl.fillsFrom[2]).toBe(T0 + 5_000 - 120_000); // then the cursor is the latest FILL time (HL clock), not the local now
+    expect(r.state.fills?.total["HYPE/USDC"]?.dq).toBe("1");
+  });
+
+  it("a held coin without a mid: no orders (NO_MID_FOR_POSITION), loss valued at 0, not at the start mid", async () => {
+    hl.balances = holding();
+    let r = await tick(T0, quiet());
+    expect(r.state.day?.startPositions).toEqual({ "HYPE/USDC": { size: "1", mid: "40" } });
+    hl.mid = undefined;
+    r = await tick(T0 + 60_000, rs(), r.state);
+    expect(r.tradingState).toBe("error");
+    expect(r.status.state_reason).toBe("NO_MID_FOR_POSITION");
+    expect(hl.placed).toHaveLength(0);
+    expect(r.status.limits.today.loss_usdc).toBe("40");
+  });
+
+  it("freshness is checked per pair: a stale mid of a held pair blocks trading although the snapshot is fresh", async () => {
+    hl.balances = holding();
+    let r = await tick(T0, quiet());
+    hl.pairAtMs = { "HYPE/USDC": T0 - H };
+    r = await tick(T0 + 60_000, rs(), r.state);
+    expect(r.status.state_reason).toBe("NO_MID_FOR_POSITION");
+    expect(hl.placed).toHaveLength(0);
+  });
+
+  it("does not roll the UTC day while a held coin has no mid (the snapshot would drop it)", async () => {
+    hl.balances = holding();
+    let r = await tick(T0, quiet());
+    const next = Date.UTC(2026, 10, 6, 0, 5, 0);
+    hl.mid = undefined;
+    r = await tick(next, rs(), r.state);
+    expect(r.state.day?.dayIndex).toBe(Math.floor(T0 / DAY_MS));
+    expect(r.status.state_reason).toBe("NO_DAY_SNAPSHOT");
+    expect(hl.placed).toHaveLength(0);
+    hl.mid = "40";
+    r = await tick(next + 60_000, quiet(), r.state);
+    expect(r.state.day?.dayIndex).toBe(Math.floor(next / DAY_MS));
+    expect(r.state.day?.startPositions).toEqual({ "HYPE/USDC": { size: "1", mid: "40" } });
+  });
+
+  it("matches fills on the oid of the bot's own order when the cloid is missing", async () => {
+    let r = await tick(T0, rs());
+    const oid = r.state.botOids[0];
+    expect(oid).toBeDefined();
+    hl.fills = [botFill(T0 + 1000, { cloid: null, oid: oid ?? 0, size: "0.29", price: "40" })];
+    r = await tick(T0 + 20 * 60_000, rs(), r.state);
+    expect(r.tradingState).toBe("running");
+    expect(r.state.fills?.botFillsToday).toBe(1);
+  });
+
+  it("alarms and stops placing when the bot's filled order leaves no attributable fill", async () => {
+    hl.autoFills = false;
+    let r = await tick(T0, rs());
+    expect(hl.placed).toHaveLength(1);
+    expect(r.state.filledOrdersToday).toBe(1);
+    r = await tick(T0 + 20 * 60_000, rs(), r.state);
+    expect(r.tradingState).toBe("error");
+    expect(r.status.state_reason).toBe("FILLS_NOT_ATTRIBUTED");
+    expect(hl.placed).toHaveLength(1);
+  });
+
+  it("a day snapshot from before position tracking plus a held coin: NO_DAY_SNAPSHOT until the next rollover", async () => {
+    let r = await tick(T0, quiet());
+    const legacy: EngineState = { ...r.state, day: { dayIndex: r.state.day?.dayIndex ?? 0, startEquity: "100", snapshotAtMs: T0 } };
+    hl.balances = holding();
+    r = await tick(T0 + 60_000, rs(), legacy);
+    expect(r.status.state_reason).toBe("NO_DAY_SNAPSHOT");
+    expect(hl.placed).toHaveLength(0);
+    // no coin held: the legacy snapshot is harmless
+    hl.balances = [{ coin: "USDC", total: "100", hold: "0" }];
+    r = await tick(T0 + 120_000, quiet(), legacy);
+    expect(r.tradingState).toBe("running");
+    // next UTC day: a fresh snapshot with startPositions
+    hl.balances = holding();
+    r = await tick(Date.UTC(2026, 10, 6, 0, 1, 0), rs(), legacy);
+    expect(r.state.day?.startPositions).toEqual({ "HYPE/USDC": { size: "1", mid: "40" } });
+  });
+
+  it("seeds botPrefixes from rulesHash and resting-order cloids on upgrade", async () => {
+    const oldHash = "cd".repeat(32);
+    const third = "0x" + "ee".repeat(8);
+    const legacyState: EngineState = {
+      ...initialEngineState(),
+      rulesHash: oldHash,
+      botPrefixes: [],
+      orders: { [`${third}0000000000000009`]: { ruleId: "x", expiresAtMs: null } },
+    };
+    const r = await tick(T0, quiet(), legacyState);
+    expect(r.state.botPrefixes).toEqual(expect.arrayContaining([cloidPrefix(oldHash), third, cloidPrefix(HASH)]));
+  });
+
+  it("warns when more than 64 prefixes were remembered and the oldest were dropped", async () => {
+    const many = Array.from({ length: 64 }, (_, i) => "0x" + i.toString(16).padStart(16, "0"));
+    const r = await tick(T0, quiet(), { ...initialEngineState(), botPrefixes: many });
+    expect(r.state.botPrefixes).toHaveLength(64);
+    expect(r.state.prefixesDropped).toBe(1);
+    expect(r.status.warnings.some((w) => w.includes("old rule-set prefix"))).toBe(true);
+  });
+
+  it("the state log repeats its entry on a new UTC day and /status exposes the repeat count", async () => {
+    hl.perp = { positions: [], openPerpOrders: 0, accountValueUsdc: "0" };
+    hl.agents = []; // awaiting_api_wallet
+    let r = await tick(T0, quiet());
+    r = await tick(T0 + 60_000, quiet(), r.state);
+    r = await tick(T0 + 120_000, quiet(), r.state);
+    expect(r.status.state_repeats).toBe(2);
+    const count = (st: EngineState) => st.recent.filter((e) => e.kind === "state" && e.detail.startsWith("awaiting_api_wallet")).length;
+    expect(count(r.state)).toBe(1);
+    r = await tick(Date.UTC(2026, 10, 6, 0, 1, 0), quiet(), r.state);
+    expect(count(r.state)).toBe(2);
+  });
+
+  it("excuses the one-time 1 USDC activation fee on the first day only", async () => {
+    // funded 1000, fee 1: equity 999. The stop is 5, so make it tight: stop 1.
+    hl.balances = [{ coin: "USDC", total: "999", hold: "0" }];
+    hl.ledger = [{ timeMs: T0 - 1000, kind: "deposit", usdc: "1000" }];
+    const tight = active([buyRule("r", { when: { type: "price", op: "lte", usdc: "1" } })], { daily_loss_stop_usdc: "1" });
+    const r = await runTick({ hl, vault, config: { ...cfg, fundedSinceMs: T0 - 2000 } }, { nowMs: T0, rules: tight, state: initialEngineState() });
+    expect(r.tradingState).toBe("running");
+  });
+});
+
+describe("dead-man volume gate (HL refuses scheduleCancel under $1M volume), 2026-11-03", () => {
+  const GATE = new Error("Cannot set scheduled cancel time until enough volume traded. Required: $1000000. Traded: $0.");
+  const limitRule = (): Rule => buyRule("lim", { action: { side: "buy", size: { usdc: "12" }, order: { type: "limit", offset_pct: "0.5", ttl: "1h" } } });
+
+  it("keeps trading with IOC orders only and reports dead_man.available=false", async () => {
+    hl.scheduleError = GATE;
+    const r = await tick(T0, active());
+    expect(r.tradingState).toBe("running");
+    expect(hl.placed).toHaveLength(1);
+    expect(hl.placed[0]?.tif).toBe("Ioc");
+    expect(r.status.dead_man).toEqual({ cancel_at_ms: null, available: false, reason: "DEADMAN_VOLUME_GATED" });
+    expect(r.status.warnings.some((w) => w.startsWith("DEADMAN_VOLUME_GATED"))).toBe(true);
+    expect(r.status.warnings).not.toContain("scheduleCancel failed");
+    expect(r.state.deadManGatedAtMs).toBe(T0);
+  });
+
+  it("a rule that would rest is rejected by the guard with LIMIT_NEEDS_DEADMAN", async () => {
+    hl.scheduleError = GATE;
+    const r = await tick(T0, active([limitRule()]));
+    expect(hl.placed).toHaveLength(0);
+    expect(r.entries.some((e) => e.kind === "skip" && e.detail.startsWith("LIMIT_NEEDS_DEADMAN"))).toBe(true);
+  });
+
+  it("cancels bot orders that already rest", async () => {
+    hl.scheduleError = GATE;
+    const cloid = `${cloidPrefix(HASH)}0000000000000007`;
+    hl.orders = [{ oid: 9, cloid, market: "spot", pair: "HYPE/USDC", side: "buy", price: "39", size: "0.3", placedAtMs: T0 - 1000 }];
+    await tick(T0, active([buyRule("dip", { when: { type: "price", op: "lte", usdc: "1" } })]), { ...initialEngineState(), orders: { [cloid]: { ruleId: "dip", expiresAtMs: null } } });
+    expect(hl.cancelled).toEqual([{ assetId: 10107, oid: 9 }]);
+  });
+
+  it("re-tries scheduleCancel at most once per hour and switches back when HL accepts it", async () => {
+    hl.scheduleError = GATE;
+    let r = await tick(T0, active());
+    const tried = () => hl.calls.filter((c) => c === "scheduleCancel").length;
+    expect(tried()).toBe(1);
+    r = await tick(T0 + 60_000, active(), r.state);
+    r = await tick(T0 + 30 * 60_000, active(), r.state);
+    expect(tried()).toBe(1);
+    r = await tick(T0 + H, active(), r.state); // still gated: one more attempt, timer restarts
+    expect(tried()).toBe(2);
+    expect(r.state.deadManGatedAtMs).toBe(T0 + H);
+    r = await tick(T0 + H + 60_000, active(), r.state);
+    expect(tried()).toBe(2);
+    hl.scheduleError = null;
+    r = await tick(T0 + 2 * H, active(), r.state);
+    expect(tried()).toBe(3);
+    expect(r.state.deadManGatedAtMs).toBeNull();
+    expect(r.status.dead_man.available).toBe(true);
+    expect(r.status.dead_man.cancel_at_ms).toBe(T0 + 2 * H + 180_000);
+  });
+
+  it("with the switch working a limit rule rests as before", async () => {
+    const r = await tick(T0, active([limitRule()]));
+    expect(hl.placed[0]?.tif).toBe("Gtc");
+    expect(r.status.dead_man.available).toBe(true);
+  });
+
+  it("any other scheduleCancel error still blocks trading", async () => {
+    hl.scheduleError = new Error("Too many requests");
+    const r = await tick(T0, active());
+    expect(r.status.state_reason).toBe("SCHEDULE_CANCEL_FAILED");
+    expect(hl.placed).toHaveLength(0);
+    expect(r.state.deadManGatedAtMs).toBeNull();
+  });
+});
+
+describe("re-review fixes 2026-11-03 (loss stop only errs toward stopping)", () => {
+  const rs = () => active([buyRule("r", { cooldown: "15m" })], { daily_loss_stop_usdc: "5" });
+  const quiet = () => active([buyRule("r", { when: { type: "price", op: "lte", usdc: "1" } })], { daily_loss_stop_usdc: "5" });
+  const botFill = (timeMs: number, extra: Partial<HlFill> = {}): HlFill => ({
+    oid: 1,
+    tid: 500 + timeMs,
+    cloid: `${cloidPrefix(HASH)}0000000000000001`,
+    pair: "HYPE/USDC",
+    side: "buy",
+    price: "40",
+    size: "1",
+    feeUsdc: "0",
+    timeMs,
+    ...extra,
+  });
+
+  describe("B1 equity backstop ignores coins outside the allowed pairs", () => {
+    it("a foreign buy of a junk coin at an inflated mid still shows as EQUITY_DROP", async () => {
+      let r = await tick(T0, quiet());
+      expect(r.state.day?.startBackstop).toBe("100");
+      // 20 USDC spent on 1000 JUNK that HL prices at 0.05 -> all-coin equity 130 (up), backstop equity 80
+      hl.balances = [{ coin: "USDC", total: "80", hold: "0" }, { coin: "JUNK", total: "1000", hold: "0" }];
+      hl.extraMids = { "JUNK/USDC": "0.05" };
+      r = await tick(T0 + 60_000, quiet(), r.state);
+      expect(r.tradingState).toBe("stopped_today");
+      expect(r.status.state_reason).toBe("EQUITY_DROP");
+      expect(r.status.balances.equity_usdc).toBe("130");
+      expect(hl.placed).toHaveLength(0);
+    });
+    it("the same junk coin received as a gift (no USDC change) neither stops nor hides anything", async () => {
+      let r = await tick(T0, quiet());
+      hl.balances = [{ coin: "USDC", total: "100", hold: "0" }, { coin: "JUNK", total: "1000", hold: "0" }];
+      hl.extraMids = { "JUNK/USDC": "0.05" };
+      r = await tick(T0 + 60_000, quiet(), r.state);
+      expect(r.tradingState).toBe("running");
+    });
+    it("a pump of a coin held at the snapshot cannot hide a loss elsewhere (gains on the start holding are clipped)", async () => {
+      hl.balances = [{ coin: "USDC", total: "60", hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }];
+      let r = await tick(T0, quiet());
+      expect(r.state.day?.startBackstop).toBe("100");
+      // HYPE 40 -> 50 (+10) while 6 USDC vanished into a junk buy: all-coin equity 104 would look fine
+      hl.mid = "50";
+      hl.balances = [{ coin: "USDC", total: "54", hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }];
+      r = await tick(T0 + 60_000, quiet(), r.state);
+      expect(r.status.balances.equity_usdc).toBe("104");
+      expect(r.status.state_reason).toBe("EQUITY_DROP");
+    });
+    it("a legacy snapshot without startBackstop falls back to the all-coin start equity", async () => {
+      let r = await tick(T0, quiet());
+      const legacy: EngineState = { ...r.state, day: { dayIndex: r.state.day?.dayIndex ?? 0, startEquity: "100", snapshotAtMs: T0, startPositions: {} } };
+      hl.balances = [{ coin: "USDC", total: "90", hold: "0" }];
+      r = await tick(T0 + 60_000, quiet(), legacy);
+      expect(r.status.state_reason).toBe("EQUITY_DROP");
+    });
+  });
+
+  describe("H1 the fill cursor follows HL's clock", () => {
+    it("a late-indexed fill older than the local read time is still picked up", async () => {
+      let r = await tick(T0, quiet());
+      r = await tick(T0 + 30 * 60_000, quiet(), r.state); // half an hour with no fill: the cursor must not run to the local now
+      hl.fills = [botFill(T0 + 10_000)];
+      r = await tick(T0 + 31 * 60_000, quiet(), r.state);
+      expect(r.state.fills?.total["HYPE/USDC"]?.dq).toBe("1");
+      expect(r.state.fills?.cursorMs).toBe(T0 + 10_000);
+    });
+    it("warns when fill timestamps run ahead of the local clock", async () => {
+      hl.fills = [botFill(T0 + 10 * 60_000)];
+      const r = await tick(T0, quiet());
+      expect(r.status.warnings.some((w) => w.includes("ahead of the local clock"))).toBe(true);
+      expect(r.state.fills?.cursorMs).toBe(T0 + 10 * 60_000);
+    });
+  });
+
+  describe("H4 position_pnl cost basis comes from the incremental tracker", () => {
+    const tp = (): Rule =>
+      buyRule("tp", { when: { type: "position_pnl", op: "gte", pct: "10" }, action: { side: "sell", size: { position_pct: "100" }, order: { type: "ioc" } } });
+    const held = (): HlSpotBalance[] => [{ coin: "USDC", total: "10", hold: "0" }, { coin: "HYPE", total: "0.5", hold: "0" }];
+
+    it("does not re-read the fill history for the rule (one fills read per tick)", async () => {
+      hl.balances = held();
+      hl.fills = [botFill(T0 - 1000, { price: "30", size: "0.5" })];
+      await tick(T0, active([tp()]));
+      expect(hl.calls.filter((c) => c === "getUserFills")).toHaveLength(1);
+      expect(hl.placed).toHaveLength(1); // 40 vs 30 = +33%
+    });
+    it("after a long pause the truncated read restarts from today's window, flagged partial, instead of failing for ever", async () => {
+      hl.balances = held();
+      let r = await tick(T0, quiet());
+      hl.fillsError = (start) => (start < T0 ? new FillsTruncatedError("too many rows since the old cursor") : null);
+      hl.fills = [botFill(T0 + 1000, { price: "30", size: "0.5" })];
+      r = await tick(T0 + 60_000, active([tp()]), r.state);
+      expect(r.tradingState).toBe("running");
+      expect(r.state.fills?.totalComplete).toBe(false);
+      expect(r.state.fills?.completeFromMs).toBe(T0);
+      expect(r.status.warnings.some((w) => w.includes("fill history gap"))).toBe(true);
+      // the rule set confirmed (T0 - 1h) before the gap: position_pnl is skipped, not guessed
+      expect(hl.placed).toHaveLength(0);
+      expect(r.entries.some((e) => e.kind === "skip" && e.detail.startsWith("COST_BASIS_PARTIAL"))).toBe(true);
+      // a rule set confirmed after the gap has a complete basis again
+      const hash2 = "cd".repeat(32);
+      const later: ActiveRules = { ...active([tp()], {}, hash2), confirmedAtMs: T0 + 30_000 };
+      hl.fills = [botFill(T0 + 40_000, { price: "30", size: "0.5", cloid: `${cloidPrefix(hash2)}0000000000000001`, oid: 2 })];
+      await tick(T0 + 120_000, later, r.state);
+      expect(hl.placed).toHaveLength(1);
+    });
+    it("the fallback itself still fails closed when even today's window is truncated", async () => {
+      let r = await tick(T0, quiet());
+      hl.fillsError = () => new FillsTruncatedError("everything");
+      r = await tick(T0 + 60_000, quiet(), r.state);
+      expect(r.status.state_reason).toBe("FILLS_TRUNCATED");
+    });
+  });
+
+  describe("H5 every filled bot order needs an attributed fill", () => {
+    it("blocks when one of two filled orders has no fill although another does", async () => {
+      let r = await tick(T0, rs());
+      expect(r.state.filledOidsToday).toEqual([1]);
+      hl.autoFills = false; // order 2 is reported filled but leaves no fill row
+      r = await tick(T0 + 20 * 60_000, rs(), r.state);
+      expect(hl.placed).toHaveLength(2);
+      expect(r.state.filledOidsToday).toEqual([1, 2]);
+      r = await tick(T0 + 40 * 60_000, rs(), r.state);
+      expect(r.tradingState).toBe("error");
+      expect(r.status.state_reason).toBe("FILLS_NOT_ATTRIBUTED");
+      expect(r.status.state_detail).toContain("2");
+      expect(hl.placed).toHaveLength(2);
+    });
+    it("trades on while every filled order has a fill, and the list resets with the UTC day", async () => {
+      let r = await tick(T0, rs());
+      r = await tick(T0 + 20 * 60_000, rs(), r.state);
+      expect(r.state.filledOidsToday).toEqual([1, 2]);
+      expect(hl.placed).toHaveLength(2);
+      r = await tick(Date.UTC(2026, 10, 6, 0, 1, 0), quiet(), r.state);
+      expect(r.state.filledOidsToday).toEqual([]);
+    });
+  });
+
+  describe("snapshot stamps", () => {
+    it("balanceAtMs is read from the injected clock right after the HL reads", async () => {
+      hl.now = T0;
+      const r = await runTick({ hl, vault, config: cfg, clock: () => T0 + 4_000 }, { nowMs: T0, rules: quiet(), state: initialEngineState() });
+      expect(r.state.day).toMatchObject({ snapshotAtMs: T0, balanceAtMs: T0 + 4_000 });
+    });
+    it("a withdrawal between the tick start and the balance read is not subtracted again (the drop stays visible)", async () => {
+      hl.now = T0;
+      // the 8 USDC left at T0+1s; the snapshot balance (read at ~T0+2s) already lacks it
+      hl.balances = [{ coin: "USDC", total: "92", hold: "0" }];
+      hl.ledger = [{ timeMs: T0 - 5000, kind: "deposit", usdc: "1000" }, { timeMs: T0 + 1_000, kind: "withdraw", usdc: "8" }];
+      const first = await runTick({ hl, vault, config: cfg, clock: () => T0 + 2_000 }, { nowMs: T0, rules: quiet(), state: initialEngineState() });
+      hl.now = T0 + 60_000;
+      hl.balances = [{ coin: "USDC", total: "86", hold: "0" }]; // a real 6 USDC loss afterwards
+      const r = await runTick({ hl, vault, config: cfg, clock: () => T0 + 60_000 }, { nowMs: T0 + 60_000, rules: quiet(), state: first.state });
+      expect(r.status.state_reason).toBe("EQUITY_DROP");
+    });
   });
 });

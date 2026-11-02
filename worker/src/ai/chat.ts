@@ -33,9 +33,9 @@ export interface ChatDeps {
 const MAX_TOOL_CALLS_PER_ROUND = 8;
 const MAX_TOOL_RESULT_CHARS = 12_000;
 
-function errorMessage(e: unknown): string {
-  if (e instanceof ModelError) return e.message;
-  return "Something went wrong while talking to the vault or the AI provider. Please try again.";
+function errorEvent(e: unknown): ChatEvent {
+  if (e instanceof ModelError) return { type: "error", message: e.message, code: e.code };
+  return { type: "error", message: "Something went wrong while talking to the vault or the AI provider. Please try again.", code: "AI_ERROR" };
 }
 
 export async function* runChat(deps: ChatDeps, messages: ChatMessage[], ownerAccount: string, signal: AbortSignal): AsyncGenerator<ChatEvent> {
@@ -111,9 +111,9 @@ export async function* runChat(deps: ChatDeps, messages: ChatMessage[], ownerAcc
     yield { type: "done" };
   } catch (e) {
     if (signal.aborted) {
-      yield { type: "error", message: "The request timed out or was cancelled." };
+      yield { type: "error", message: "The request timed out or was cancelled.", code: "AI_TIMEOUT" };
       return;
     }
-    yield { type: "error", message: errorMessage(e) };
+    yield errorEvent(e);
   }
 }
