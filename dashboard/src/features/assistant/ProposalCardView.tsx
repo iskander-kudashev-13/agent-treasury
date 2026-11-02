@@ -165,6 +165,11 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
           {signed ? tr("as.rulesActive") : tr("kit.propDraft")}
         </span>
       </header>
+      {p.bot && (
+        <p className="m-0 text-xs text-ink-muted">
+          {tr("as.rulesForBot")} <strong className="font-semibold text-ink">{p.bot.is_new ? tr("as.rulesNewStrategy", { name: p.bot.name }) : p.bot.name}</strong>
+        </p>
+      )}
       <RulesView rules={p.rules} hash={localHash ?? undefined} {...(live ? { mids: midsOf(live) } : {})} />
       <p className="m-0 text-xs text-ink-subtle">{tr("as.rulesShown")}</p>
       {mismatch && <Callout accent="danger">{tr("as.rulesMismatch")}</Callout>}

@@ -31,3 +31,22 @@ export function hexA(color: string, alpha: number): string {
   const n = parseInt(m[1]!, 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
+
+/** Close prices as a line (same ordering rules as the candles). */
+export function lineSeries(candles: readonly Candle[]): LinePoint[] {
+  return candleSeries(candles).map((c) => ({ time: c.time, value: c.close }));
+}
+
+/**
+ * Decimals for the price axis: enough that the visible range shows a few distinct steps (a cheap junk coin moving by a
+ * thousandth needs 4-5 decimals, a 2000-dollar coin needs 2), never fewer than 2 nor more than 8.
+ */
+export function pricePrecision(values: readonly number[]): number {
+  const v = values.filter((x) => Number.isFinite(x));
+  if (v.length === 0) return 2;
+  const lo = Math.min(...v);
+  const hi = Math.max(...v);
+  const span = hi - lo > 0 ? hi - lo : Math.abs(hi) * 0.01;
+  if (!(span > 0)) return 2;
+  return Math.min(8, Math.max(2, Math.ceil(-Math.log10(span / 20))));
+}

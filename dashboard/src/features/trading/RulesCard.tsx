@@ -22,7 +22,7 @@ export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn
           <p className="m-0 text-sm text-ink-secondary">{t("trading.rules.none")}</p>
           {AI_ENABLED ? (
             <div>
-              <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={() => openWith(t("trading.rules.prefillNew", { pair }))}>
+              <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={() => openWith(t("trading.rules.prefillNew", { pair }), "new")}>
                 {t("trading.rules.describeBtn")}
               </Button>
             </div>

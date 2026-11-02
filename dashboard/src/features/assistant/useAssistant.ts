@@ -1,10 +1,11 @@
 import { t } from "@/i18n";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AssistantHttpError, clearSession, loadSession, signInWithWallet, streamChat, type AiSession, type ChatEvent } from "@/lib/assistantClient";
 import { VAULT_ID } from "@/lib/config";
 import type { PlannedCall } from "@/lib/calls";
 import { proposalToCall } from "@/lib/proposals";
 import { useNow } from "@/lib/useNow";
+import { useAssistantPanel } from "@/features/layout/AssistantContext";
 import { useWallet } from "@/features/wallet/WalletProvider";
 import { buildHistory, cardId, isProposalItem, isTradingRulesItem, type ChatItem } from "./model";
 
@@ -20,6 +21,11 @@ const errText = (e: unknown): string => (e instanceof Error ? e.message : String
 export function useAssistant() {
   const { accountId, signMessage } = useWallet();
   const now = useNow(60_000);
+  const { tradingBot } = useAssistantPanel();
+  const botRef = useRef(tradingBot);
+  useEffect(() => {
+    botRef.current = tradingBot;
+  });
   const [items, setItems] = useState<ChatItem[]>([]);
   const itemsRef = useRef<ChatItem[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -126,7 +132,7 @@ export function useAssistant() {
       try {
         for (let attempt = 0; ; attempt++) {
           try {
-            const body = { conversation_id: conversation.current, messages: buildHistory(itemsRef.current), vault: VAULT_ID, owner_account: accountId };
+            const body = { conversation_id: conversation.current, messages: buildHistory(itemsRef.current), vault: VAULT_ID, owner_account: accountId, ...(botRef.current ? { trading_bot: botRef.current } : {}) };
             for await (const ev of streamChat(token, body, ac.signal)) apply(ev, myTurn);
             break;
           } catch (e) {

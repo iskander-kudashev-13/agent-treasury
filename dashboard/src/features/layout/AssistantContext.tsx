@@ -25,7 +25,9 @@ interface AssistantCtx {
   /** The chat input; the panel attaches it, `/` focuses it while the panel is open. */
   inputRef: RefObject<HTMLInputElement | null>;
   /** Open the panel with the input pre-filled (e.g. "Add a scheduled payment: "). */
-  openWith: (text: string) => void;
+  openWith: (text: string, tradingBot?: string) => void;
+  /** Trading agent the next chat is about: a bot id, "new" for a new strategy, or null (ADR-0006 §9). Sent as `trading_bot`. */
+  tradingBot: string | null;
   /** Pending prefill text, consumed by the panel. */
   prefill: string | null;
   clearPrefill: () => void;
@@ -37,15 +39,21 @@ const Ctx = createContext<AssistantCtx | null>(null);
 export function AssistantProvider({ children }: { children: ReactNode }) {
   const [open, setOpenState] = useState(read);
   const [prefill, setPrefill] = useState<string | null>(null);
+  const [tradingBot, setTradingBot] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const setOpen = useCallback((v: boolean) => {
     setOpenState(v);
     write(v);
   }, []);
-  const toggle = useCallback(() => setOpen(!open), [open, setOpen]);
+  // Opening or closing the panel by hand drops the bot target, so rules can never go to a bot the owner didn't pick now.
+  const toggle = useCallback(() => {
+    setTradingBot(null);
+    setOpen(!open);
+  }, [open, setOpen]);
   const openWith = useCallback(
-    (text: string) => {
+    (text: string, bot?: string) => {
+      setTradingBot(bot ?? null);
       setPrefill(text);
       setOpen(true);
     },
@@ -66,8 +74,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [open]);
 
   const value = useMemo(
-    () => ({ open, setOpen, toggle, inputRef, openWith, prefill, clearPrefill: () => setPrefill(null) }),
-    [open, setOpen, toggle, openWith, prefill],
+    () => ({ open, setOpen, toggle, inputRef, openWith, tradingBot, prefill, clearPrefill: () => setPrefill(null) }),
+    [open, setOpen, toggle, openWith, tradingBot, prefill],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

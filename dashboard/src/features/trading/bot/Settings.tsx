@@ -19,14 +19,15 @@ export function Settings({ detail, status, signedIn, signingIn, signIn, error }:
         title={t("trading.bot.rulesTitle")}
         actions={
           AI_ENABLED ? (
-            <Button size="sm" variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={() => openWith(t("trading.bot.prefillChange", { name: detail.bot.name }))}>
+            <Button size="sm" variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={() => openWith(t("trading.bot.prefillChange", { name: detail.bot.name }), detail.bot.id)}>
               {t("trading.bot.changeRules")}
             </Button>
           ) : undefined
         }
       />
+      {!detail.rules && !signedIn && <p className="m-0 text-sm text-ink-muted">{t("trading.bot.rulesLocked")}</p>}
       <RulesBody status={status} rules={detail.rules} verified signedIn={signedIn} signingIn={signingIn} signIn={signIn} error={error} log={[]} />
-      {(own || acc) && (
+      {(own || acc) && (detail.rules || signedIn) && (
         <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm text-ink-secondary">
           {own && <li>{t("trading.bot.limitsBot", { position: fmtMoney(own.max_position_usdc), order: fmtMoney(own.max_order_usdc), loss: fmtMoney(own.daily_loss_stop_usdc), orders: own.max_orders_per_day })}</li>}
           {acc && <li className="text-ink-muted">{t("trading.bot.limitsAccount", { position: fmtMoney(acc.max_position_usdc), order: fmtMoney(acc.max_order_usdc), loss: fmtMoney(acc.daily_loss_stop_usdc), orders: acc.max_orders_per_day })}</li>}

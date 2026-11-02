@@ -262,6 +262,8 @@ export interface TradingRulesProposal {
   /** The hash the worker claims. The card recomputes it and refuses to confirm on mismatch. */
   hash: string;
   validation: { ok: boolean; errors: string[]; warnings: string[] };
+  /** ADR-0006: the agent the rules are for. Absent on older workers. */
+  bot: { id: string; name: string; is_new: boolean } | null;
 }
 
 /** `{ id, type: "TradingRules", title, summary, rules, hash, validation, confirm }` -> typed proposal, or null when malformed. */
@@ -275,7 +277,9 @@ export function parseTradingRulesProposal(raw: unknown): TradingRulesProposal | 
   if (typeof v.ok !== "boolean") return null;
   const strs = (x: unknown): string[] => arr(x, 20).flatMap((e) => (typeof e === "string" ? [e.slice(0, 300)] : []));
   const errors = strs(v.errors);
-  return { id: raw.id, title: str(raw.title, "", 120), summary: str(raw.summary, "", 2000), rules: rules.rules, hash: raw.hash, validation: { ok: v.ok && errors.length === 0, errors, warnings: strs(v.warnings) } };
+  const b = obj(raw.bot);
+  const bot = typeof b.id === "string" && b.id !== "" ? { id: b.id.slice(0, 64), name: str(b.name, b.id, 80), is_new: b.is_new === true } : null;
+  return { id: raw.id, title: str(raw.title, "", 120), summary: str(raw.summary, "", 2000), rules: rules.rules, hash: raw.hash, validation: { ok: v.ok && errors.length === 0, errors, warnings: strs(v.warnings) }, bot };
 }
 
 /* ───────────── HTTP ───────────── */

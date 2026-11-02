@@ -332,6 +332,8 @@ export interface ChatRequest {
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   vault: string;
   owner_account: string;
+  /** ADR-0006 D9: the trading agent this chat targets (bot id, or "new"). Older workers ignore it. */
+  trading_bot?: string;
 }
 
 /** Streams typed events. Throws AssistantHttpError on non-2xx (401 = sign in again). Abort with the signal. */

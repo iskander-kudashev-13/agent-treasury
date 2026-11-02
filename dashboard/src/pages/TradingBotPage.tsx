@@ -1,10 +1,12 @@
-import { lazy, Suspense, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useT } from "@/i18n";
 import { Button, Callout, Card, EmptyState, Icons, Page, Pill, Segmented, Skeleton, Tabs } from "@/kit";
 import { TRADING_CONNECT_PATH, TRADING_LIST_PATH } from "@/lib/agentKind";
 import { WORKER_URL } from "@/lib/config";
+import type { HistoryPoint } from "@/lib/tradingClient";
 import { candleInterval, RANGES, type HistoryRange } from "@/lib/tradingMetrics";
+import type { PriceMode } from "@/features/trading/bot/Charts";
 import { BotStatePill, PnlValue } from "@/features/trading/BotRows";
 import { Metrics } from "@/features/trading/bot/Metrics";
 import { Settings } from "@/features/trading/bot/Settings";
@@ -17,6 +19,32 @@ const PnlChart = lazy(() => import("@/features/trading/bot/Charts").then((m) => 
 const PriceChart = lazy(() => import("@/features/trading/bot/Charts").then((m) => ({ default: m.PriceChart })));
 
 const NONE: never[] = [];
+const SESSION_GAP_MS = 15_000;
+const SESSION_MAX = 600;
+
+/**
+ * Coarse P&L curve for the time the page is open: the worker's history is empty for a fresh agent, but the header total is
+ * polled, so the page keeps its own samples (in memory only) and the chart can draw those until real history exists.
+ */
+function useSessionPnl(botId: string, total: string | null): HistoryPoint[] {
+  const [samples, setSamples] = useState<{ id: string; list: HistoryPoint[] }>({ id: botId, list: [] });
+  useEffect(() => {
+    if (total === null || !Number.isFinite(Number(total))) return;
+    const push = () =>
+      setSamples((cur) => {
+        const now = Date.now();
+        const list = cur.id === botId ? cur.list : [];
+        const last = list[list.length - 1];
+        if (last && now - last.t < SESSION_GAP_MS) return cur;
+        const p: HistoryPoint = { t: now, pnl: total, lo: total, hi: total, today: "0", val: "0", px: {} };
+        return { id: botId, list: [...list, p].slice(-SESSION_MAX) };
+      });
+    push();
+    const iv = window.setInterval(push, SESSION_GAP_MS);
+    return () => window.clearInterval(iv);
+  }, [botId, total]);
+  return samples.id === botId ? samples.list : NONE;
+}
 
 /** `/trading/bots/:id` (ADR-0006 §9): header, range tabs, P&L curve, price chart with trades, numbers, rules, trades table. */
 export function TradingBotPage() {
@@ -24,6 +52,7 @@ export function TradingBotPage() {
   const { id = "" } = useParams();
   const [range, setRange] = useState<HistoryRange>("1d");
   const [pairPick, setPairPick] = useState<string | null>(null);
+  const [mode, setMode] = useState<PriceMode>("line");
   const { ctx, load } = useBotCtx();
   const { detail, loading: detailLoading, error: detailError } = useBotDetail(ctx, id);
   const history = useBotHistory(ctx, detail, range);
@@ -31,6 +60,13 @@ export function TradingBotPage() {
   const trades = useBotTrades(ctx, detail);
   const pairName = pairPick && detail?.bot.pairs.includes(pairPick) ? pairPick : (detail?.bot.pairs[0] ?? null);
   const price = useBotPrice(ctx, detail, pairName, range);
+
+  const sessionPnl = useSessionPnl(id, detail?.bot.pnl_total_usdc ?? null);
+  const pnlPoints = useMemo(() => {
+    const real = history.history?.points ?? NONE;
+    if (real.length >= 2) return real;
+    return sessionPnl.length >= 2 ? sessionPnl : real;
+  }, [history.history, sessionPnl]);
 
   const back = (
     <Link to={TRADING_LIST_PATH} className="inline-flex items-center gap-1 text-sm text-ink-muted no-underline hover:text-ink">
@@ -111,7 +147,7 @@ export function TradingBotPage() {
           {t("trading.bot.pnlTitle")}
         </h2>
         <Suspense fallback={<Skeleton className="h-60" />}>
-          <PnlChart points={history.history?.points ?? NONE} loading={history.loading} />
+          <PnlChart points={pnlPoints} loading={history.loading && pnlPoints.length < 2} />
         </Suspense>
       </Card>
 
@@ -121,15 +157,16 @@ export function TradingBotPage() {
             {t("trading.bot.priceTitle")}
           </h2>
           {bot.pairs.length > 1 && <Segmented label={t("trading.bot.pairAria")} value={pairName ?? ""} onChange={setPairPick} options={bot.pairs.map((p) => ({ value: p, label: p }))} />}
+          <Segmented label={t("trading.bot.modeAria")} value={mode} onChange={setMode} options={[{ value: "line", label: t("trading.bot.modeLine") }, { value: "candles", label: t("trading.bot.modeCandles") }]} />
         </div>
         <Suspense fallback={<Skeleton className="h-72" />}>
-          <PriceChart candles={price.candles} fills={price.fills} interval={candleInterval(range)} fromMs={price.fromMs} loading={price.loading} unavailable={price.pair === null || price.pair.coin === ""} />
+          <PriceChart mode={mode} candles={price.candles} fills={price.fills} interval={candleInterval(range)} fromMs={price.fromMs} loading={price.loading} unavailable={price.pair === null || price.pair.coin === ""} />
         </Suspense>
         {price.error && <p className="m-0 text-xs text-ink-muted">{price.error}</p>}
         <p className="m-0 text-xs text-ink-subtle">{t("trading.bot.markersLegend")}</p>
       </Card>
 
-      <Metrics metrics={metrics.metrics} loading={metrics.loading} />
+      <Metrics metrics={metrics.metrics} loading={metrics.loading} total={bot.pnl_total_usdc} />
 
       <Settings detail={detail} status={ctx.status} signedIn={ctx.token !== null} signingIn={load.signingIn} signIn={() => void load.signIn()} error={load.authError} />
 

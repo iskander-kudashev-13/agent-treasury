@@ -1,13 +1,14 @@
-import { useT } from "@/i18n";
+import { intlLocale, useT } from "@/i18n";
 import { Button, Callout, Card, CardHeader, Pill, Skeleton, Table, Td, Th, Tr } from "@/kit";
 import { formatTime } from "@/lib/format";
 import type { BotFill } from "@/lib/tradingClient";
-import { fmtMoney, fmtMoneySigned, fmtPrice, fmtSize } from "@/lib/tradingMetrics";
+import { fmtLocalTime, fmtMoney, fmtPrice, fmtSize } from "@/lib/tradingMetrics";
 import { PnlValue } from "../BotRows";
 
 /** Trades newest first, 50 per page ("Show more" loads the next cursor). */
 export function Trades({ fills, loading, more, loadingMore, loadMore, error }: { fills: readonly BotFill[]; loading: boolean; more: boolean; loadingMore: boolean; loadMore: () => void; error: string | null }) {
   const t = useT();
+  const loc = intlLocale();
   return (
     <Card padding="none" aria-labelledby="bot-trades" className="flex flex-col">
       <div className="p-5 pb-3">
@@ -34,15 +35,15 @@ export function Trades({ fills, loading, more, loadingMore, loadMore, error }: {
           <tbody>
             {fills.map((f) => (
               <Tr key={`${f.tid ?? f.oid}-${f.time_ms}-${f.cloid ?? ""}`}>
-                <Td className="whitespace-nowrap text-ink-secondary">{formatTime(f.time_ms)}</Td>
+                <Td className="whitespace-nowrap text-ink-secondary"><span title={formatTime(f.time_ms)}>{fmtLocalTime(f.time_ms, loc)}</span></Td>
                 <Td>
-                  <Pill accent={f.side === "buy" ? "ok" : "danger"}>{t(f.side === "buy" ? "trading.bot.buy" : "trading.bot.sell")}</Pill>
+                  <Pill accent={f.side === "buy" ? "ok" : "danger"}>{f.side === "buy" ? "▲ " : "▼ "}{t(f.side === "buy" ? "trading.bot.buy" : "trading.bot.sell")}</Pill>
                 </Td>
                 <Td mono>{f.pair}</Td>
                 <Td align="right" mono>{fmtPrice(f.price)}</Td>
                 <Td align="right" mono>{fmtSize(f.size)}</Td>
                 <Td align="right" mono className="text-ink-muted">{fmtMoney(f.fee_usdc)}</Td>
-                <Td align="right">{f.side === "sell" ? <PnlValue value={f.realized_usdc} className="text-[13px]" /> : <span className="text-ink-subtle">{fmtMoneySigned(null)}</span>}</Td>
+                <Td align="right">{f.side === "sell" ? <PnlValue value={f.realized_usdc} className="text-[13px]" /> : <span className="cursor-help text-ink-subtle" title={t("trading.bot.resultOnSell")}>—</span>}</Td>
               </Tr>
             ))}
           </tbody>

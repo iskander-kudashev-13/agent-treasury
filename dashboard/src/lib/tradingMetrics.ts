@@ -36,6 +36,8 @@ export interface FillMarker {
   side: "buy" | "sell";
   price: number;
   size: number;
+  /** The exact fill time (the marker time is snapped to the candle). */
+  timeMs: number;
 }
 export const MAX_MARKERS = 500;
 
@@ -47,7 +49,7 @@ export function fillMarkers(fills: readonly BotFill[], fromMs: number, interval:
     .sort((a, b) => b.time_ms - a.time_ms)
     .slice(0, max)
     .sort((a, b) => a.time_ms - b.time_ms)
-    .map((f) => ({ time: Math.floor(f.time_ms / step) * (step / 1000), side: f.side, price: Number(f.price), size: Number(f.size) }));
+    .map((f) => ({ time: Math.floor(f.time_ms / step) * (step / 1000), side: f.side, price: Number(f.price), size: Number(f.size), timeMs: f.time_ms }));
 }
 
 /* ───────────── formatting ───────────── */
@@ -184,4 +186,10 @@ export function hourlySpark(list: readonly PnlSample[], nowMs: number, n = 24): 
     if (cur !== null) out.push(cur);
   }
   return out;
+}
+
+/** Local time of the owner's browser for a table cell ("3 Nov, 14:05"); the UTC string goes into a tooltip. */
+export function fmtLocalTime(ms: number, locale: string): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  return new Date(ms).toLocaleString(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
