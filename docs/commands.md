@@ -518,3 +518,17 @@ Dashboard against mainnet (new terminal): `cd dashboard && VITE_NEAR_NETWORK=mai
    - `near contract call-function as-transaction $VAULT withdraw json-args '{"amount":"<AMOUNT>","receiver_id":null}' prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $OWNER network-config mainnet sign-with-legacy-keychain send`
 6. Record everything in `docs/deployments.md` (vault, wasm hash, init tx, payout ids, the HL ledger `delta.type` of the
    landing) and `CHANGELOG.md`. Delete `worker/.env` trader key lines and `./.trading-mainnet/api-wallet.json`.
+
+## Testnet trading vault (2026-11-03)
+
+```bash
+near account create-account sponsor-by-faucet-service at-trade-11030006.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
+near tokens at-owner-11012309.testnet send-near at-trade-11030006.testnet '3 NEAR' network-config testnet sign-with-legacy-keychain send
+cd contract && ./build.sh && cd ..
+near contract deploy at-trade-11030006.testnet use-file contract/target-wasm/near/agent_treasury_vault.wasm \
+  with-init-call new json-args '{"owner_id":"at-owner-11012309.testnet","treasury_token":"3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af","policy":{"daily_limit":"100000000","min_payment":"500000","overdue_grace_ms":"259200000"},"requires_tee":false,"attestation_expiration_time_ms":"604800000","storage_deposit_yocto":null,"allow_insecure_local_mode":true}' \
+  prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+# hl-trader key agent (mandate: Allowlist hypercore + owner HL testnet address; prints the agent key once)
+cd sdk && pnpm setup-key-agent --owner at-owner-11012309.testnet --vault at-trade-11030006.testnet --name hl-trader \
+  --agent-id hl-trader --display-name "HL trader" --mandate <mandate.json> --dry-run   # then without --dry-run, OWNER_PRIVATE_KEY set
+```
