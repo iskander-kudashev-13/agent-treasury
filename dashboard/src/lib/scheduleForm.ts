@@ -1,5 +1,4 @@
 /** Pure logic of the schedule drawer (UI_UPDATES §4.2): form state -> validated `ScheduleInput` -> the calls to sign. */
-import { isoDate } from "./describeMandate";
 import { DAY_MS, firstAtOrAfter } from "./frequency";
 import { parseUsdc } from "./amount";
 import type { PlannedCall } from "./calls";
@@ -9,6 +8,16 @@ import type { AgentView, Frequency, Mandate, RecipientInput, Schedule, ScheduleE
 
 export type FreqKind = "Once" | "Monthly" | "Weekly" | "EveryNDays";
 export type EndKind = "Never" | "AfterCount" | "On";
+/** The two owner paths: a one-time payment, or a recurring schedule. Both are `add_schedule` on the contract. */
+export type PaymentMode = "once" | "recurring";
+/** One-time payment: as soon as possible, or at a chosen moment. */
+export type WhenKind = "now" | "later";
+
+/**
+ * "Now" = this far after the moment the owner clicks Save. The contract refuses a `Once` whose start is already in the
+ * past when the transaction lands (no payable date), so the start must outlive the wallet confirmation.
+ */
+export const NOW_LEAD_MS = 2 * 60_000;
 
 export interface ScheduleFormState {
   /** "" (none), a recipient id, or "new" (inline new recipient in `newRecipient`). */
@@ -20,9 +29,11 @@ export interface ScheduleFormState {
   /** 0 = Sunday. */
   weekday: string;
   everyN: string;
-  /** YYYY-MM-DD, UTC. */
+  /** One-time payments only: pay as soon as possible, or at startDate/startTime. */
+  when: WhenKind;
+  /** YYYY-MM-DD, the owner's local time zone (stored on chain as UTC ms). */
   startDate: string;
-  /** HH:MM, UTC. */
+  /** HH:MM, local time. */
   startTime: string;
   endKind: EndKind;
   endCount: string;
@@ -46,6 +57,59 @@ export function parseUtc(date: string, time: string): number | null {
 }
 export const toTimeInput = (ms: number): string => new Date(ms).toISOString().slice(11, 16);
 
+const pad = (n: number): string => String(n).padStart(2, "0");
+
+/** Local date + time inputs -> ms, or null for an impossible date (31 Feb) or a time skipped by a DST jump. */
+export function parseLocal(date: string, time: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const t = /^(\d{2}):(\d{2})$/.exec(time);
+  if (!m || !t) return null;
+  const [y, mo, d, h, mi] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(t[1]), Number(t[2])];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return null;
+  const v = new Date(y, mo - 1, d, h, mi);
+  return v.getFullYear() === y && v.getMonth() === mo - 1 && v.getDate() === d && v.getHours() === h && v.getMinutes() === mi ? v.getTime() : null;
+}
+/** ms -> YYYY-MM-DD in local time. */
+export const localDateInput = (ms: number): string => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+/** ms -> HH:MM in local time. */
+export const localTimeInput = (ms: number): string => {
+  const d = new Date(ms);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/** Quick picks for "Later". Each returns the local date/time inputs. */
+export const WHEN_PRESETS: Array<{ label: string; at: (now: number) => number }> = [
+  { label: "In 15 min", at: (now) => ceilMinute(now + 15 * 60_000) },
+  { label: "In 1 hour", at: (now) => ceilMinute(now + 60 * 60_000) },
+  {
+    label: "Tomorrow 09:00",
+    at: (now) => {
+      const d = new Date(now);
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 9, 0).getTime();
+    },
+  },
+];
+const ceilMinute = (ms: number): number => Math.ceil(ms / 60_000) * 60_000;
+
+/** "UTC+3", "UTC-4:30", "UTC" for the local offset at `ms`. */
+export function utcOffsetLabel(ms: number): string {
+  const off = -new Date(ms).getTimezoneOffset();
+  if (off === 0) return "UTC";
+  const a = Math.abs(off);
+  return `UTC${off > 0 ? "+" : "-"}${Math.floor(a / 60)}${a % 60 ? `:${pad(a % 60)}` : ""}`;
+}
+
+/**
+ * Recurring dates are counted in UTC days (ADR-0004). When the local start falls on another UTC day, "Monthly on the 1st"
+ * means the 1st in UTC, i.e. a different local day. Returns the UTC day the owner should know about, or null if the same.
+ */
+export function utcDayShift(ms: number): string | null {
+  return localDateInput(ms) === new Date(ms).toISOString().slice(0, 10) ? null : new Date(ms).toISOString().slice(0, 10);
+}
+
 export function emptyScheduleForm(now: number, defaults: Partial<ScheduleFormState> = {}): ScheduleFormState {
   return {
     recipientId: "",
@@ -55,11 +119,12 @@ export function emptyScheduleForm(now: number, defaults: Partial<ScheduleFormSta
     day: "1",
     weekday: "1",
     everyN: "14",
-    startDate: isoDate(now + DAY_MS),
+    when: "now",
+    startDate: localDateInput(now + DAY_MS),
     startTime: "09:00",
     endKind: "Never",
     endCount: "6",
-    endDate: isoDate(now + 365 * DAY_MS),
+    endDate: localDateInput(now + 365 * DAY_MS),
     agentId: "",
     addToMandate: false,
     ...defaults,
@@ -81,11 +146,12 @@ export function inputToForm(s: ScheduleInput, now: number): ScheduleFormState {
     day: typeof f === "object" && "Monthly" in f ? String(f.Monthly.day) : "1",
     weekday: typeof f === "object" && "Weekly" in f ? String(f.Weekly.weekday) : "1",
     everyN: typeof f === "object" && "EveryNDays" in f ? String(f.EveryNDays.n) : "14",
-    startDate: isoDate(start),
-    startTime: toTimeInput(start),
+    when: "later",
+    startDate: localDateInput(start),
+    startTime: localTimeInput(start),
     endKind: s.end === "Never" ? "Never" : "AfterCount" in s.end ? "AfterCount" : "On",
     endCount: typeof s.end === "object" && "AfterCount" in s.end ? String(s.end.AfterCount.count) : "6",
-    endDate: typeof s.end === "object" && "On" in s.end ? isoDate(Number(s.end.On.at)) : isoDate(now + 365 * DAY_MS),
+    endDate: typeof s.end === "object" && "On" in s.end ? localDateInput(Number(s.end.On.at)) : localDateInput(now + 365 * DAY_MS),
     agentId: s.agent_id,
   });
 }
@@ -149,8 +215,10 @@ export function buildScheduleInput(f: ScheduleFormState, ctx: { now: number; rec
     errors[f.freq === "Monthly" ? "day" : f.freq === "Weekly" ? "weekday" : "everyN"] =
       f.freq === "Monthly" ? "Day must be 1 to 28 (use 28 for end of month)" : f.freq === "Weekly" ? "Pick a weekday" : "Days must be 1 to 365";
   }
-  const start = parseUtc(f.startDate, f.startTime);
-  if (start === null) errors.start = "Enter a valid start date and time (UTC)";
+  // "Now" is resolved against ctx.now, so the drawer passes the click time on save.
+  const asap = f.freq === "Once" && f.when === "now" && !ctx.editing;
+  const start = asap ? ctx.now + NOW_LEAD_MS : parseLocal(f.startDate, f.startTime);
+  if (start === null) errors.start = "Enter a valid date and time";
   else if (!ctx.editing && f.freq === "Once" && start <= ctx.now) errors.start = "A one-time payment must be in the future";
 
   let end: ScheduleEnd = "Never";
@@ -159,10 +227,10 @@ export function buildScheduleInput(f: ScheduleFormState, ctx: { now: number; rec
       if (isInt(f.endCount, 1, MAX_COUNT)) end = { AfterCount: { count: Number(f.endCount) } };
       else errors.endCount = `Number of payments must be 1 to ${MAX_COUNT}`;
     } else if (f.endKind === "On") {
-      const day = parseUtc(f.endDate, "00:00");
+      const day = parseLocal(f.endDate, "23:59");
       if (day === null) errors.endDate = "Enter a valid end date";
       else {
-        const at = day + DAY_MS - 1; // the whole end day still counts
+        const at = day + 59_999; // the whole local end day still counts
         if (start !== null && at < start) errors.endDate = "The end date is before the start";
         else end = { On: { at: String(at) } };
       }

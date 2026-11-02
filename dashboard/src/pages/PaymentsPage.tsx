@@ -1,3 +1,4 @@
+import type { PaymentMode } from "@/lib/scheduleForm";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAssistantPanel } from "@/features/layout/AssistantContext";
@@ -25,7 +26,7 @@ export function PaymentsPage() {
   const schedules = useSchedules();
   const { canAct } = useOwner();
   const assistant = useAssistantPanel();
-  const [sched, setSched] = useState<{ schedule?: Schedule } | null>(null);
+  const [sched, setSched] = useState<{ schedule?: Schedule; mode?: PaymentMode } | null>(null);
   const [rec, setRec] = useState<{ recipient?: RecipientView } | null>(null);
   const now = useNow();
   const ask = AI_ENABLED ? () => assistant.openWith("Add a scheduled payment: ") : undefined;
@@ -41,8 +42,11 @@ export function PaymentsPage() {
                 Ask assistant
               </Button>
             )}
-            <Button variant="primary" disabled={!canAct} onClick={() => setSched({})}>
-              + Scheduled payment
+            <Button variant="primary" disabled={!canAct} onClick={() => setSched({ mode: "once" })}>
+              Pay once
+            </Button>
+            <Button disabled={!canAct} onClick={() => setSched({ mode: "recurring" })}>
+              + Recurring payment
             </Button>
           </div>
         ) : undefined
@@ -60,11 +64,11 @@ export function PaymentsPage() {
         ]}
       />
       {tab === "scheduled" ? (
-        <ScheduledTab onEdit={(s) => setSched({ schedule: s })} onNew={() => setSched({})} onAsk={ask} />
+        <ScheduledTab onEdit={(s) => setSched({ schedule: s })} onNew={(mode) => setSched({ mode })} onAsk={ask} />
       ) : (
         <RecipientsTable recipients={recipients.data} now={now} onAdd={() => setRec({})} onEdit={(r) => setRec({ recipient: r })} />
       )}
-      <ScheduleDrawer open={sched !== null} onClose={() => setSched(null)} schedule={sched?.schedule} />
+      <ScheduleDrawer open={sched !== null} onClose={() => setSched(null)} schedule={sched?.schedule} mode={sched?.mode} />
       <RecipientDrawer open={rec !== null} onClose={() => setRec(null)} recipient={rec?.recipient} />
     </Page>
   );

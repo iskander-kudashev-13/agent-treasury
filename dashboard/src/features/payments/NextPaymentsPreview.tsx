@@ -1,5 +1,5 @@
 import { nextOccurrences, shortDate } from "@/lib/frequency";
-import { previewFirst } from "@/lib/scheduleForm";
+import { localTimeInput, previewFirst } from "@/lib/scheduleForm";
 import type { ScheduleInput } from "@/lib/types";
 
 /** "Next payments: 1 Dec · 1 Jan · 1 Feb", recomputed on every keystroke from the same function the contract rules are tested against. */
@@ -8,10 +8,11 @@ export function NextPaymentsPreview({ input, now, paidCount = 0, floor = 0 }: { 
   const first = previewFirst(input, now, floor);
   const dates = nextOccurrences({ frequency: input.frequency, start_at: input.start_at, end: input.end, next_due_at: first, paid_count: paidCount }, 3);
   if (dates.length === 0) return <p className="m-0 text-[13px] text-warn">No payment dates left with these settings.</p>;
-  const time = new Date(dates[0] as number).toISOString().slice(11, 16);
+  const first0 = dates[0] as number;
+  const time = `${localTimeInput(first0)} your time (${new Date(first0).toISOString().slice(11, 16)} UTC)`;
   return (
     <p className="m-0 text-[13px] text-ink-secondary" aria-live="polite">
-      <span className="text-ink-muted">Next payments:</span> <span className="mono">{dates.map(shortDate).join(" · ")}</span> <span className="text-ink-subtle">at {time} UTC</span>
+      <span className="text-ink-muted">{dates.length === 1 ? "Payment:" : "Next payments:"}</span> <span className="mono">{dates.map(shortDate).join(" · ")}</span> <span className="text-ink-subtle">at {time}</span>
     </p>
   );
 }

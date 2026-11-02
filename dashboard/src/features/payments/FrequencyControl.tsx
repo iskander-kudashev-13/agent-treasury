@@ -5,8 +5,8 @@ const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frida
 // Monday first, like the design.
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
+/** Recurring frequencies only: one-time payments have their own form ("Pay once"). */
 const OPTIONS: Array<{ value: FreqKind; label: string }> = [
-  { value: "Once", label: "Once" },
   { value: "Monthly", label: "Monthly" },
   { value: "Weekly", label: "Weekly" },
   { value: "EveryNDays", label: "Every N days" },
@@ -35,14 +35,13 @@ export function FrequencyControl({
               <input type="radio" name="frequency" className="accent-[var(--color-ok)]" checked={on} disabled={disabled} onChange={() => onChange({ freq: o.value })} />
               {o.label}
             </label>
-            {on && o.value === "Once" && <span className="text-xs text-ink-subtle">on the start date below</span>}
             {on && o.value === "Monthly" && (
-              <Field label="Day of month" error={errors.day} hint="Use 28 for end-of-month" className="w-44">
+              <Field label="Day of month (UTC)" error={errors.day} hint="Use 28 for end-of-month" className="w-44">
                 {(a) => <Input {...a} type="number" inputMode="numeric" min={1} max={28} value={value.day} disabled={disabled} state={errors.day ? "error" : "default"} onChange={(e) => onChange({ day: e.target.value })} />}
               </Field>
             )}
             {on && o.value === "Weekly" && (
-              <Field label="Weekday" error={errors.weekday} className="w-44">
+              <Field label="Weekday (UTC)" error={errors.weekday} className="w-44">
                 {(a) => (
                   <Select {...a} value={value.weekday} disabled={disabled} onChange={(e) => onChange({ weekday: e.target.value })}>
                     {WEEKDAY_ORDER.map((d) => (

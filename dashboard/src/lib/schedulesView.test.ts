@@ -31,5 +31,8 @@ describe("schedulesView", () => {
     expect(filterSchedules(rows, { ...NO_FILTERS, chain: "base" }).map((r) => r.schedule.id)).toEqual([1]);
     expect(filterSchedules(rows, { ...NO_FILTERS, recipient: 2 })).toHaveLength(1);
     expect(filterSchedules(rows, NO_FILTERS)).toHaveLength(2);
+    const typed = [mk(1, { frequency: "Once" }), mk(2, { frequency: { Monthly: { day: 1 } } })].map((schedule) => ({ schedule, chain: "base" }));
+    expect(filterSchedules(typed, { ...NO_FILTERS, type: "once" }).map((r) => r.schedule.id)).toEqual([1]);
+    expect(filterSchedules(typed, { ...NO_FILTERS, type: "recurring" }).map((r) => r.schedule.id)).toEqual([2]);
   });
 });

@@ -1,3 +1,4 @@
+import type { PaymentMode } from "@/lib/scheduleForm";
 import { useState } from "react";
 import { Avatar, Button, Card, ChainBadge, EmptyState, Modal, Select, StatusPill, Table, Td, Th, Tr, SigningHint, Icons } from "@/kit";
 import { describeFrequency, shortDate } from "@/lib/frequency";
@@ -26,7 +27,7 @@ export interface SchedulesTableProps {
   filters: ScheduleFilters;
   onFilters: (f: ScheduleFilters) => void;
   onEdit: (s: Schedule) => void;
-  onNew: () => void;
+  onNew: (mode: PaymentMode) => void;
   onAsk?: (() => void) | undefined;
 }
 
@@ -40,7 +41,7 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
   const all = schedules.map((schedule) => ({ schedule, chain: recipientOf.get(schedule.recipient_id)?.destination_chain ?? "" }));
   const chains = [...new Set(all.map((r) => r.chain).filter(Boolean))].sort();
   const rows = sortByNextPayment(filterSchedules(all, filters));
-  const filtered = filters.agent !== "" || filters.status !== "" || filters.chain !== "" || filters.recipient !== null;
+  const filtered = filters.type !== "" || filters.agent !== "" || filters.status !== "" || filters.chain !== "" || filters.recipient !== null;
 
   const run = (calls: PlannedCall[], label: string) => void send(calls, label);
   const dis = !canAct || busy;
@@ -49,11 +50,14 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
     return (
       <Card padding="none">
         <EmptyState
-          title="No scheduled payments yet"
+          title="No payments yet"
           action={
             <div className="flex flex-wrap justify-center gap-2">
-              <Button variant="primary" disabled={!canAct} onClick={onNew}>
-                + Scheduled payment
+              <Button variant="primary" disabled={!canAct} onClick={() => onNew("once")}>
+                Pay once
+              </Button>
+              <Button disabled={!canAct} onClick={() => onNew("recurring")}>
+                + Recurring payment
               </Button>
               {onAsk && (
                 <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={onAsk}>
@@ -63,7 +67,7 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
             </div>
           }
         >
-          Set up salaries, subscriptions or regular supplier payments — the assigned agent will pay them on time.
+          Pay someone once, or set up salaries and other regular payments — the assigned agent pays them on time.
         </EmptyState>
       </Card>
     );
@@ -72,6 +76,14 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
   return (
     <Card padding="none">
       <div className="flex flex-wrap items-end gap-3 border-b border-line px-5 py-3">
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
+          Type
+          <Select className="h-9 w-36" value={filters.type} onChange={(e) => onFilters({ ...filters, type: e.target.value as ScheduleFilters["type"] })} aria-label="Filter by type">
+            <option value="">All types</option>
+            <option value="once">One-time</option>
+            <option value="recurring">Recurring</option>
+          </Select>
+        </label>
         <label className="flex flex-col gap-1 text-xs text-ink-muted">
           Agent
           <Select className="h-9 w-44" value={filters.agent} onChange={(e) => onFilters({ ...filters, agent: e.target.value })} aria-label="Filter by agent">

@@ -85,6 +85,15 @@ Empty state: "No scheduled payments yet. Set up salaries, subscriptions or regul
 
 ### 4.2 Schedule form (drawer)
 
+> **Update 2026-11-02 (owner feedback during the testnet run).** Two separate paths instead of "Once" being one of the
+> frequencies: **Pay once** (recipient, amount, agent, *When*: **Now** = start 2 min after Save so it survives the wallet
+> confirmation, or **Later** with quick picks "In 15 min / In 1 hour / Tomorrow 09:00" and an exact date/time) and
+> **+ Recurring payment** (Monthly / Weekly / Every N days, first payment, Ends). Both still call `add_schedule`
+> (`Once` vs recurring frequency); no contract change. Dates and times are entered in the owner's **local** time with
+> "= HH:MM UTC" under the field; recurring days stay UTC days (ADR-0004), and the form says so when the local start
+> falls on another UTC day. The Scheduled table gets a **Type** filter (One-time / Recurring). The mock below is the
+> recurring form.
+
 ```
 ┌ New scheduled payment ───────────────────────────────┐
 │ Recipient     [ Maria — Base, 0xAb…12        ▾ ] [+] │

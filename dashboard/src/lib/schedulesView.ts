@@ -20,16 +20,19 @@ export function progressText(s: Pick<Schedule, "paid_count" | "end">): string {
 }
 
 export interface ScheduleFilters {
+  /** "" = all, "once" = one-time payments, "recurring" = everything else. */
+  type: "" | "once" | "recurring";
   agent: string;
   status: ScheduleStatus | "";
   chain: string;
   recipient: number | null;
 }
-export const NO_FILTERS: ScheduleFilters = { agent: "", status: "", chain: "", recipient: null };
+export const NO_FILTERS: ScheduleFilters = { type: "", agent: "", status: "", chain: "", recipient: null };
 
 export function filterSchedules<T extends { schedule: Schedule; chain: string }>(rows: T[], f: ScheduleFilters): T[] {
   return rows.filter(
     (r) =>
+      (!f.type || (r.schedule.frequency === "Once") === (f.type === "once")) &&
       (!f.agent || r.schedule.agent_id === f.agent) &&
       (!f.status || r.schedule.status === f.status) &&
       (!f.chain || r.chain === f.chain) &&

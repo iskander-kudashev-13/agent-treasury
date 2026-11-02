@@ -1,20 +1,30 @@
 import { useState } from "react";
 import { Button, chainName, Drawer, Field, IconButton, Icons, Input, Select, shortId, SigningHint } from "@/kit";
 import { usdcGrouped } from "@/lib/amount";
+import { shortDate } from "@/lib/frequency";
 import type { PlannedCall } from "@/lib/calls";
 import {
   buildScheduleInput,
   effectiveCompat,
   emptyScheduleForm,
+  localDateInput,
+  localTimeInput,
   mandateWithRecipient,
+  NOW_LEAD_MS,
   monthlyEquivalent,
   planScheduleSave,
   recipientMissingFromMandate,
+  parseLocal,
   scheduleToForm,
+  utcDayShift,
+  utcOffsetLabel,
+  WHEN_PRESETS,
   type MandateTarget,
+  type PaymentMode,
   type ScheduleFormState,
 } from "@/lib/scheduleForm";
 import type { Schedule } from "@/lib/types";
+import { useNow } from "@/lib/useNow";
 import { useAgents, useContractInfo, usePolicy, useRecipients } from "@/lib/useVault";
 import { FrequencyControl } from "./FrequencyControl";
 import { MandateCompatibility } from "./MandateCompatibility";
@@ -35,6 +45,8 @@ export interface ScheduleDrawerProps {
   onClose: () => void;
   /** Edit this schedule (update_schedule); otherwise add_schedule. */
   schedule?: Schedule | undefined;
+  /** "once" (Pay once) or "recurring". Defaults from the schedule being edited or the prefill. */
+  mode?: PaymentMode | undefined;
   /** Initial values (assistant "Edit in form"). */
   prefill?: Partial<ScheduleFormState> | undefined;
   pendingRecipients?: PendingRecipient[] | undefined;
@@ -47,14 +59,34 @@ export function ScheduleDrawer(props: ScheduleDrawerProps) {
   return <Inner {...props} />;
 }
 
-function Inner({ onClose, schedule, prefill, pendingRecipients = [], onPlan }: ScheduleDrawerProps) {
+/** Wall-clock time of a user action (event handlers only, never during render). */
+const clickTime = (): number => Date.now();
+
+function modeOf(p: ScheduleDrawerProps): PaymentMode {
+  if (p.schedule) return p.schedule.frequency === "Once" ? "once" : "recurring";
+  if (p.prefill?.freq) return p.prefill.freq === "Once" ? "once" : "recurring";
+  return p.mode ?? "recurring";
+}
+
+function Inner(props: ScheduleDrawerProps) {
+  const { onClose, schedule, prefill, pendingRecipients = [], onPlan } = props;
+  const mode = modeOf(props);
+  const once = mode === "once";
   const [now] = useState(() => Date.now());
+  const liveNow = useNow(15_000);
   const { data: recipients } = useRecipients();
   const { data: agents } = useAgents();
   const { data: policy } = usePolicy();
   const { data: info } = useContractInfo();
   const { send, busy, canAct } = useOwnerTx();
-  const [form, setForm] = useState<ScheduleFormState>(() => ({ ...(schedule ? scheduleToForm(schedule, now) : emptyScheduleForm(now)), ...prefill }));
+  const [form, setForm] = useState<ScheduleFormState>(() => {
+    const init = { ...(schedule ? scheduleToForm(schedule, now) : emptyScheduleForm(now)), ...prefill };
+    // An assistant prefill carries an exact start: keep it instead of "now".
+    if (prefill?.startDate) init.when = "later";
+    if (once) init.freq = "Once";
+    else if (init.freq === "Once") init.freq = "Monthly";
+    return init;
+  });
   const patch = (p: Partial<ScheduleFormState>) => setForm((f) => ({ ...f, ...p }));
 
   const payers = agents.filter((a) => a.status !== "Revoked");
@@ -89,25 +121,27 @@ function Inner({ onClose, schedule, prefill, pendingRecipients = [], onPlan }: S
   const recipientReady = !isNew || (newDraft.input !== null && nextRecipientId !== null);
   const canSave = built.input !== null && target !== null && recipientReady && compat.errors.length === 0 && (onPlan !== undefined || canAct) && !busy;
 
-  const calls = (): PlannedCall[] =>
-    !built.input || !target
+  const calls = (input: NonNullable<typeof built.input>): PlannedCall[] =>
+    !target
       ? []
       : planScheduleSave({
           scheduleId: schedule?.id ?? null,
-          input: built.input,
+          input,
           ...(isNew && newDraft.input ? { newRecipient: newDraft.input } : {}),
           ...(addToMandate && agent ? { mandateUpdate: { agentId: agent.id, mandate: mandateWithRecipient(agent.mandate, target) } } : {}),
         });
 
   const save = async () => {
-    const c = calls();
+    // "Now" is fixed at the click, not when the drawer opened.
+    const fresh = buildScheduleInput(f, { now: clickTime(), recipientId: target?.id ?? null, editing: schedule !== undefined });
+    const c = fresh.input && target ? calls(fresh.input) : [];
     if (c.length === 0) return;
     if (onPlan) {
       onPlan(c, { newRecipientId: isNew ? (target?.id ?? null) : null });
       onClose();
       return;
     }
-    const r = await send(c, schedule ? "Schedule update" : c.length > 1 ? `${c.length} changes` : "Scheduled payment");
+    const r = await send(c, schedule ? "Payment update" : c.length > 1 ? `${c.length} changes` : once ? "One-time payment" : "Recurring payment");
     if (r.ok) onClose();
   };
 
@@ -117,8 +151,8 @@ function Inner({ onClose, schedule, prefill, pendingRecipients = [], onPlan }: S
     <Drawer
       open
       onClose={onClose}
-      title={schedule ? `Edit scheduled payment #${schedule.id}` : "New scheduled payment"}
-      subtitle="The assigned agent pays it on the dates you set."
+      title={schedule ? `Edit ${once ? "one-time" : "recurring"} payment #${schedule.id}` : once ? "Pay once" : "New recurring payment"}
+      subtitle={once ? "The agent pays it once, now or at the time you pick." : "The agent pays it on every date of the schedule."}
       width={520}
       footer={
         <>
@@ -127,7 +161,7 @@ function Inner({ onClose, schedule, prefill, pendingRecipients = [], onPlan }: S
             Cancel
           </Button>
           <Button variant="primary" disabled={!canSave} loading={busy} onClick={() => void save()}>
-            {onPlan ? "Use these values" : "Save & sign"}
+            {onPlan ? "Use these values" : once && !schedule ? "Create & sign" : "Save & sign"}
           </Button>
         </>
       }
@@ -168,16 +202,14 @@ function Inner({ onClose, schedule, prefill, pendingRecipients = [], onPlan }: S
           {(a) => <Input {...a} mono inputMode="decimal" placeholder="1500" suffix="USDC" value={f.amount} disabled={busy} state={show("amount") ? "error" : "default"} onChange={(e) => patch({ amount: e.target.value })} />}
         </Field>
 
-        <FrequencyControl value={f} onChange={patch} errors={built.errors} disabled={busy} />
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Starts (date, UTC)" error={built.errors.start} className="col-span-1">
-            {(a) => <Input {...a} type="date" value={f.startDate} disabled={busy} state={built.errors.start ? "error" : "default"} onChange={(e) => patch({ startDate: e.target.value })} />}
-          </Field>
-          <Field label="Time (UTC)" hint="Every payment is made at this time of day" className="col-span-1">
-            {(a) => <Input {...a} type="time" value={f.startTime} disabled={busy} onChange={(e) => patch({ startTime: e.target.value })} />}
-          </Field>
-        </div>
+        {once ? (
+          <WhenControl form={f} onChange={patch} error={built.errors.start} disabled={busy} editing={schedule !== undefined} />
+        ) : (
+          <>
+            <FrequencyControl value={f} onChange={patch} errors={built.errors} disabled={busy} />
+            <LocalDateTime label="First payment" date={f.startDate} time={f.startTime} error={built.errors.start} disabled={busy} onChange={patch} hint="Every payment is made at this time of day" recurring />
+          </>
+        )}
 
         {f.freq !== "Once" && (
           <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
@@ -203,7 +235,7 @@ function Inner({ onClose, schedule, prefill, pendingRecipients = [], onPlan }: S
                 On a date
               </label>
               {f.endKind === "On" && (
-                <Field label="Last day (UTC)" error={built.errors.endDate} className="w-44">
+                <Field label="Last day" error={built.errors.endDate} className="w-44">
                   {(a) => <Input {...a} type="date" value={f.endDate} disabled={busy} state={built.errors.endDate ? "error" : "default"} onChange={(e) => patch({ endDate: e.target.value })} />}
                 </Field>
               )}
@@ -226,11 +258,117 @@ function Inner({ onClose, schedule, prefill, pendingRecipients = [], onPlan }: S
         </Field>
 
         <div className="flex flex-col gap-3 border-t border-line pt-4">
-          <NextPaymentsPreview input={built.input} now={now} paidCount={schedule?.paid_count ?? 0} floor={lastHandled > 0 ? lastHandled + 1 : 0} />
+          {once && f.when === "now" && !schedule ? (
+            <p className="m-0 text-[13px] text-ink-secondary">The agent pays it on its first run after {localTimeInput(liveNow + NOW_LEAD_MS)} (2 minutes after you sign).</p>
+          ) : (
+            <NextPaymentsPreview input={built.input} now={now} paidCount={schedule?.paid_count ?? 0} floor={lastHandled > 0 ? lastHandled + 1 : 0} />
+          )}
           <MandateCompatibility agent={agent} compat={compat} offerAddToMandate={missing} addToMandate={addToMandate} onAddToMandate={(v) => patch({ addToMandate: v })} disabled={busy} />
           {!onPlan && !canAct && <p className="m-0 text-xs text-ink-subtle">Connect the vault owner&apos;s wallet to save.</p>}
         </div>
       </div>
     </Drawer>
+  );
+}
+
+/** "= 11:30 UTC, 3 Nov" under a local date/time, plus the UTC-day caveat for recurring schedules. */
+function utcHint(date: string, time: string, recurring: boolean): string | undefined {
+  const ms = parseLocal(date, time);
+  if (ms === null) return undefined;
+  const iso = new Date(ms).toISOString();
+  const base = `Your time (${utcOffsetLabel(ms)}) = ${iso.slice(11, 16)} UTC, ${shortDate(ms)}`;
+  const shift = recurring ? utcDayShift(ms) : null;
+  return shift ? `${base}. Days of the schedule are counted in UTC, so this is ${shift} in UTC.` : base;
+}
+
+function LocalDateTime({
+  label,
+  date,
+  time,
+  error,
+  disabled,
+  onChange,
+  hint,
+  recurring = false,
+}: {
+  label: string;
+  date: string;
+  time: string;
+  error: string | undefined;
+  disabled: boolean;
+  onChange: (p: Partial<ScheduleFormState>) => void;
+  hint?: string;
+  recurring?: boolean;
+}) {
+  const utc = utcHint(date, time, recurring);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={`${label}: date`} error={error}>
+          {(a) => <Input {...a} type="date" value={date} disabled={disabled} state={error ? "error" : "default"} onChange={(e) => onChange({ startDate: e.target.value })} />}
+        </Field>
+        <Field label="Time" hint={hint}>
+          {(a) => <Input {...a} type="time" value={time} disabled={disabled} onChange={(e) => onChange({ startTime: e.target.value })} />}
+        </Field>
+      </div>
+      {utc && <p className="m-0 text-xs text-ink-subtle">{utc}</p>}
+    </div>
+  );
+}
+
+/** One-time payment: "Now" (default) or "Later" with quick picks and an exact local date/time. */
+function WhenControl({
+  form,
+  onChange,
+  error,
+  disabled,
+  editing,
+}: {
+  form: ScheduleFormState;
+  onChange: (p: Partial<ScheduleFormState>) => void;
+  error: string | undefined;
+  disabled: boolean;
+  editing: boolean;
+}) {
+  const later = editing || form.when === "later";
+  return (
+    <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+      <legend className="mb-1.5 p-0 text-[13px] font-medium text-ink-secondary">When</legend>
+      {!editing && (
+        <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
+          <input type="radio" name="when" className="accent-[var(--color-ok)]" checked={!later} disabled={disabled} onChange={() => onChange({ when: "now" })} />
+          Now <span className="text-xs text-ink-subtle">— on the agent&apos;s next run, within a few minutes</span>
+        </label>
+      )}
+      {!editing && (
+        <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
+          <input type="radio" name="when" className="accent-[var(--color-ok)]" checked={later} disabled={disabled} onChange={() => onChange({ when: "later" })} />
+          Later
+        </label>
+      )}
+      {later && (
+        <div className={editing ? "flex flex-col gap-3" : "ml-6 flex flex-col gap-3"}>
+          <div className="flex flex-wrap gap-2">
+            {WHEN_PRESETS.map((p) => (
+              <Button
+                key={p.label}
+                size="sm"
+                variant="ghost"
+                className="border border-line-strong"
+                disabled={disabled}
+                onClick={() => {
+                  const at = p.at(Date.now());
+                  onChange({ when: "later", startDate: localDateInput(at), startTime: localTimeInput(at) });
+                }}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+          <LocalDateTime label="Pay on" date={form.startDate} time={form.startTime} error={error} disabled={disabled} onChange={onChange} />
+        </div>
+      )}
+      {!later && error && <p className="m-0 text-xs text-danger-text">{error}</p>}
+    </fieldset>
   );
 }
