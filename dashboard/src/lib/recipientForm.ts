@@ -11,6 +11,7 @@ export const RECIPIENT_CHAINS: readonly ChainOption[] = [
   { id: "base", label: "Base", kind: "evm" },
   { id: "arb", label: "Arbitrum", kind: "evm" },
   { id: "eth", label: "Ethereum", kind: "evm" },
+  { id: "hypercore", label: "Hyperliquid", kind: "evm" },
   { id: "sol", label: "Solana", kind: "sol" },
   { id: "tron", label: "Tron", kind: "tron" },
 ];

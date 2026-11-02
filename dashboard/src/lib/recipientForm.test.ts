@@ -40,3 +40,19 @@ describe("1Click tokens", () => {
     expect(findUsdcAsset(tokens, "tron")).toBeNull();
   });
 });
+
+describe("hypercore", () => {
+  const EVM = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01";
+  it("accepts a Hyperliquid master address and lowercases it", () => {
+    expect(validateRecipientDraft({ label: "HL", chain: "hypercore", address: EVM })).toEqual({ errors: {}, address: EVM.toLowerCase() });
+    expect(validateRecipientDraft({ label: "HL", chain: "hypercore", address: "nope" }).errors.address).toMatch(/Hyperliquid/);
+  });
+  it("picks the HyperCore spot USDC (hip1), not the erc20 one", () => {
+    const tokens = parseTokens([
+      { assetId: "nep141:hyper-erc20.omft.near", blockchain: "hypercore", symbol: "USDC", decimals: 6 },
+      { assetId: "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054", blockchain: "hypercore", symbol: "USDC", decimals: 8 },
+    ]);
+    expect(findUsdcAsset(tokens, "hypercore")).toBe("1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054");
+    expect(findUsdcAsset(tokens.slice(0, 1), "hypercore")).toBeNull();
+  });
+});

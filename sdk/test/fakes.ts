@@ -8,6 +8,8 @@ export const AGENT_ACCOUNT = "procurement.owner.testnet";
 export const TREASURY_TOKEN = "usdc.fake.testnet";
 export const ORIGIN_ASSET = `nep141:${TREASURY_TOKEN}`;
 export const BASE_ASSET = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
+export const HL_HIP1_USDC = "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054";
+export const HL_ERC20_USDC = "1cs_v1:hypercore:erc20:0xb88339CB7199b77E23DB6E890353E22632Ba630f";
 export const EVM = "0x1111111111111111111111111111111111111111";
 export const NOW = Date.parse("2026-11-10T12:00:00Z");
 
@@ -16,6 +18,10 @@ export const TOKENS: Token[] = [
   tok(ORIGIN_ASSET, "near", "USDC"),
   tok(BASE_ASSET, "base", "USDC"),
   tok("nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near", "sol", "USDC"),
+  // Live /v0/tokens lists two USDC assets on hypercore (plus wNEAR); order is deliberately erc20 first.
+  tok(HL_ERC20_USDC, "hypercore", "USDC", 6),
+  tok(HL_HIP1_USDC, "hypercore", "USDC", 8),
+  tok("1cs_v1:hypercore:hip1:0x20b8c9d2f022ffd2aea4f7962b7b1d8b", "hypercore", "wNEAR", 8),
   tok("nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near", "tron", "USDT"),
 ];
 

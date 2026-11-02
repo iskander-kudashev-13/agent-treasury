@@ -12,6 +12,7 @@ import type { AiInfo } from "./info.js";
 import { RateLimiter } from "./ratelimit.js";
 import { challengeMessage, ChallengeStore, nep413Digest, SESSION_TTL_MS, signToken, verifyEd25519, verifyToken } from "./session.js";
 import { buildTools } from "./tools.js";
+import type { TradingAuthoring } from "./trading.js";
 import { VaultReader } from "./views.js";
 import type { ViewFn } from "./views.js";
 
@@ -41,6 +42,8 @@ export interface AiDeps {
   /** Kind of key `publicKey` is on `accountId` (RPC `view_access_key`): full access, function call/other, or not a key of it. */
   accessKey: (accountId: string, publicKey: string) => Promise<"full" | "limited" | "none">;
   now?: () => number;
+  /** Present only when `TRADING_ENABLED`: hard limits and live pair data for `propose_trading_rules`. */
+  trading?: TradingAuthoring | undefined;
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -63,7 +66,7 @@ const sessionBodySchema = z.object({
   callbackUrl: z.string().max(500).nullish(),
 });
 
-function clientKey(c: Context, trustProxy: boolean): string {
+export function clientKey(c: Context, trustProxy: boolean): string {
   if (trustProxy) {
     const xff = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
     if (xff) return xff;
@@ -80,7 +83,7 @@ export function createAiRouter(d: AiDeps): Hono {
   const cfg = d.config;
   const now = d.now ?? Date.now;
   const limiter = new RateLimiter(cfg.rateLimitPerMin);
-  const tools = buildTools();
+  const tools = buildTools(d.trading ? { trading: d.trading } : {});
   const reader = new VaultReader(d.view);
   let ownerCache: { at: number; id: string } | undefined;
   const vaultOwner = async (): Promise<string> => {

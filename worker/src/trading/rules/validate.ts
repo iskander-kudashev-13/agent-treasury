@@ -13,6 +13,8 @@ export interface ValidateResult {
 
 /** Lowest asset id of a spot market. Anything below is a perp. */
 export const SPOT_ASSET_ID_MIN = 10_000;
+/** 11 USDC in micro units: smallest order size that reliably clears HL's 10 USDC minimum after rounding. */
+const MIN_RELIABLE_ORDER_MICRO = 11_000_000n;
 
 /**
  * @param input    untrusted rule set (parsed here; structural and static errors come back as issues)
@@ -58,6 +60,11 @@ export function validate(input: unknown, hard: HardLimits, pairInfo: PairInfoMap
   if (toMicro(rs.limits.max_position_usdc) < toMicro(rs.limits.max_order_usdc))
     warnings.push(issue("LIMIT_MAX_POSITION", "limits.max_position_usdc", "max_position_usdc is below max_order_usdc, so a full-size buy would be skipped"));
   rs.rules.forEach((r, i) => {
+    // HL's minimum order value is 10 USDC and sizes round down to szDecimals, so an order of exactly 10 ends up below it.
+    if ("usdc" in r.action.size && toMicro(r.action.size.usdc) < MIN_RELIABLE_ORDER_MICRO)
+      warnings.push(
+        issue("SIZE_NEAR_HL_MINIMUM", `rules.${i}.action.size.usdc`, `size ${r.action.size.usdc} USDC is below 11: Hyperliquid needs 10 USDC per order and size rounding can drop it under, so this rule may never fire`),
+      );
     if ("usdc" in r.action.size && r.action.side === "buy" && toMicro(r.action.size.usdc) > toMicro(rs.limits.max_position_usdc))
       warnings.push(issue("LIMIT_MAX_POSITION", `rules.${i}.action.size.usdc`, `buy size ${r.action.size.usdc} is above max_position_usdc, so this rule can never fire`));
   });

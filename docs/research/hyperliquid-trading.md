@@ -366,3 +366,43 @@ profits: owner spotSend → 1Click deposit addr → NEAR USDC → vault (plain f
    EIP-712 `approveAgent` signer through an injected EVM wallet.
 5. The worker's Node version against `@nktkas/hyperliquid`'s Node ≥ 22.12 requirement.
 6. Regulatory / ToS: HL geo-restrictions apply to the owner. That is not our call, but it is worth a line in the README.
+
+---
+
+## V0 spike results (2026-11-02, read-only)
+
+Method: public `info` requests through `@nktkas/hyperliquid` 0.33.3 (`InfoClient` + `HttpTransport`, mainnet and
+`isTestnet: true`), run through the real `NktkasHl` adapter (`worker/src/trading/hl/nktkas.ts`). Nothing was signed and no
+order or exchange action was sent. Active accounts used for shape checks were taken from the public `recentTrades` of
+`@107`.
+
+| Item | Result |
+|---|---|
+| `spotMeta` / `spotMetaAndAssetCtxs` | **Confirmed.** `universe[i] = { tokens: [base, quote], name: "@<index>", index, isCanonical }`, `tokens[] = { name, szDecimals, weiDecimals, index, ... }`. Asset id = `10000 + universe.index`. Mainnet HYPE/USDC = `@107`, id 10107, `szDecimals` 2. Testnet HYPE/USDC = `@1035`, id 11035, `szDecimals` 2. `assetCtxs` carry `coin`, `midPx` (null on empty book) and `dayNtlVlm`. |
+| `isCanonical` | **Surprise.** HYPE/USDC `@107` has `isCanonical: false` on mainnet (only legacy PURR/USDC is canonical). The adapter therefore must not require canonical. It drops a display name only when several non-canonical tokens share it. `HYPE/USDT0`, `HYPE/USDE`, `HYPE/USDH`, `KHYPE/USDC` exist next to it, so the pair allowlist must be matched by the full display name. |
+| Display-name collisions | Mainnet: none for HYPE/USDC. Testnet has 1343 pairs and many duplicate token names, but `HYPE/USDC` is still unique. |
+| Volume units | `dayNtlVlm` is in quote-token units. For `/USDC` pairs it is USDC. `HYPE/USDT0` volume is in USDT0, so the volume gate should only be applied to `/USDC` pairs (ADR already says quote USDC). Mainnet HYPE/USDC 24 h: about 85 M. |
+| `allMids` | Spot keys are `@<index>` (and `PURR/USDC`), perps are bare tickers. Values are decimal strings. Mid from `allMids` and `midPx` from the asset ctx differ slightly by timing, so the engine should use one source (the adapter's `getMids`). |
+| `candleSnapshot` for spot | **Confirmed** with `coin: "@107"`: returns `{ t, T, s: "@107", i, o, c, h, l, v, n }`, 1h and 1d both work, on mainnet and on testnet (`@1035`). The `price_change` trigger can use it. |
+| `l2Book` for spot | Works with `coin: "@107"`. Testnet HYPE/USDC is not a usable price source: mid 9777.5, bid 8200, ask 11355 at the time of the test. The spread gate would (correctly) skip every tick there, so testnet runs need a pair with a sane book or the fake port. |
+| Approved API wallets | **Confirmed.** Info request `extraAgents { user }` returns `[{ name, address, validUntil }]`. `validUntil` is a **millisecond** timestamp (for example 1797408899328) or null. `name` is the name given at approval (a plain string such as `"agent-treasury valid_until 1797408899328"`). Address is lower-case. Works for both networks. `HlPort.getApprovedAgents` maps it as `{ address, name | null, validUntilMs }`. |
+| Ledger fields for `net_inflow` | **Partly confirmed.** `userNonFundingLedgerUpdates` returns `delta.type` values seen live: `send`, `spotTransfer`, `cStakingTransfer`, `deposit`, `withdraw`, `internalTransfer`, `accountClassTransfer` and others (see the library type). Transfers carry `user`, `destination`, `token` (can be `"USDC"` or `"USDC:0x..."`) and `amount`. The adapter counts USDC `spotTransfer`/`send`/`internalTransfer` by `destination`/`user` equals the account, plus `deposit`/`withdraw`, and ignores `accountClassTransfer`. **Not verified:** which `delta.type` a real 1Click HyperCore landing produces (probably a `spotTransfer` from a system address). This still needs the first 20 USDC mainnet top-up. |
+| Perp state | `clearinghouseState` (default dex) gives `assetPositions[].position.{coin, szi}` and `marginSummary.accountValue`. Open perp orders come from `frontendOpenOrders` (anything whose coin is not `@N` and has no `/`). HIP-3 builder-dex positions need a `dex` argument and are **not** covered by the adapter. |
+| Fills | `userFillsByTime { user, startTime }` has `cloid`, `fee`, `feeToken`. Buys pay the fee in the base token (for example `HYPE`), so the adapter converts to USDC at the fill price. |
+| `scheduleCancel` trigger counting | **Not verified** (needs a signed action). Remains an ADR **[verify]** item: do not rely on 180 s refreshes every tick before checking on testnet. |
+| HL UI accepts an external API wallet address | **Not verified** (needs the master wallet in a browser). Fallback D4 stays in the plan. |
+| Order response shape | From the library types: `statuses[0]` is `{ resting: { oid } }`, `{ filled: { totalSz, avgPx, oid } }` or `{ error }`. The library **throws `ApiRequestError`** for any status carrying `error`, so "IOC found nothing" arrives as an exception with message "Order could not immediately match against any resting orders". The adapter maps it to `unfilled`. The exact live wording is **not verified**. |
+
+### Node version
+- `@nktkas/hyperliquid` 0.33.3 declares `engines.node >= 22.12.0`.
+- `worker/Dockerfile` pins `node:22-alpine@sha256:92d51e5f...`. Docker Hub tag listing shows that digest is
+  **`22.22.1-alpine` / `22.22.1-alpine3.23`** (checked 2026-11-02), so it satisfies >= 22.12. The check was by tag
+  listing, not by running the image.
+- `worker/package.json` still has no `engines` field (task W2 in the ADR asks for `>=22.12`; not changed here).
+
+### Signer note
+`ExchangeClient` accepts a viem local account, an ethers v5/v6 signer or a viem JSON-RPC account (`AbstractWallet`). viem is
+**not** a direct dependency of the worker (it is only in the pnpm store through other packages). `createNktkasHl` therefore
+takes the wallet as an argument; the code that builds the API-wallet account from the stored private key
+(`wallet.ts`) must add `viem` (`privateKeyToAccount`) to `package.json`, or implement the small `AbstractViemLocalAccount`
+interface itself (`address` + `signTypedData`).

@@ -22,8 +22,7 @@ Facts this ADR builds on (from the research, which cites HL and 1Click):
 - HL needs at least 10 USDC per order. Spot asset id = `10000 + spotIndex` (mainnet HYPE/USDC `@107` → 10107; testnet
   `@1035`). Ids are read from `spotMeta` and never hard-coded.
 - The testnet faucet pays only addresses that have already deposited on mainnet.
-- `@nktkas/hyperliquid` 0.33.3 needs Node >= 22.12. The worker image is `node:22-alpine` pinned by digest, minor
-  version unknown **[verify]**. `worker/package.json` has no `engines` field.
+- `@nktkas/hyperliquid` 0.33.3 needs Node >= 22.12. The worker image is `node:22-alpine` pinned by digest; checked with `docker run` on 2026-11-02: Node v22.22.1, so >= 22.12 holds. `worker/package.json` now has `"engines": {"node": ">=22.12"}`.
 
 Code facts checked for this ADR:
 - Contract: chain ids are free strings of at most 16 bytes (`contract/src/agent.rs` `validate_mandate`,
@@ -35,8 +34,8 @@ Code facts checked for this ADR:
 - Dashboard `lib/address.ts` `EVM_CHAINS`, `lib/recipientForm.ts` and worker `src/ai/chains.ts` `CHAINS` have no
   `hypercore` either.
 - The worker does not depend on the SDK (it has its own `oneclick.ts`, `quote-check.ts` and `vault.ts` on top of
-  `ShadeClient`). The MCP server uses `"agent-treasury-sdk": "link:../sdk"`. The worker Docker build context is
-  `worker/` only.
+  `ShadeClient`). The MCP server uses `"agent-treasury-sdk": "link:../sdk"`. The worker Docker build context used to be
+  `worker/` only; W5 moved the Dockerfile to the repo root (`Dockerfile.worker`, context = repo root) because the worker now links `../sdk`.
 - The assistant already has NEP-413 owner sign-in (`worker/src/ai/session.ts`: `nep413Digest`, `verifyEd25519`,
   `ChallengeStore`, HMAC bearer tokens). It checks that the signer used a full-access key and is the vault owner
   (`route.ts`).
@@ -212,6 +211,7 @@ limits only how much is sent there per day."
 | T13 | Unauthenticated HTTP abuse | `propose`, `kill`, `rotate`, `rules` and `log` require an owner bearer token; `confirm` requires a NEP-413 signature; rate limits reused from `/ai` |
 | T14 | Tampered rules file | Re-verified on load; refuses if verification fails |
 | T15 | Funding to a fresh HL address loses the activation fee or fails | Use an already active master; refunds go to `refundTo = vault` |
+| T16 | **Known gap, HIP-3 builder perp dexes**: the perp alarm reads the default dex only (`clearinghouseState`), so a perp position on a HIP-3 builder dex is NOT detected. Open orders are checked (all open orders of the account are read, and any perp order trips the alarm) | Dedicated master account, so nothing else trades on builder dexes; the API wallet cannot withdraw. v2: enumerate `perpDexs` and read each dex's clearinghouse state |
 
 ## Interfaces
 
@@ -260,12 +260,12 @@ interface Action {
   `hash = hex(sha256(canonical))`.
 - Shared vectors in `docs/trading-rules-vectors.json` contain inputs, canonical strings, hashes and English renderings.
   Worker and dashboard both test against them.
-- Example ("buy HYPE for 10 USDC when price drops 3% in a day; never hold more than 40 USDC; stop if −5 USDC today"):
+- Example ("buy HYPE for 12 USDC when price drops 3% in a day; never hold more than 40 USDC; stop if −5 USDC today"). The size is 12, not 10: HL needs 10 USDC per order and the size rounds down to `szDecimals`, so an order of exactly 10 never fires. `validate()` warns (`SIZE_NEAR_HL_MINIMUM`) for a USDC size below 11:
 ```json
 {"version":1,"name":"HYPE dip buyer","pairs":["HYPE/USDC"],
- "limits":{"max_position_usdc":"40","max_order_usdc":"10","daily_loss_stop_usdc":"5","max_orders_per_day":3},
+ "limits":{"max_position_usdc":"40","max_order_usdc":"12","daily_loss_stop_usdc":"5","max_orders_per_day":3},
  "rules":[{"id":"dip","pair":"HYPE/USDC","when":{"type":"price_change","window":"1d","op":"lte","pct":"-3"},
-           "action":{"side":"buy","size":{"usdc":"10"},"order":{"type":"ioc"}},"cooldown":"1d"}]}
+           "action":{"side":"buy","size":{"usdc":"12"},"order":{"type":"ioc"}},"cooldown":"1d"}]}
 ```
 
 ### NEP-413 confirmation message (exact, `\n`-separated; recipient = vault id)
@@ -353,7 +353,7 @@ TradingStatus {
 | `TRADING_DEADMAN_SEC` | `180` | `scheduleCancel` horizon, >= 3 × tick |
 | `TRADING_TOPUP_ENABLED` | `true` | Allow `request_payment` top-ups |
 | `TRADING_TOPUP_USDC` / `TRADING_TOPUP_FLOOR_USDC` | `20` / `10` | Top-up size (>= 2, 1Click minimum) and trigger |
-| `TRADING_START_MS` | first confirm | Baseline for `net_funded` |
+| `TRADING_START_MS` | first tick of the state dir (persisted in `meta.json`) | Baseline for `net_funded`. Not "first confirm": top-ups usually arrive before the first rule set is signed and must count as funding |
 
 In TEE mode later, the hard-limit env vars must be pinned in the measured compose (same as the H1 fix for payroll).
 
@@ -502,3 +502,11 @@ In TEE mode later, the hard-limit env vars must be pinned in the measured compos
    private key.
 5. Strategy authoring: natural language in the assistant chat → AI proposes the DSL rule set → owner confirms
    (NEP-413) → deterministic engine. The LLM never places orders.
+
+## Session decision (2026-11-03, after audit docs/security/audit-2026-11-03-trading.md)
+
+For the first mainnet session the owner accepted the auditor's limits (H1): `approval_threshold = 0` (every HL top-up
+is approved by the owner in the dashboard, with the 1Click quote check), vault funded with at most 26 USDC, vault and
+mandate daily limit 25, 1 top-up per day, agent expiry within 48 h, HL API wallet `valid_until` within 48 h, revoke
+everything after the session. Autonomous top-ups (threshold = per-tx) stay the design for later and on testnet.
+Worst case for the session: about 26 USDC.

@@ -103,7 +103,7 @@ Edit both files together before `shade deploy`; changing either changes the meas
 cd worker
 # deployment.yaml: set agent_contract.contract_id (= vault id) and build_docker_image.tag; environment: TEE
 pnpm exec shade plan
-pnpm exec shade deploy        # builds image and deploys to Phala (approvals are disabled in deployment.yaml, see below)
+pnpm exec shade deploy        # run from worker/ (the build context is the repo root; the allow-list in ../Dockerfile.worker.dockerignore and ../.dockerignore keep .env and .trading out of the image). Builds image and deploys to Phala (approvals are disabled in deployment.yaml, see below)
 ```
 `shade deploy` cannot approve measurements/PPIDs for this vault (no attached deposit, vault needs 1 yoctoNEAR), so the owner does it with near-cli-rs
 using the values for the deployed image (`<MEASUREMENTS_JSON>` = `{"rtmrs":{"mrtd":..,"rtmr0":..,"rtmr1":..,"rtmr2":..},"key_provider_event_digest":..,"app_compose_hash_payload":..}`,
@@ -192,7 +192,7 @@ Known limitations (v1): batches that depend on each other (new recipient + sched
 | `src/near.ts` | ShadeClient, registration loop, attestation summary |
 | `src/app.ts`, `src/index.ts` | Hono API, bootstrap |
 | `scripts/dry-quote.ts` | M0 script |
-| `Dockerfile`, `docker-compose.yaml`, `deployment.yaml` | TEE packaging (shade-agent-cli 2.4.0) |
+| `../Dockerfile.worker`, `docker-compose.yaml`, `deployment.yaml` | TEE packaging (shade-agent-cli 2.4.0) |
 
 After the worker shows `registration.state: "registered"` and `/status.attestation` matches what you deployed, the owner should pin the slot so no
 other instance of the approved image can take it over (1 yoctoNEAR):

@@ -61,7 +61,7 @@ suite("shared vectors", () => {
     for (const c of used) expect(ISSUE_CODES).toContain(c);
     // Codes that are only warnings or unreachable through plain vectors are exempt.
     const uncovered = ISSUE_CODES.filter((c) => !used.has(c));
-    expect(uncovered).toEqual(["PAIR_UNKNOWN"]);
+    expect(uncovered).toEqual(["PAIR_UNKNOWN", "SIZE_NEAR_HL_MINIMUM"]);
   });
 });
 
@@ -239,6 +239,15 @@ suite("validate against hard limits", () => {
     const r = validate(rs, hard, pairs);
     expect(r.ok).toBe(true);
     expect(r.warnings.length).toBeGreaterThan(0);
+  });
+  it("warns when a usdc size is below 11 (HL minimum notional plus rounding)", () => {
+    const rs = base(); // base size is 10
+    const r = validate(rs, hard, pairs);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.code === "SIZE_NEAR_HL_MINIMUM" && w.path === "rules.0.action.size.usdc")).toBe(true);
+    R0(rs).action.size = { usdc: "11" };
+    rs.limits.max_order_usdc = "12";
+    expect(validate(rs, hard, pairs).warnings.some((w) => w.code === "SIZE_NEAR_HL_MINIMUM")).toBe(false);
   });
   it("warns when a buy is larger than max_position", () => {
     const rs = base();

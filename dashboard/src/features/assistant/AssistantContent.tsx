@@ -139,7 +139,7 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
         look={look}
         canSign={canAct}
         busy={signing}
-        handlers={{ onQueue: assistant.queue, onUnqueue: assistant.unqueue, onDiscard: assistant.discard, onEdit: editCard, onPauseNow: (i) => void pauseNow(i) }}
+        handlers={{ onQueue: assistant.queue, onUnqueue: assistant.unqueue, onDiscard: assistant.discard, onEdit: editCard, onPauseNow: (i) => void pauseNow(i), onRulesConfirmed: assistant.markRulesConfirmed, onRulesDiscard: assistant.discardRules }}
         onAnswer={(t) => void assistant.send(t)}
       />
     );

@@ -1,0 +1,16 @@
+# Allow-list: only what Dockerfile.worker copies (BuildKit reads <Dockerfile>.dockerignore).
+*
+!worker/package.json
+!worker/pnpm-lock.yaml
+!worker/pnpm-workspace.yaml
+!worker/.npmrc
+!worker/tsconfig.json
+!worker/tsconfig.build.json
+!worker/tee.config.json
+!worker/src
+!sdk/package.json
+!sdk/pnpm-lock.yaml
+!sdk/pnpm-workspace.yaml
+!sdk/tsconfig.json
+!sdk/tsconfig.build.json
+!sdk/src

@@ -4,6 +4,7 @@ import { isAssistantMethod, type PlannedCall } from "@/lib/calls";
 import { previewFirst } from "@/lib/scheduleForm";
 import { nextOccurrences } from "@/lib/frequency";
 import type { BatchItem, Proposal } from "@/lib/proposals";
+import type { TradingRulesProposal } from "@/lib/tradingClient";
 import type { ScheduleInput } from "@/lib/types";
 
 export type CardStatus = "draft" | "queued" | "signed" | "discarded";
@@ -27,9 +28,20 @@ export type ChatItem =
       recipientId: number | null;
       hash: string | null;
     }
+  | {
+      /** Trading rules (ADR-0005): confirmed with a NEP-413 signature, never part of a transaction batch. */
+      kind: "trading_rules";
+      id: string;
+      proposal: TradingRulesProposal;
+      status: "draft" | "signed" | "discarded";
+      /** When the worker accepted the signed rules. */
+      confirmedAt: number | null;
+    }
   | { kind: "notice"; id: string; text: string; tone: "error" | "info" };
 
 export type ProposalItem = Extract<ChatItem, { kind: "proposal" }>;
+export type TradingRulesItem = Extract<ChatItem, { kind: "trading_rules" }>;
+export const isTradingRulesItem = (i: ChatItem): i is TradingRulesItem => i.kind === "trading_rules";
 export const isProposalItem = (i: ChatItem): i is ProposalItem => i.kind === "proposal";
 
 /** Messages for `POST /ai/chat`: user texts and the assistant's text/questions. Cards, data and notices are not history. */

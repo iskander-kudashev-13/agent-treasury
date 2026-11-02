@@ -125,6 +125,8 @@ export const ISSUE_CODES = [
   "PAIR_UNKNOWN",
   "PAIR_PERP",
   "PAIR_LOW_VOLUME",
+  /** Warning only. */
+  "SIZE_NEAR_HL_MINIMUM",
 ] as const;
 export type IssueCode = (typeof ISSUE_CODES)[number];
 const KNOWN = new Set<string>(ISSUE_CODES);

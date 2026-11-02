@@ -16,12 +16,17 @@ export const CHAINS: Readonly<Record<string, ChainInfo>> = {
   arb: { kind: "evm", label: "Arbitrum" },
   eth: { kind: "evm", label: "Ethereum" },
   sol: { kind: "sol", label: "Solana" },
+  // Hyperliquid HyperCore spot (ADR-0005): 0x address of the owner's HL account. 1Click lists two USDC assets here; the
+  // hip1 one must be picked (see sdk resolveUsdc), not the first match.
+  hypercore: { kind: "evm", label: "Hyperliquid (HyperCore)" },
 };
 
 const ALIASES: Readonly<Record<string, string>> = {
   solana: "sol",
   ethereum: "eth",
   arbitrum: "arb",
+  hyperliquid: "hypercore",
+  hl: "hypercore",
 };
 
 /** Maps user wording ("Solana", "BASE") to a 1Click chain id, or `null` when unknown/unsupported. */

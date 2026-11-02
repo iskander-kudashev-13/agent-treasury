@@ -4,6 +4,8 @@ import { timingSafeEqual } from "node:crypto";
 import type { AttestationSummary, RegistrationState } from "./near.js";
 import type { AiDeps } from "./ai/index.js";
 import { createAiRouter } from "./ai/index.js";
+import { createTradingRouter } from "./trading/route.js";
+import type { TradingRouteDeps } from "./trading/route.js";
 import type { PayoutLoop } from "./payout-loop.js";
 import type { AgentBudget, Rejection, UpcomingItem } from "./vault.js";
 
@@ -26,6 +28,8 @@ export interface AppDeps {
   dashboardOrigin: string;
   /** AI assistant (docs: worker/README.md "AI assistant"). Omitted = routes not mounted. */
   ai?: AiDeps;
+  /** Hyperliquid trading module (docs/adr/0005). Omitted = `GET /trading/status` answers `{ enabled: false }`, other routes 404. */
+  trading?: TradingRouteDeps;
 }
 
 function tokenOk(given: string, expected: string): boolean {
@@ -85,6 +89,8 @@ export function createApp(d: AppDeps): Hono {
   });
 
   if (d.ai) app.route("/ai", createAiRouter(d.ai));
+  if (d.trading) app.route("/trading", createTradingRouter(d.trading));
+  else app.get("/trading/status", (c) => c.json({ enabled: false }));
 
   return app;
 }

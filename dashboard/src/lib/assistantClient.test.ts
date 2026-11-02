@@ -46,6 +46,16 @@ describe("parseChatEvent", () => {
     expect(ev({ type: "tool_call", name: "withdraw" })).toBeNull();
     expect(ev({ type: "proposal", proposal: { type: "Withdraw", call: { method: "withdraw", args: {} } } })).toEqual({ type: "malformed_proposal" });
   });
+  it("routes TradingRules proposals to their own event and drops forged ones", async () => {
+    const rules = { version: 1, name: "n", pairs: ["HYPE/USDC"], limits: { max_position_usdc: "40", max_order_usdc: "10", daily_loss_stop_usdc: "5", max_orders_per_day: 3 }, rules: [{ id: "a", pair: "HYPE/USDC", when: { type: "interval", every: "1d" }, action: { side: "buy", size: { usdc: "10" }, order: { type: "ioc" } } }] };
+    const p = { id: "p1", type: "TradingRules", title: "t", summary: "s", rules, hash: "a".repeat(64), validation: { ok: true, errors: [], warnings: ["w"] }, confirm: { kind: "nep413" } };
+    const e = ev({ type: "proposal", proposal: p });
+    expect(e).toMatchObject({ type: "trading_rules", proposal: { id: "p1", hash: "a".repeat(64), validation: { ok: true, warnings: ["w"] } } });
+    // unknown key in the rules, bad hash, or a claimed ok with errors never reach the card as valid
+    expect(ev({ type: "proposal", proposal: { ...p, rules: { ...rules, extra: 1 } } })).toEqual({ type: "malformed_proposal" });
+    expect(ev({ type: "proposal", proposal: { ...p, hash: "xyz" } })).toEqual({ type: "malformed_proposal" });
+    expect(ev({ type: "proposal", proposal: { ...p, validation: { ok: true, errors: ["bad"], warnings: [] } } })).toMatchObject({ proposal: { validation: { ok: false } } });
+  });
   it("uses the SSE event name when the payload has no type", () => {
     expect(parseChatEvent({ event: "text", data: '{"delta":"z"}' })).toEqual({ type: "text", delta: "z" });
   });

@@ -26,6 +26,9 @@ import {
   cleanText,
 } from "./proposals.js";
 import type { BuildResult, ProposalContext } from "./proposals.js";
+import { buildTradingRulesCard, tradingToolDescription } from "./trading.js";
+import type { TradingAuthoring } from "./trading.js";
+import { ruleSetSchema } from "../trading/rules/schema.js";
 import type { Agent, Schedule } from "./views.js";
 
 export interface ToolResult {
@@ -264,7 +267,46 @@ function guarded(run: (ctx: ProposalContext) => Promise<BuildResult>, extra?: (r
 
 const agentId = z.string().min(1).max(32);
 
-export function buildTools(): Tool[] {
+const MAX_TRADING_FIX_ROUNDS = 3;
+
+/** `propose_trading_rules` (ADR-0005 §4). Only offered when trading is enabled; the model never trades. */
+function tradingTool(t: TradingAuthoring): Tool {
+  const base = defineTool("propose_trading_rules", tradingToolDescription(t.hard), z.object({ rules: z.unknown() }), async (a, ctx) => {
+    if (ctx.state.proposals.length >= MAX_PROPOSALS_PER_TURN) return { content: { ok: false, error: "Too many proposals in one message" } };
+    // After a few failed tries the red card is shown so the owner sees what is wrong; the model then explains.
+    if (ctx.state.tradingFailures >= MAX_TRADING_FIX_ROUNDS) {
+      return { content: { ok: false, error: "Too many failed attempts. Stop retrying: explain the problem to the owner in one or two sentences and ask what they want to change." } };
+    }
+    const r = await buildTradingRulesCard(t, ctx.state, a.rules, { showInvalid: ctx.state.tradingFailures >= MAX_TRADING_FIX_ROUNDS - 1 });
+    if (r.errors) {
+      ctx.state.tradingFailures += 1;
+      return {
+        content: {
+          ok: false,
+          errors: r.errors,
+          note:
+            ctx.state.tradingFailures >= MAX_TRADING_FIX_ROUNDS
+              ? "Stop retrying. Explain the problem to the owner in one or two sentences and ask what they want to change."
+              : "Nothing was shown to the owner. Fix these errors (stay inside the hard limits, use only allowed pairs) and call propose_trading_rules again, or ask the owner if the fix needs their decision.",
+        },
+      };
+    }
+    if (!r.card.validation.ok) ctx.state.tradingFailures = MAX_TRADING_FIX_ROUNDS;
+    ctx.state.proposals.push(r.card);
+    return toResult({ proposal: r.card }, { hash: r.card.hash, rules_in_plain_english: r.card.lines });
+  });
+  // The model gets the real DSL as JSON Schema; arguments are parsed by `validate`, which reports stable error codes.
+  const rules = z.toJSONSchema(ruleSetSchema, { io: "input" }) as Record<string, unknown>;
+  delete rules.$schema;
+  return { ...base, parameters: { type: "object", properties: { rules }, required: ["rules"] } };
+}
+
+export interface BuildToolsOptions {
+  /** Present only when `TRADING_ENABLED`: adds `propose_trading_rules`. */
+  trading?: TradingAuthoring;
+}
+
+export function buildTools(opts: BuildToolsOptions = {}): Tool[] {
   const readTools: Tool[] = [
     defineTool("get_balance", "Vault USDC balance and today's spending. Amounts in USDC.", z.object({}), async (_a, ctx) => {
       const b = await ctx.reader.balance();
@@ -569,5 +611,5 @@ export function buildTools(): Tool[] {
     defineTool("propose_resume_vault", "Prepare a card that resumes the vault.", z.object({}), (_a, ctx) => guarded(buildResumeVault)(ctx)),
   ];
 
-  return [...readTools, ...displayTools, ...proposeTools];
+  return [...readTools, ...displayTools, ...proposeTools, ...(opts.trading ? [tradingTool(opts.trading)] : [])];
 }

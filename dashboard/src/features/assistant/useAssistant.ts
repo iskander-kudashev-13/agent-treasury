@@ -5,7 +5,7 @@ import type { PlannedCall } from "@/lib/calls";
 import { proposalToCall } from "@/lib/proposals";
 import { useNow } from "@/lib/useNow";
 import { useWallet } from "@/features/wallet/WalletProvider";
-import { buildHistory, cardId, isProposalItem, type ChatItem } from "./model";
+import { buildHistory, cardId, isProposalItem, isTradingRulesItem, type ChatItem } from "./model";
 
 export type Phase = "idle" | "signing-in" | "streaming";
 
@@ -84,6 +84,11 @@ export function useAssistant() {
                   },
                 ],
           );
+          return;
+        }
+        case "trading_rules": {
+          const id = cardId(myTurn, ev.proposal.id);
+          update((cur) => (cur.some((i) => i.id === id) ? cur : [...closeStreaming(cur), { kind: "trading_rules", id, proposal: ev.proposal, status: "draft", confirmedAt: null }]));
           return;
         }
         case "malformed_proposal":
@@ -175,6 +180,9 @@ export function useAssistant() {
     discard: (id: string) => patchCard(id, (i) => (i.status === "signed" ? i : { ...i, status: "discarded" })),
     /** The owner edited the card in the form: the new calls replace the proposal's call (back to draft, valid by form rules). */
     replaceCalls: (id: string, calls: PlannedCall[], recipientId: number | null) => patchCard(id, (i) => ({ ...i, calls, edited: true, status: "draft", recipientId: recipientId ?? i.recipientId })),
+    /** Trading rules card: the worker accepted the NEP-413 confirmation. */
+    markRulesConfirmed: (id: string, at: number) => update((cur) => cur.map((i) => (isTradingRulesItem(i) && i.id === id ? { ...i, status: "signed", confirmedAt: at } : i))),
+    discardRules: (id: string) => update((cur) => cur.map((i) => (isTradingRulesItem(i) && i.id === id && i.status === "draft" ? { ...i, status: "discarded" } : i))),
     markSigned: (ids: string[], hash: string | null) => update((cur) => cur.map((i) => (isProposalItem(i) && ids.includes(i.id) ? { ...i, status: "signed", hash } : i))),
     notice: (text: string, tone: "error" | "info" = "info") => update((cur) => [...cur, { kind: "notice", id: nid(), text, tone }]),
   };

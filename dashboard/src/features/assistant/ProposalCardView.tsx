@@ -1,7 +1,14 @@
-import { Button, Icons, ProposalActions, ProposalCard } from "@/kit";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { Button, Callout, cx, Hash, Icons, ProposalActions, ProposalCard, SigningHint } from "@/kit";
 import { explorerTxUrl } from "@/lib/config";
 import { proposalRows, type RowLookups } from "@/lib/proposals";
-import { effectiveProposal, type ProposalItem } from "./model";
+import { confirmTradingRules } from "@/lib/tradingClient";
+import { hashRuleSet } from "@/lib/tradingRules";
+import { RulesView } from "@/features/trading/RulesView";
+import { tradingKeys, useTradingStatus } from "@/features/trading/useTrading";
+import { useWallet } from "@/features/wallet/WalletProvider";
+import { effectiveProposal, type ProposalItem, type TradingRulesItem } from "./model";
 
 const EDITABLE = new Set(["AddRecipient", "AddSchedule", "UpdateSchedule"]);
 
@@ -96,5 +103,98 @@ export function ProposalCardView({
         ) : undefined
       }
     />
+  );
+}
+
+/**
+ * Trading rules proposed by the assistant (ADR-0005). The card shows the rules rendered by the dashboard from the JSON, not the
+ * model's words, and recomputes the hash itself. "Confirm rules" asks the wallet for a NEP-413 signature over the exact message
+ * the dashboard built (see `confirmTradingRules`), so it is refused if the worker's hash or message differ.
+ */
+export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: { item: TradingRulesItem; canSign: boolean; onConfirmed: (at: number) => void; onDiscard: () => void }) {
+  const { accountId, signMessage } = useWallet();
+  const qc = useQueryClient();
+  const { status } = useTradingStatus();
+  const [localHash, setLocalHash] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const p = item.proposal;
+
+  useEffect(() => {
+    let live = true;
+    void hashRuleSet(p.rules).then((h) => live && setLocalHash(h));
+    return () => {
+      live = false;
+    };
+  }, [p.rules]);
+
+  if (item.status === "discarded") return <p className="m-0 px-1 text-xs text-ink-subtle">Discarded trading rules: {p.rules.name}</p>;
+
+  const mismatch = localHash !== null && localHash !== p.hash;
+  const live = status?.enabled ? status : null;
+  const signed = item.status === "signed";
+  const blocked = !p.validation.ok || mismatch || localHash === null || live === null || !canSign || accountId === null;
+
+  const confirm = async () => {
+    if (accountId === null || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await confirmTradingRules(p.rules, { accountId, signMessage });
+      void qc.invalidateQueries({ queryKey: tradingKeys.all });
+      onConfirmed(r.active?.confirmed_at_ms ?? Date.now());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <article className={cx("card-in flex flex-col gap-3 rounded-card border bg-surface p-4", mismatch || !p.validation.ok ? "border-danger/60" : "border-line", signed && "just-signed")}>
+      <header className="flex items-center gap-2">
+        <h3 className="m-0 flex-1 text-sm font-semibold">Trading rules</h3>
+        <span className={cx("inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px]", signed ? "border-ok/50 bg-ok-tint text-ok" : "border-line-strong text-ink-muted")}>
+          {signed && <Icons.Check size={11} strokeWidth={3} />}
+          {signed ? "Active" : "draft"}
+        </span>
+      </header>
+      <RulesView rules={p.rules} hash={localHash ?? undefined} />
+      <p className="m-0 text-xs text-ink-subtle">Shown by the dashboard from the rules data. The hash above was computed in your browser.</p>
+      {mismatch && <Callout accent="danger">The hash sent by the assistant does not match these rules. Do not confirm. Ask again or discard this card.</Callout>}
+      {p.validation.errors.map((e, i) => (
+        <Callout key={`e${i}`} accent="danger">
+          {e}
+        </Callout>
+      ))}
+      {p.validation.warnings.map((w, i) => (
+        <Callout key={`w${i}`} accent="warn">
+          {w}
+        </Callout>
+      ))}
+      {!signed && live && (
+        <p className="m-0 text-xs text-ink-muted">
+          You authorize these rules to trade spot on Hyperliquid <strong>{live.hl_network}</strong> for account <Hash value={live.hl_account} short={false} copy={false} className="align-bottom" />. The bot runs them without asking again, until you stop it.
+        </p>
+      )}
+      {!signed && status !== null && !status.enabled && <Callout accent="warn">Trading is switched off on the worker, so these rules cannot be confirmed.</Callout>}
+      {!signed && !canSign && <Callout accent="neutral">Only the vault owner can confirm rules.</Callout>}
+      {error && <Callout accent="danger">{error}</Callout>}
+      {signed ? (
+        <p className="m-0 flex items-center gap-1.5 text-xs text-ok">
+          <Icons.Check size={13} /> Confirmed with your signature. The bot now runs these rules.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {busy && <SigningHint />}
+          <Button size="sm" variant="ghost" onClick={onDiscard} disabled={busy}>
+            Discard
+          </Button>
+          <Button size="sm" variant="approve" icon={<Icons.ShieldCheck size={14} />} loading={busy} disabled={blocked || busy} onClick={() => void confirm()}>
+            Confirm rules
+          </Button>
+        </div>
+      )}
+    </article>
   );
 }

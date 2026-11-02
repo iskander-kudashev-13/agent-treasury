@@ -12,6 +12,7 @@ import { createAgentRuntime, defaultRpc } from "./near.js";
 import { OneClickClient } from "./oneclick.js";
 import { SimulatedOneClient } from "./oneclick-simulated.js";
 import { PayoutLoop } from "./payout-loop.js";
+import { createTradingModule } from "./trading/index.js";
 
 if (process.env.NODE_ENV !== "production") dotenv.config();
 
@@ -51,6 +52,17 @@ const loop = new PayoutLoop({
   },
 });
 
+const ai = createAiDeps(config, oneclick);
+// Hyperliquid trading module: off unless TRADING_ENABLED=true (config validation guarantees AI_SESSION_SECRET then).
+const trading = config.TRADING_ENABLED && ai ? createTradingModule(config, ai) : undefined;
+if (trading && ai) {
+  ai.trading = trading.authoring;
+  console.warn(
+    `TRADING ENABLED: hl=${config.HL_NETWORK} account=${config.HL_MASTER_ADDRESS} agent=${config.TRADER_AGENT_ID} api-wallet=${trading.service.status().api_wallet.address}`,
+  );
+  if (config.HL_NETWORK === "mainnet") console.warn("\x1b[1;31mHYPERLIQUID MAINNET (TRADING_ALLOW_MAINNET=true): real orders, local mode, no TEE.\x1b[0m");
+}
+
 const app = createApp({
   mode: config.RUN_MODE,
   network: config.NEAR_NETWORK,
@@ -71,12 +83,15 @@ const app = createApp({
   attestation: runtime.attestation,
   adminToken: config.WORKER_ADMIN_TOKEN,
   dashboardOrigin: config.DASHBOARD_ORIGIN,
-  ai: createAiDeps(config, oneclick),
+  ai,
+  ...(trading ? { trading: trading.routeDeps } : {}),
 });
 
 runtime.startRegistration();
 // The server starts right away; payout runs wait for registration (dry runs only read, so they may start at once).
 loop.schedule(config.LOOP_INTERVAL_MIN * 60_000, () => config.DRY_RUN || runtime.registration().state === "registered");
+
+trading?.service.start();
 
 console.log(`Server starting on port ${config.PORT}...`);
 serve({ fetch: app.fetch, port: config.PORT });

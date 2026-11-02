@@ -21,9 +21,14 @@ export function parseTokens(body: unknown): OneClickToken[] {
   });
 }
 
-/** The USDC asset id on `chain`, or null (Tron has no USDC in 1Click). Same rule as the worker. */
+/**
+ * The USDC asset id on `chain`, or null (Tron has no USDC in 1Click). Same rule as the worker.
+ * `hypercore` lists two USDC tokens; only the HyperCore spot one (hip1) is a valid destination (ADR-0005).
+ */
 export function findUsdcAsset(tokens: OneClickToken[], chain: string): string | null {
-  return tokens.find((t) => t.blockchain === chain && t.symbol.toUpperCase() === "USDC")?.assetId ?? null;
+  const usdc = tokens.filter((t) => t.blockchain === chain && t.symbol.toUpperCase() === "USDC");
+  if (chain === "hypercore") return usdc.find((t) => t.assetId.includes(":hip1:"))?.assetId ?? null;
+  return usdc[0]?.assetId ?? null;
 }
 
 export async function fetchTokens(signal?: AbortSignal): Promise<OneClickToken[]> {

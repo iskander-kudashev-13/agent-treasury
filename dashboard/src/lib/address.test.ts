@@ -10,6 +10,10 @@ describe("normalizeAddress", () => {
     expect(() => normalizeAddress("arb", "abc")).toThrow();
     expect(() => normalizeAddress("eth", "0x" + "g".repeat(40))).toThrow();
   });
+  it("treats hypercore (Hyperliquid) as an EVM address chain", () => {
+    expect(normalizeAddress("hypercore", "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01")).toBe("0xabcdef0123456789abcdef0123456789abcdef01");
+    expect(() => normalizeAddress("hypercore", "abc")).toThrow(/EVM/);
+  });
   it("validates sol base58 length", () => {
     expect(normalizeAddress("sol", "11111111111111111111111111111111")).toBe("11111111111111111111111111111111");
     expect(() => normalizeAddress("sol", "short")).toThrow();

@@ -1,0 +1,60 @@
+# Derived from NearDeFi/shade-agent-template (Apache-2.0). Modified: pnpm instead of npm, worker build, repo-root context
+# (the worker links ../sdk), see the build commands below.
+# The image digest of this build ends up in the TEE measurements (app-compose hash), so keep inputs pinned.
+#
+# BUILD CONTEXT = REPO ROOT (the worker depends on `link:../sdk`):
+#   docker build -f Dockerfile.worker -t agent-treasury-worker .
+# `shade deploy` uses dirname(dockerfile_path) as the context, so worker/deployment.yaml points at this file
+# (`dockerfile_path: ../Dockerfile.worker`). Only worker/ and sdk/ sources are sent (Dockerfile.worker.dockerignore).
+ARG SOURCE_DATE_EPOCH=0
+
+FROM node:22-alpine@sha256:92d51e5f20b7ff58faa5a969af1a1cec6cbec3fbff7e0f523242b9b5c85ad887 AS base
+ARG SOURCE_DATE_EPOCH=0
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+RUN corepack enable && corepack prepare pnpm@11.22.0 --activate
+WORKDIR /app
+
+# --- SDK (agent-treasury-sdk): build once, ship dist + production dependencies ---------------------------------------
+FROM base AS sdk-build
+WORKDIR /app/sdk
+COPY sdk/package.json sdk/pnpm-lock.yaml sdk/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY sdk/tsconfig.json sdk/tsconfig.build.json ./
+COPY sdk/src/ ./src/
+RUN pnpm build
+
+FROM base AS sdk-deps
+WORKDIR /app/sdk
+COPY sdk/package.json sdk/pnpm-lock.yaml sdk/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --prod
+
+# --- Worker ----------------------------------------------------------------------------------------------------------
+FROM base AS deps
+WORKDIR /app/worker
+# `link:../sdk` only needs the directory to exist while installing.
+COPY sdk/package.json /app/sdk/package.json
+COPY worker/package.json worker/pnpm-lock.yaml worker/pnpm-workspace.yaml worker/.npmrc ./
+RUN pnpm install --frozen-lockfile --prod
+
+FROM base AS builder
+WORKDIR /app/worker
+COPY --from=sdk-build /app/sdk /app/sdk
+COPY worker/package.json worker/pnpm-lock.yaml worker/pnpm-workspace.yaml worker/.npmrc worker/tsconfig.json worker/tsconfig.build.json ./
+RUN pnpm install --frozen-lockfile
+COPY worker/src/ ./src/
+RUN pnpm build
+
+FROM base AS runner
+ENV NODE_ENV=production
+WORKDIR /app/worker
+# The worker's node_modules/agent-treasury-sdk is a relative symlink to ../../sdk, so the layout /app/{sdk,worker} matters.
+COPY --from=sdk-deps /app/sdk/node_modules /app/sdk/node_modules
+COPY --from=sdk-build /app/sdk/dist /app/sdk/dist
+COPY sdk/package.json /app/sdk/package.json
+COPY --from=deps /app/worker/node_modules ./node_modules
+COPY --from=builder /app/worker/dist ./dist
+COPY worker/package.json worker/tee.config.json ./
+# audit L10: do not run as root
+USER node
+EXPOSE 3000
+CMD ["node", "dist/index.js"]

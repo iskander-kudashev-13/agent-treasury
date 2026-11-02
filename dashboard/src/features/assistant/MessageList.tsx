@@ -3,7 +3,7 @@ import { Callout, Chip, Message, TypingDots } from "@/kit";
 import type { RowLookups } from "@/lib/proposals";
 import { DataView } from "./DataViews";
 import type { ChatItem, ProposalItem } from "./model";
-import { ProposalCardView } from "./ProposalCardView";
+import { ProposalCardView, TradingRulesCardView } from "./ProposalCardView";
 
 export interface CardHandlers {
   onQueue: (id: string) => void;
@@ -11,6 +11,9 @@ export interface CardHandlers {
   onDiscard: (id: string) => void;
   onEdit: (item: ProposalItem) => void;
   onPauseNow: (item: ProposalItem) => void;
+  /** Trading rules card (ADR-0005). */
+  onRulesConfirmed: (id: string, at: number) => void;
+  onRulesDiscard: (id: string) => void;
 }
 
 /**
@@ -94,6 +97,8 @@ export function MessageList({
                 onPauseNow={() => handlers.onPauseNow(i)}
               />
             );
+          case "trading_rules":
+            return <TradingRulesCardView key={i.id} item={i} canSign={canSign} onConfirmed={(at) => handlers.onRulesConfirmed(i.id, at)} onDiscard={() => handlers.onRulesDiscard(i.id)} />;
           case "notice":
             return (
               <Callout key={i.id} accent={i.tone === "error" ? "danger" : "info"}>

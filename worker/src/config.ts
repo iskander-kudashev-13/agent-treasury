@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { checkFundingConfig } from "./trading/funding.js";
+import type { HardLimits } from "./trading/types.js";
 
 /** Boolean env flag: only the literal strings "true" / "false" are accepted (no silent truthiness). */
 const boolFlag = (def: boolean) =>
@@ -9,10 +11,11 @@ const boolFlag = (def: boolean) =>
     .transform((v) => v === "true");
 
 const emptyToUndefined = (v: unknown) => (v === "" ? undefined : v);
+/** Human USDC decimal ("20", "0.5"): at most 6 decimals, same shape as the rules DSL. */
+const decString = (def: string) => z.string().regex(/^\d+(\.\d{1,6})?$/, "expected a decimal number such as 20 or 0.5").default(def);
 const optionalString = z.preprocess(emptyToUndefined, z.string().min(1).optional());
 
-const envSchema = z
-  .object({
+const baseEnvShape = z.object({
     NEAR_NETWORK: z.enum(["testnet", "mainnet"]).default("testnet"),
     /** The vault IS the Shade agent contract (docs/adr/0001). Replaces the template's AGENT_CONTRACT_ID. */
     VAULT_CONTRACT_ID: z.string().min(2),
@@ -53,8 +56,43 @@ const envSchema = z
     AI_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
     /** Use the first X-Forwarded-For hop for rate limiting. Only behind a proxy you control. */
     AI_TRUST_PROXY: boolFlag(false),
-  })
-  .superRefine((env, ctx) => {
+
+    // ---- Hyperliquid spot trading (docs/adr/0005). Everything below is inert while TRADING_ENABLED=false. ----
+    TRADING_ENABLED: boolFlag(false),
+    HL_NETWORK: z.enum(["mainnet", "testnet"]).default("testnet"),
+    /** Explicit opt-in for HL_NETWORK=mainnet (real money), like ALLOW_INSECURE_LOCAL_MODE. */
+    TRADING_ALLOW_MAINNET: boolFlag(false),
+    /** The owner's DEDICATED Hyperliquid account. Must equal the single `hypercore` allowlist entry of the trader mandate. */
+    HL_MASTER_ADDRESS: z.preprocess(emptyToUndefined, z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected 0x + 40 hex").optional()),
+    /** Tests only: otherwise the API wallet is generated into TRADING_STATE_DIR. */
+    HL_API_WALLET_PRIVATE_KEY: z.preprocess(emptyToUndefined, z.string().regex(/^0x[0-9a-fA-F]{64}$/, "expected 0x + 64 hex").optional()),
+    TRADING_STATE_DIR: z.string().min(1).default("./.trading"),
+    TRADER_AGENT_ID: z.string().regex(/^[a-z0-9-]{1,32}$/).default("hl-trader"),
+    /** Key agent account of the trader and its function-call key (created by sdk/scripts/setup-key-agent.ts). */
+    TRADER_NEAR_ACCOUNT_ID: optionalString,
+    TRADER_NEAR_PRIVATE_KEY: optionalString,
+    TRADING_TICK_SEC: z.coerce.number().int().min(15).max(600).default(60),
+    /** Comma-separated HL spot display names, quote USDC. */
+    TRADING_ALLOWED_PAIRS: z
+      .string()
+      .default("HYPE/USDC")
+      .transform((v) => v.split(",").map((x) => x.trim()).filter((x) => x !== ""))
+      .pipe(z.array(z.string().regex(/^[A-Za-z0-9]{1,16}\/USDC$/, "expected BASE/USDC")).min(1).max(3)),
+    TRADING_MIN_PAIR_VOLUME_USDC: decString("1000000"),
+    TRADING_HARD_MAX_POSITION_USDC: decString("50"),
+    TRADING_HARD_MAX_ORDER_USDC: decString("20"),
+    TRADING_HARD_DAILY_LOSS_USDC: decString("10"),
+    TRADING_HARD_MAX_ORDERS_PER_DAY: z.coerce.number().int().min(1).max(50).default(20),
+    TRADING_PRICE_BAND_BPS: z.coerce.number().int().min(10).max(200).default(100),
+    TRADING_DEADMAN_SEC: z.coerce.number().int().min(45).max(3600).default(180),
+    TRADING_TOPUP_ENABLED: boolFlag(true),
+    TRADING_TOPUP_USDC: decString("20"),
+    TRADING_TOPUP_FLOOR_USDC: decString("10"),
+    /** Baseline (ms epoch) for net_funded. Unset = the time of the first tick, persisted in meta.json. */
+    TRADING_START_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().optional()),
+});
+
+const envSchema = baseEnvShape.superRefine((env, ctx) => {
     if (env.ONECLICK_MODE === "simulated" && env.NEAR_NETWORK !== "testnet") {
       ctx.addIssue({
         code: "custom",
@@ -76,9 +114,56 @@ const envSchema = z
         path: ["SPONSOR_ACCOUNT_ID"],
       });
     }
-  });
+    if (env.TRADING_ENABLED) validateTrading(env, ctx);
+});
+
+type Env = z.infer<typeof baseEnvShape>;
+
+/** Cross-field rules of the trading module. Only runs when TRADING_ENABLED=true. */
+function validateTrading(env: Env, ctx: z.RefinementCtx): void {
+  const bad = (path: string, message: string) => {
+    ctx.addIssue({ code: "custom", message, path: [path] });
+  };
+  if (!env.AI_SESSION_SECRET) bad("AI_SESSION_SECRET", "TRADING_ENABLED=true requires AI_SESSION_SECRET (owner sessions protect the trading routes)");
+  if (env.RUN_MODE === "tee") bad("TRADING_ENABLED", "trading is local-mode only for now: its hard limits are not part of the TEE measurements (ADR-0005)");
+  if (!env.HL_MASTER_ADDRESS) bad("HL_MASTER_ADDRESS", "TRADING_ENABLED=true requires HL_MASTER_ADDRESS (the owner's dedicated Hyperliquid account)");
+  if (env.HL_NETWORK === "mainnet" && env.HL_API_WALLET_PRIVATE_KEY)
+    bad("HL_API_WALLET_PRIVATE_KEY", "HL_API_WALLET_PRIVATE_KEY is not accepted on mainnet: let the worker generate the API wallet (stored 0600 in TRADING_STATE_DIR) so the key never sits in env files");
+  if (env.HL_NETWORK === "mainnet" && !env.TRADING_ALLOW_MAINNET)
+    bad("HL_NETWORK", "HL_NETWORK=mainnet trades real money: set TRADING_ALLOW_MAINNET=true to accept that explicitly");
+  if (env.TRADING_DEADMAN_SEC < 3 * env.TRADING_TICK_SEC) bad("TRADING_DEADMAN_SEC", "TRADING_DEADMAN_SEC must be at least 3 x TRADING_TICK_SEC");
+  const micro = (v: string): bigint => {
+    // Malformed values were already reported by the field schema; do not throw here.
+    if (!/^\d+(\.\d{1,6})?$/.test(v)) return 0n;
+    const [i = "0", f = ""] = v.split(".");
+    return BigInt(i) * 1_000_000n + BigInt(f.padEnd(6, "0"));
+  };
+  if (micro(env.TRADING_HARD_MAX_ORDER_USDC) < 10_000_000n) bad("TRADING_HARD_MAX_ORDER_USDC", "must be at least 10 (Hyperliquid minimum order value)");
+  if (micro(env.TRADING_HARD_MAX_POSITION_USDC) < micro(env.TRADING_HARD_MAX_ORDER_USDC)) bad("TRADING_HARD_MAX_POSITION_USDC", "must not be below TRADING_HARD_MAX_ORDER_USDC");
+  if (micro(env.TRADING_HARD_DAILY_LOSS_USDC) <= 0n) bad("TRADING_HARD_DAILY_LOSS_USDC", "must be greater than 0");
+  if (micro(env.TRADING_MIN_PAIR_VOLUME_USDC) <= 0n) bad("TRADING_MIN_PAIR_VOLUME_USDC", "must be greater than 0");
+  if (env.TRADING_TOPUP_ENABLED) {
+    if (!env.TRADER_NEAR_ACCOUNT_ID || !env.TRADER_NEAR_PRIVATE_KEY)
+      bad("TRADER_NEAR_ACCOUNT_ID", "TRADER_NEAR_ACCOUNT_ID and TRADER_NEAR_PRIVATE_KEY are required while TRADING_TOPUP_ENABLED=true");
+    const fundingErr = checkFundingConfig({ masterAddress: env.HL_MASTER_ADDRESS ?? "", topupUsdc: env.TRADING_TOPUP_USDC, floorUsdc: env.TRADING_TOPUP_FLOOR_USDC });
+    if (fundingErr && env.HL_MASTER_ADDRESS) bad("TRADING_TOPUP_USDC", fundingErr);
+  }
+}
 
 export type Config = z.infer<typeof envSchema>;
+
+/** The env hard limits of the trading module in the shape the rules validator and the engine use. */
+export function hardLimitsOf(c: Config): HardLimits {
+  return {
+    maxPositionUsdc: c.TRADING_HARD_MAX_POSITION_USDC,
+    maxOrderUsdc: c.TRADING_HARD_MAX_ORDER_USDC,
+    dailyLossUsdc: c.TRADING_HARD_DAILY_LOSS_USDC,
+    maxOrdersPerDay: c.TRADING_HARD_MAX_ORDERS_PER_DAY,
+    allowedPairs: c.TRADING_ALLOWED_PAIRS,
+    minPairVolumeUsdc: c.TRADING_MIN_PAIR_VOLUME_USDC,
+    priceBandBps: c.TRADING_PRICE_BAND_BPS,
+  };
+}
 
 /**
  * H1: in TEE mode the values that decide where money goes come from `tee.config.json`, which is baked into the image

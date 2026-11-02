@@ -18,6 +18,7 @@ import {
   occurrences,
 } from "./frequency.js";
 import { formatUsdcHuman } from "./money.js";
+import type { TradingRulesCard } from "./trading.js";
 import type { Agent, Mandate, VaultReader } from "./views.js";
 
 export interface Validation {
@@ -98,7 +99,9 @@ export type Proposal =
   | PauseAgentProposal
   | ResumeAgentProposal
   | PauseVaultProposal
-  | ResumeVaultProposal;
+  | ResumeVaultProposal
+  /** No contract `call`: the owner signs a NEP-413 message in the dashboard (ADR-0005). */
+  | TradingRulesCard;
 
 export type ProposalType = Proposal["type"];
 
@@ -141,6 +144,8 @@ interface PendingRecipient {
 /** State shared by the tools of one assistant turn (a "what the batch will look like" overlay on chain state). */
 export class TurnState {
   readonly proposals: Proposal[] = [];
+  /** Rejected `propose_trading_rules` attempts in this turn (bounds the fix-and-retry loop). */
+  tradingFailures = 0;
   readonly pendingRecipients = new Map<number, PendingRecipient>();
   readonly mandateOverrides = new Map<string, { mandate: Mandate; proposalId: string }>();
   private counter = 0;

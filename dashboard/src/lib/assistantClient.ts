@@ -4,6 +4,7 @@
  */
 import { VAULT_ID, WORKER_URL } from "./config";
 import { parseProposal, type Proposal } from "./proposals";
+import { parseTradingRulesProposal, type TradingRulesProposal } from "./tradingClient";
 
 /* ───────────── SSE parsing ───────────── */
 
@@ -75,6 +76,8 @@ export type DataKind = "table" | "number" | "upcoming";
 export type ChatEvent =
   | { type: "text"; delta: string }
   | { type: "proposal"; proposal: Proposal }
+  /** ADR-0005: trading rules for NEP-413 confirmation; not a vault transaction, so not a `Proposal`. */
+  | { type: "trading_rules"; proposal: TradingRulesProposal }
   | { type: "malformed_proposal" }
   | { type: "question"; text: string; options: string[] }
   | { type: "data"; kind: DataKind; payload: unknown }
@@ -97,6 +100,10 @@ export function parseChatEvent(m: SseMessage): ChatEvent | null {
     case "text":
       return typeof j.delta === "string" ? { type, delta: j.delta } : null;
     case "proposal": {
+      if (isObj(j.proposal) && j.proposal.type === "TradingRules") {
+        const t = parseTradingRulesProposal(j.proposal);
+        return t ? { type: "trading_rules", proposal: t } : { type: "malformed_proposal" };
+      }
       const p = parseProposal(j.proposal);
       return p ? { type, proposal: p } : { type: "malformed_proposal" };
     }

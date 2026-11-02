@@ -6,6 +6,9 @@ import { AiInfo } from "./info.js";
 import { createAiRouter } from "./route.js";
 import type { AiDeps } from "./route.js";
 
+/** Same pin as sdk/src/chains.ts: HyperCore spot USDC (hip1). */
+export const HYPERCORE_USDC_ASSET = "1cs_v1:hypercore:hip1:0x6d1e7cde53ba9467b783cb7c530ce054";
+
 const defaultRpc = (network: Config["NEAR_NETWORK"]) => (network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
 
 /** Wires the assistant: a READ-ONLY RPC provider (no keys, no signer) and the NEAR AI settings. */
@@ -31,6 +34,11 @@ export function createAiDeps(config: Config, oneclick: OneClickPort): AiDeps | u
     },
     view: (method, args) => provider.callFunction(config.VAULT_CONTRACT_ID, method, args),
     usdcAsset: async (chain) => {
+      // Hyperliquid spot USDC is pinned (1Click lists two USDC tokens on hypercore; the erc20 one must never be used).
+      if (chain === "hypercore") {
+        if (!(oneclick instanceof OneClickClient)) return HYPERCORE_USDC_ASSET;
+        return (await oneclick.getTokens()).some((x) => x.assetId === HYPERCORE_USDC_ASSET) ? HYPERCORE_USDC_ASSET : null;
+      }
       // Simulated 1Click (testnet reproduction) has no token list: synthesize an id it accepts.
       if (!(oneclick instanceof OneClickClient)) return `nep141:${chain}-usdc.omft.near`;
       const t = (await oneclick.getTokens()).find((x) => x.blockchain === chain && x.symbol.toUpperCase() === "USDC");

@@ -1,5 +1,5 @@
 # Derived from NearDeFi/shade-agent-template (Apache-2.0). Modified for Agent Treasury.
-# `shade deploy` (TEE) rewrites `image:` with the digest of the image it builds from ./Dockerfile.
+# `shade deploy` (TEE) rewrites `image:` with the digest of the image it builds from ../Dockerfile.worker (context = repo root).
 #
 # SECURITY (audit H1): the TEE measurements cover this file's TEXT and the image digest, but NOT the values of `${...}`
 # placeholders (those arrive as unmeasured env). So everything that decides where money goes is a LITERAL below and is

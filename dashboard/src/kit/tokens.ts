@@ -13,6 +13,7 @@ export const CHAIN_COLORS: Record<string, string> = {
   sol: "#A78BFA",
   tron: "#F87171",
   near: "#2ECC71",
+  hypercore: "#2DD4BF",
 };
 
 const CHAIN_NAMES: Record<string, string> = {
@@ -25,6 +26,7 @@ const CHAIN_NAMES: Record<string, string> = {
   sol: "Solana",
   tron: "Tron",
   near: "NEAR",
+  hypercore: "Hyperliquid",
 };
 
 const FALLBACK_CHAIN_COLOR = "#8A93A3";
@@ -40,6 +42,7 @@ export const CHAIN_OPTIONS = [
   { id: "arb", label: "Arbitrum" },
   { id: "sol", label: "Solana" },
   { id: "near", label: "NEAR" },
+  { id: "hypercore", label: "Hyperliquid" },
 ] as const;
 export const CHAIN_IDS: readonly string[] = CHAIN_OPTIONS.map((c) => c.id);
 

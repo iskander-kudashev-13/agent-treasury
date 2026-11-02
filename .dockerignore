@@ -1,0 +1,14 @@
+# Fallback for builders that ignore Dockerfile.worker.dockerignore (classic builder, some CI): never send secrets or state.
+# The allow-list in Dockerfile.worker.dockerignore is the real filter under BuildKit.
+**/.env
+**/.env.*
+!**/.env.example
+.trading
+**/.trading
+**/node_modules
+.git
+mcp/.env*
+worker/.env*
+!worker/.env.example
+**/*.pem
+**/api-wallet.json

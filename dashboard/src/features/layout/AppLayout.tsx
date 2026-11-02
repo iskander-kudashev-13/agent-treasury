@@ -15,6 +15,7 @@ export const NAV = [
   { label: "Agents", to: "/agents", mobile: true },
   { label: "Payments", to: "/payments", mobile: true },
   { label: "Payouts", to: "/payouts", mobile: true },
+  { label: "Trading", to: "/trading", mobile: false },
   { label: "Policy", to: "/policy", mobile: false },
 ] as const;
 
@@ -23,7 +24,7 @@ const isActive = (pathname: string, to: string) => (to === "/" ? pathname === "/
 function MobileNav() {
   const { pathname } = useLocation();
   const [more, setMore] = useState(false);
-  const policyActive = isActive(pathname, "/policy");
+  const policyActive = NAV.some((n) => !n.mobile && isActive(pathname, n.to)); // "More" is bold when one of its items is open
   return (
     <nav aria-label="Main (mobile)" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-bg/95 backdrop-blur md:hidden">
       {NAV.filter((n) => n.mobile).map((n) => (

@@ -1,4 +1,5 @@
-const EVM_CHAINS = new Set(["eth", "base", "arb", "op", "pol", "bsc", "avax", "gnosis", "bera", "monad", "xlayer", "plasma"]);
+/** `hypercore` = Hyperliquid HyperCore spot (ADR-0005): a plain 0x + 40 hex address. */
+const EVM_CHAINS = new Set(["eth", "base", "arb", "op", "pol", "bsc", "avax", "gnosis", "bera", "monad", "xlayer", "plasma", "hypercore"]);
 const EVM_RE = /^0x[0-9a-fA-F]{40}$/;
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
