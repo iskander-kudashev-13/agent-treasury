@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { apiWalletName, buildTraderSetup, fmtDec, fmtSigned, hlAppUrl, pnlAccent, ratio, reasonText } from "./tradingView";
+import type { AgentView } from "./types";
+import { apiWalletName, buildTraderSetup, checkHlAccount, mainnetSetupCommands, trustedHlAccount, fmtDec, fmtSigned, hlAppUrl, pnlAccent, ratio, reasonText } from "./tradingView";
 
 const NOW = 1_800_000_000_000;
 const HL = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01";
@@ -58,11 +59,55 @@ describe("Hyperliquid helpers", () => {
   it("links the right app and names the API wallet with a 30 day expiry", () => {
     expect(hlAppUrl("mainnet")).toBe("https://app.hyperliquid.xyz/API");
     expect(hlAppUrl("testnet")).toBe("https://app.hyperliquid-testnet.xyz/API");
-    expect(apiWalletName(NOW)).toBe(`agent-treasury valid_until ${NOW + 30 * 86_400_000}`);
+    expect(apiWalletName(NOW)).toBe(`agent-treasury valid_until ${NOW + 47 * 3_600_000}`);
   });
   it("explains known halt reasons", () => {
     expect(reasonText("PERP_POSITION_DETECTED", null)).toMatch(/spot only/);
     expect(reasonText(null, null)).toBeNull();
     expect(reasonText("OTHER", "x")).toBe("OTHER x");
+  });
+});
+
+const trader = (allowlist: { chain: string; address: string; label: string | null }[], extra: Record<string, unknown> = {}): AgentView => ({ id: "hl-trader", status: "Active", mandate: { recipients_mode: "Allowlist", allowed_chains: ["hypercore"], allowlist, ...extra } }) as unknown as AgentView;
+
+describe("checkHlAccount (audit M7)", () => {
+  const t = trader([{ chain: "hypercore", address: HL.toLowerCase(), label: null }]);
+  it("accepts the account in the on-chain allowlist, case-insensitively", () => {
+    expect(checkHlAccount(HL, t)).toEqual({ kind: "ok", account: HL.toLowerCase() });
+    expect(trustedHlAccount(t)).toBe(HL.toLowerCase());
+  });
+  it("flags a different account reported by the worker", () => {
+    const other = "0x" + "11".repeat(20);
+    expect(checkHlAccount(other, t)).toEqual({ kind: "mismatch", reported: other, onchain: HL.toLowerCase() });
+  });
+  it("cannot verify without an agent or with several HL addresses", () => {
+    expect(checkHlAccount(HL, null).kind).toBe("unverified");
+    expect(checkHlAccount(HL, trader([{ chain: "hypercore", address: HL, label: null }], { recipients_mode: "Open" })).kind).toBe("unverified");
+    expect(checkHlAccount(HL, trader([{ chain: "hypercore", address: HL, label: null }], { allowed_chains: [] })).kind).toBe("unverified");
+    expect(checkHlAccount(HL, trader([{ chain: "hypercore", address: HL, label: null }], { allowed_chains: ["hypercore", "base"] })).kind).toBe("unverified");
+    expect(checkHlAccount(HL, trader([])).kind).toBe("unverified");
+    expect(checkHlAccount(HL, trader([{ chain: "hypercore", address: "0x" + "22".repeat(20), label: null }, { chain: "hypercore", address: HL, label: null }])).kind).toBe("unverified");
+  });
+});
+
+describe("mainnetSetupCommands (audit M6)", () => {
+  const cmd = mainnetSetupCommands({ owner: "owner.near", vault: "vault.near", master: HL.toLowerCase(), name: "hl-trader", fundNear: "0.35" });
+  it("uses the CLI with --confirm-mainnet and the session mandate", () => {
+    expect(cmd).toContain("--confirm-mainnet");
+    expect(cmd).toContain("--network mainnet");
+    expect(cmd).toContain('"approval_threshold": "0"');
+    expect(cmd).toContain('"daily_limit": "25000000"');
+    expect(cmd).toContain('"per_tx_limit": "25000000"');
+    expect(cmd).toContain('"max_payments_per_day": 1');
+    expect(cmd).toContain(`"address": "${HL.toLowerCase()}"`);
+    expect(cmd).toContain("169200000");
+  });
+  it("never contains a key", () => {
+    expect(cmd).not.toContain("OWNER_PRIVATE_KEY=ed25519");
+    expect(cmd).toContain("--dry-run");
+    expect(cmd.indexOf("--dry-run")).toBeLessThan(cmd.indexOf("--confirm-mainnet"));
+    expect(cmd).toContain("jq -r .private_key");
+    expect(cmd).not.toContain("setup-key-agent -- ");
+    expect(cmd).not.toMatch(/ed25519:[1-9A-HJ-NP-Za-km-z]{40,}/);
   });
 });

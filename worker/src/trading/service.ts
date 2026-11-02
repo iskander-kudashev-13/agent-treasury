@@ -482,6 +482,7 @@ export class TradingService {
       state_reason: "NO_TICK_YET",
       state_detail: "the worker has not completed a trading tick yet",
       api_wallet: { address: this.safeAddress(), approved: false, name: null, valid_until_ms: null },
+      other_approved_agents: [],
       balances: { usdc_free: "0", usdc_total: "0", equity_usdc: "0", positions: [] },
       pnl: { today_usdc: "0", total_usdc: "0", net_funded_usdc: "0", day_start_equity_usdc: "0" },
       limits: {

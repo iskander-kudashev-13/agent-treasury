@@ -374,6 +374,11 @@ describe("on-chain status", () => {
 });
 
 describe("other gates", () => {
+  it("lists other approved API wallets in the status (audit M7), not our own", async () => {
+    hl.agents = [...hl.agents, { address: "0x" + "ab".repeat(20), name: "old", validUntilMs: null }];
+    const r = await tick(T0, active());
+    expect(r.status.other_approved_agents).toEqual([{ address: "0x" + "ab".repeat(20), name: "old", valid_until_ms: null }]);
+  });
   it("API wallet not approved", async () => {
     hl.agents = [];
     const r = await tick(T0, active());

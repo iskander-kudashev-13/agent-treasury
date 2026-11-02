@@ -1,0 +1,13 @@
+{
+  "daily_limit": "25000000",
+  "per_tx_limit": "25000000",
+  "approval_threshold": "0",
+  "max_payments_per_day": 1,
+  "allowed_chains": ["hypercore"],
+  "recipients_mode": "Allowlist",
+  "allowlist": [
+    { "chain": "hypercore", "address": "0x0000000000000000000000000000000000000001", "label": "Owner HL" }
+  ],
+  "recipients": [],
+  "expires_at": "REPLACE_WITH_UNIX_MS_NOW_PLUS_48H_MAX"
+}

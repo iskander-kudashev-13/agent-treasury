@@ -267,6 +267,8 @@ export interface TradingStatus {
   vault: string;
   agent_id: string;
   api_wallet: { address: string; approved: boolean; name: string | null; valid_until_ms: number | null };
+  /** Other API wallets approved on the HL master (`extraAgents`), i.e. not the bot's current one. Empty = none seen. */
+  other_approved_agents: { address: string; name: string | null; valid_until_ms: number | null }[];
   balances: {
     usdc_free: Dec;
     usdc_total: Dec;

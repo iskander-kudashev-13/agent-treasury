@@ -3,8 +3,8 @@
  * Auth: `owner` = bearer token of the NEP-413 assistant session (`/ai/session`); `confirm` = a NEP-413 signature over the
  * message below. Everything coming back is untrusted: parsed defensively and rendered as text only.
  */
-import { loadSession, signInWithWallet, type AiSession, type SignMessageFn } from "./assistantClient";
-import { VAULT_ID, WORKER_URL } from "./config";
+import { clearSession, loadSession, signInWithWallet, type AiSession, type SignMessageFn } from "./assistantClient";
+import { NETWORK, VAULT_ID, WORKER_URL } from "./config";
 import { confirmationMessage, hashRuleSet, parseRuleSet, type RuleSetV1 } from "./tradingRules";
 
 export const TRADER_AGENT_ID = "hl-trader";
@@ -29,6 +29,11 @@ export interface TradingOrder {
   placed_at_ms: number;
   rule_id: string | null;
 }
+export interface HlAgent {
+  address: string;
+  name: string | null;
+  valid_until_ms: number | null;
+}
 export interface TradingStatus {
   enabled: true;
   state: TradingState;
@@ -39,6 +44,8 @@ export interface TradingStatus {
   vault: string;
   agent_id: string;
   api_wallet: { address: string; approved: boolean; name: string | null; valid_until_ms: number | null };
+  /** Other API wallets approved on the HL account (worker's view). Untrusted; the dashboard also asks Hyperliquid directly. */
+  other_approved_agents: HlAgent[];
   balances: { usdc_free: string; usdc_total: string; equity_usdc: string; positions: TradingPosition[] };
   pnl: { today_usdc: string; total_usdc: string; net_funded_usdc: string; day_start_equity_usdc: string };
   limits: {
@@ -99,6 +106,22 @@ const numOrNull = (v: unknown): number | null => (typeof v === "number" && Numbe
 const obj = (v: unknown): Record<string, unknown> => (isObj(v) ? v : {});
 const arr = (v: unknown, max = 100): unknown[] => (Array.isArray(v) ? v.slice(0, max) : []);
 
+function parseHlAgents(v: unknown): HlAgent[] {
+  return arr(v, 20).flatMap((x): HlAgent[] => (isObj(x) && typeof x.address === "string" ? [{ address: x.address.slice(0, 64), name: strOrNull(x.name, 80), valid_until_ms: numOrNull(x.valid_until_ms ?? x.validUntil) }] : []));
+}
+
+/** Hyperliquid's public info API: the API wallets approved on `user`, read by the browser itself (no trust in the worker). */
+export async function fetchHlApprovedAgents(network: "mainnet" | "testnet", user: string, signal?: AbortSignal): Promise<HlAgent[]> {
+  const res = await fetch(`https://api.hyperliquid${network === "testnet" ? "-testnet" : ""}.xyz/info`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "extraAgents", user }),
+    ...(signal ? { signal } : {}),
+  });
+  if (!res.ok) throw new Error(`Hyperliquid info HTTP ${res.status}`);
+  return parseHlAgents(await res.json());
+}
+
 export function parseTradingStatus(j: unknown): TradingStatusResult | null {
   if (!isObj(j)) return null;
   if (j.enabled === false) return { enabled: false };
@@ -121,6 +144,7 @@ export function parseTradingStatus(j: unknown): TradingStatusResult | null {
     vault: str(j.vault),
     agent_id: str(j.agent_id, TRADER_AGENT_ID),
     api_wallet: { address: str(w.address), approved: w.approved === true, name: strOrNull(w.name), valid_until_ms: numOrNull(w.valid_until_ms) },
+    other_approved_agents: parseHlAgents(j.other_approved_agents),
     balances: {
       usdc_free: str(b.usdc_free, "0"),
       usdc_total: str(b.usdc_total, "0"),
@@ -310,6 +334,22 @@ export async function ensureSession(accountId: string, signMessage: SignMessageF
   return loadSession(accountId) ?? (await signInWithWallet(signMessage, accountId));
 }
 
+/**
+ * Runs `fn(token)` with an owner session. If the worker answers 401 (the 1 h token expired or the worker restarted), the stale
+ * session is dropped and the owner signs in again inline, then `fn` runs once more: one click, no page reload.
+ */
+export async function withOwnerSession<T>(accountId: string, signMessage: SignMessageFn, fn: (token: string) => Promise<T>): Promise<T> {
+  const first = await ensureSession(accountId, signMessage);
+  try {
+    return await fn(first.token);
+  } catch (e) {
+    if (!(e instanceof TradingHttpError) || e.status !== 401) throw e;
+    clearSession();
+    const fresh = await signInWithWallet(signMessage, accountId);
+    return fn(fresh.token);
+  }
+}
+
 /* ───────────── rules confirmation (NEP-413) ───────────── */
 
 const b64ToBytes = (b64: string): Uint8Array => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
@@ -317,6 +357,11 @@ const b64ToBytes = (b64: string): Uint8Array => Uint8Array.from(atob(b64), (c) =
 export interface ConfirmDeps {
   accountId: string;
   signMessage: SignMessageFn;
+  /**
+   * The Hyperliquid account the on-chain `hl-trader` mandate pays (single `hypercore` allowlist entry), from the vault, not from
+   * the worker. `null` = the chain cannot vouch for one: confirming is refused. (audit 2026-11-03 M7)
+   */
+  trustedHlAccount: string | null;
   /** Overridable for tests. */
   vault?: string;
 }
@@ -334,6 +379,16 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
   if (vault && status.vault && status.vault !== vault) throw new Error("The worker trades for a different vault than this dashboard");
   // The agent id goes into the signed message: refuse anything but the trader agent this dashboard manages.
   if (status.agent_id !== TRADER_AGENT_ID) throw new Error(`The worker trades as agent "${status.agent_id}", not "${TRADER_AGENT_ID}". Nothing was signed.`);
+
+  if (deps.trustedHlAccount === null) throw new Error("The vault does not name a single Hyperliquid account for hl-trader, so the account the worker reports cannot be verified. Nothing was signed.");
+  const HEX_ADDR = /^0x[0-9a-f]{40}$/;
+  const reported = status.hl_account.toLowerCase();
+  const trusted = deps.trustedHlAccount.toLowerCase();
+  if (!HEX_ADDR.test(reported) || !HEX_ADDR.test(trusted)) throw new Error("Not a valid Hyperliquid address (expected 0x and 40 hex characters). Nothing was signed.");
+  if (NETWORK === "mainnet" && status.hl_network !== "mainnet") throw new Error(`The worker trades on Hyperliquid ${status.hl_network}, but this dashboard is on mainnet. Nothing was signed.`);
+  if (reported !== trusted) {
+    throw new Error(`The worker reports Hyperliquid account ${status.hl_account}, but the vault pays ${deps.trustedHlAccount}. Nothing was signed.`);
+  }
 
   const session = await ensureSession(deps.accountId, deps.signMessage);
   const ch = await request("/rules/challenge", { method: "POST", token: session.token, body: { rules } });

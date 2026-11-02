@@ -6,7 +6,8 @@ import { proposalRows, type RowLookups } from "@/lib/proposals";
 import { confirmTradingRules } from "@/lib/tradingClient";
 import { hashRuleSet } from "@/lib/tradingRules";
 import { RulesView } from "@/features/trading/RulesView";
-import { tradingKeys, useTradingStatus } from "@/features/trading/useTrading";
+import { AccountTrustCallout } from "@/features/trading/AccountTrust";
+import { tradingKeys, useAccountTrust, useTradingStatus } from "@/features/trading/useTrading";
 import { useWallet } from "@/features/wallet/WalletProvider";
 import { effectiveProposal, type ProposalItem, type TradingRulesItem } from "./model";
 
@@ -115,6 +116,8 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
   const { accountId, signMessage } = useWallet();
   const qc = useQueryClient();
   const { status } = useTradingStatus();
+  const liveStatus = status?.enabled ? status : null;
+  const { trust, trusted } = useAccountTrust(liveStatus);
   const [localHash, setLocalHash] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,14 +136,14 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
   const mismatch = localHash !== null && localHash !== p.hash;
   const live = status?.enabled ? status : null;
   const signed = item.status === "signed";
-  const blocked = !p.validation.ok || mismatch || localHash === null || live === null || !canSign || accountId === null;
+  const blocked = !p.validation.ok || mismatch || localHash === null || live === null || trust?.kind !== "ok" || !canSign || accountId === null;
 
   const confirm = async () => {
     if (accountId === null || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await confirmTradingRules(p.rules, { accountId, signMessage });
+      const r = await confirmTradingRules(p.rules, { accountId, signMessage, trustedHlAccount: trusted });
       void qc.invalidateQueries({ queryKey: tradingKeys.all });
       onConfirmed(r.active?.confirmed_at_ms ?? Date.now());
     } catch (e) {
@@ -174,9 +177,17 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
       ))}
       {!signed && live && (
         <p className="m-0 text-xs text-ink-muted">
-          You authorize these rules to trade spot on Hyperliquid <strong>{live.hl_network}</strong> for account <Hash value={live.hl_account} short={false} copy={false} className="align-bottom" />. The bot runs them without asking again, until you stop it.
+          You authorize these rules to trade spot on Hyperliquid <strong>{live.hl_network}</strong> for account <Hash value={live.hl_account} short={false} copy={false} className="align-bottom" />
+          {live.api_wallet.address && (
+            <>
+              {" "}
+              through its API wallet <Hash value={live.api_wallet.address} short={false} copy={false} className="align-bottom" />
+            </>
+          )}
+          . The bot runs them without asking again, until you stop it.
         </p>
       )}
+      {!signed && live && <AccountTrustCallout trust={trust} />}
       {!signed && status !== null && !status.enabled && <Callout accent="warn">Trading is switched off on the worker, so these rules cannot be confirmed.</Callout>}
       {!signed && !canSign && <Callout accent="neutral">Only the vault owner can confirm rules.</Callout>}
       {error && <Callout accent="danger">{error}</Callout>}

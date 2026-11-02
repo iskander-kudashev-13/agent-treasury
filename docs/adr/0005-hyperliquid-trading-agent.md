@@ -184,7 +184,7 @@ States: `not_configured` | `awaiting_api_wallet` | `no_rules` | `running` | `pau
 | Boundary | Protects | Does NOT protect |
 |---|---|---|
 | Vault mandate (contract) | Vault USDC: only to the owner's HL master, at most `per_tx`/`daily_limit`/2 top-ups per day, until expiry; pause/revoke at any time | Anything already on HL. A leaked `hl-trader` NEAR key quoting to another address (ADR-0003 §11), bounded by the limits |
-| HL API wallet (protocol) | Withdrawals and sends to other addresses | **Trading losses**, **perps with leverage through a leaked key**, wash trades against an attacker on thin books, staking moves |
+| HL API wallet (protocol) | Direct withdrawals and direct sends from the master: `withdraw3`, `usdSend`, `spotSend` and `approveAgent` are user-signed and need the master EVM key | **Everything on the master account, lost or routed away by whoever holds the API-wallet key** (audit 2026-11-03 H2). The key signs L1 actions, so it can: trade at any price, including wash trades against the attacker's own orders on thin books; open leveraged perps, including on HIP-3 builder dexes, which the perp alarm does not see (T16); move USDC between spot and perp; possibly `vaultTransfer` into an HL vault the attacker leads (**[verify]**: the library signs it as L1); burn funds through deploy-auction or priority-bid actions. The bot's code calls only `order`/`cancel`/`scheduleCancel`, but the key is not limited to them |
 | Bot risk guard + DSL validation (our code) | Pairs, band, size, position, daily loss, spot-only, LLM mistakes | A compromised host in local mode (it can skip its own code) |
 | Owner NEP-413 confirmation | Rules running without the owner's consent; swapping rules between proposal and confirm | Owner signing bad rules |
 | `scheduleCancel` (protocol) | Open orders surviving a bot crash | Filled positions |
@@ -199,7 +199,7 @@ limits only how much is sent there per day."
 | T1 | LLM mis-compiles rules (hallucination, prompt injection in chat) | Zod schema, hard limits, the dashboard's own renderer, owner signs the hash, engine is deterministic |
 | T2 | Worker swaps rules between propose and confirm | Dashboard computes the canonical hash from the JSON it rendered and refuses on mismatch; the signature covers the hash |
 | T3 | Replay of an old confirmation | NEP-413 nonce issued by `/trading/rules/challenge`, single-use, 5 min TTL; the message includes the vault, agent, HL account and HL network |
-| T4 | Leaked HL API key | Exposure capped by daily funding; `valid_until` 30 days; rotate; perp alarm halts and alerts; dedicated master account |
+| T4 | Leaked HL API key: trading losses, leveraged perps (incl. HIP-3), spot↔perp moves, `vaultTransfer` into an attacker's HL vault (**[verify]**), deploy-auction / priority-bid burns. The whole master balance is at risk | Exposure capped by what the vault sends there (daily funding); the dedicated master holds only the session amount; `valid_until` ≤ 48 h for the first mainnet session (30 days later); revoke on HL right after the session; rotate; the perp alarm halts and alerts, but only for the honest bot in the same process |
 | T5 | Leaked `hl-trader` NEAR key | Mandate caps (25/tx, 50/day, 2/day, expiry); optional `approval_threshold = 0` so every top-up goes through the dashboard quote check |
 | T6 | Compromised worker host (local mode) | Same bounds as T4 plus T5; documented as insecure; TEE later |
 | T7 | Off-market fills on a thin book | Pair allowlist with minimum volume, ±1% band, skip on a wide spread, IOC by default |
@@ -211,7 +211,7 @@ limits only how much is sent there per day."
 | T13 | Unauthenticated HTTP abuse | `propose`, `kill`, `rotate`, `rules` and `log` require an owner bearer token; `confirm` requires a NEP-413 signature; rate limits reused from `/ai` |
 | T14 | Tampered rules file | Re-verified on load; refuses if verification fails |
 | T15 | Funding to a fresh HL address loses the activation fee or fails | Use an already active master; refunds go to `refundTo = vault` |
-| T16 | **Known gap, HIP-3 builder perp dexes**: the perp alarm reads the default dex only (`clearinghouseState`), so a perp position on a HIP-3 builder dex is NOT detected. Open orders are checked (all open orders of the account are read, and any perp order trips the alarm) | Dedicated master account, so nothing else trades on builder dexes; the API wallet cannot withdraw. v2: enumerate `perpDexs` and read each dex's clearinghouse state |
+| T16 | **Known gap, HIP-3 builder perp dexes**: the perp alarm reads the default dex only (`clearinghouseState`), so a perp position on a HIP-3 builder dex is NOT detected. Open orders are checked (all open orders of the account are read, and any perp order trips the alarm) | Dedicated master account, so nothing else trades on builder dexes. The API wallet cannot withdraw or send directly, but a leaked key can open a HIP-3 perp and lose the balance through it (T4). v2: enumerate `perpDexs` and read each dex's clearinghouse state |
 
 ## Interfaces
 
@@ -321,8 +321,9 @@ TradingStatus {
   perp_check: { ok: boolean, at_ms: number },
   last_tick_ms: number | null, next_tick_ms: number | null, warnings: string[] }
 ```
-- `pnl.total_usdc = equity − net_funded`, where `net_funded` comes from the HL ledger since `TRADING_START_MS`. The
-  value is cross-checked against the vault's `Confirmed` payouts for `hl-trader` and a warning is added on mismatch.
+- `pnl.total_usdc = equity − net_funded`, where `net_funded` comes from the HL ledger since `TRADING_START_MS`.
+  Planned: cross-check the value against the vault's `Confirmed` payouts for `hl-trader` and warn on mismatch.
+  **Not implemented as of `ddc1da2`** (audit 2026-11-03 M3); see "Audit 2026-11-03 follow-up".
 - When `TRADING_ENABLED=false`, `GET /trading/status` returns `{ enabled: false }` and the other routes return 404.
 
 ### Dashboard kill switch (one button, each step's result shown)
@@ -510,3 +511,26 @@ is approved by the owner in the dashboard, with the 1Click quote check), vault f
 mandate daily limit 25, 1 top-up per day, agent expiry within 48 h, HL API wallet `valid_until` within 48 h, revoke
 everything after the session. Autonomous top-ups (threshold = per-tx) stay the design for later and on testnet.
 Worst case for the session: about 26 USDC.
+
+## Audit 2026-11-03 follow-up
+
+Status of the findings in `docs/security/audit-2026-11-03-trading.md` (H = high, M = medium), as of 2026-11-03:
+
+| # | Finding | Status |
+|---|---|---|
+| H1 | `hl-trader` allowlist pins only the declared destination | Mitigated by config for the first mainnet session (Session decision above: threshold 0, ≤ 26 USDC, 25/day, 1/day, ≤ 48 h). Code fix (threshold 0 by default for Key agents, or Tee-only auto-pay) open |
+| H2 | HL API-wallet key controls the whole master balance | Docs corrected (trust row, T4, T16 above, README "What the vault does NOT protect"). Session hygiene in the runbook (`docs/commands.md` → "[MAINNET] Trading session runbook"). v2: TEE trader, HIP-3 sweep |
+| M1 | Kill switch races a running tick | **Fixed in `ddc1da2`**: a tick stops placing orders and refreshing the dead-man once a kill arrives (`shouldStop`, kill epoch in `worker/src/trading/service.ts`); `kill()` waits up to 10 s for the tick in flight, then cancels and sets `scheduleCancel` to now + 6 s. Tests: `worker/test/trading/review-fixes.test.ts`, `service.test.ts` |
+| M2 | Kill switch fails without NEAR RPC | **Fixed in `ddc1da2`**: `/trading/kill` accepts a valid owner session token with the last known owner when RPC fails (`worker/src/trading/route.ts`, `safetyOnly`). `pause_agent` (step 2) still needs RPC and the wallet |
+| M3 | Loss stop rests on an unverified HL ledger mapping; vault cross-check missing | **Open** until the first mainnet 1Click landing on HyperCore is observed and its ledger `delta.type` recorded. Session procedure: top-up first, confirm rules only when `/trading/status` `pnl.net_funded_usdc` shows the delivered amount |
+| M4 | No mainnet runbook | Written: `docs/commands.md` → "[MAINNET] Trading session runbook" and "Trading testnet drills". Owner reviews it before the session |
+| M5 | Two workers can share one state dir | Fixed: `worker/src/trading/lock.ts` (O_EXCL pid lock, single host) |
+| M6 | Dashboard generates the trader NEAR key in the browser | Fixed: on mainnet SetupCard shows the CLI command instead of generating a key. The runbook creates `hl-trader` with `sdk/scripts/setup-key-agent.ts --confirm-mainnet` |
+| M7 | Dashboard trusts the worker's `hl_account` / API-wallet address | Fixed: dashboard compares with the on-chain allowlist, reads `extraAgents` from HL directly, blocks confirm on mismatch. The runbook has the owner compare the address with the worker console line before approving |
+
+## Interface change 2026-11-03
+
+`GET /trading/status` has a new field `other_approved_agents: { address, name, valid_until_ms }[]`: the API wallets Hyperliquid
+lists (`extraAgents`) for the master account other than the bot's current one (empty when none; capped at 20). The dashboard
+shows a warning when it is not empty and also reads `extraAgents` itself from the Hyperliquid info API. The worker now takes an
+exclusive pid lock `TRADING_STATE_DIR/lock` and refuses to start trading when another live process holds it.

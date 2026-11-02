@@ -144,3 +144,8 @@ export function printPlan(title: string, txs: PlannedTx[], out: (s: string) => v
 export function defaultRpc(network: Network): string {
   return network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com";
 }
+
+/** pnpm 11 forwards a literal `--` to scripts (`pnpm x -- --owner a`); drop one leading `--` so parseArgs stays strict. */
+export function stripLeadingDashDash(args: string[]): string[] {
+  return args[0] === "--" ? args.slice(1) : args;
+}

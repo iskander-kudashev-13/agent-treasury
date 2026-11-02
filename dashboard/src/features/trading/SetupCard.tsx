@@ -4,10 +4,10 @@ import { clearPending, loadPending, savePending, type PendingKeyAgent } from "@/
 import { useAgentTx } from "@/features/agents/useAgentTx";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { DEFAULT_FUND_NEAR, planKeyAgentCreate, subAccountId, validateAccountPrefix, validateFund } from "@/lib/agentSetup";
-import { VAULT_ID } from "@/lib/config";
+import { NETWORK, VAULT_ID } from "@/lib/config";
 import { generateAgentKey, type AgentKey } from "@/lib/keygen";
 import { TRADER_AGENT_ID } from "@/lib/tradingClient";
-import { buildTraderSetup, DEFAULT_DAILY_FUNDING, DEFAULT_TOPUP, TRADER_AGENT_NAME } from "@/lib/tradingView";
+import { buildTraderSetup, DEFAULT_DAILY_FUNDING, DEFAULT_TOPUP, mainnetSetupCommands, SESSION_LIMIT_USDC, TRADER_AGENT_NAME } from "@/lib/tradingView";
 import { useNow } from "@/lib/useNow";
 
 /** The pending one-time key of a trader created before a wallet redirect, if any. */
@@ -26,8 +26,9 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
   const { ownerId } = useOwner();
   const now = useNow(60_000);
   const [master, setMaster] = useState("");
-  const [daily, setDaily] = useState(DEFAULT_DAILY_FUNDING);
-  const [perTx, setPerTx] = useState(DEFAULT_TOPUP);
+  const mainnet = NETWORK === "mainnet";
+  const [daily, setDaily] = useState(mainnet ? SESSION_LIMIT_USDC : DEFAULT_DAILY_FUNDING);
+  const [perTx, setPerTx] = useState(mainnet ? SESSION_LIMIT_USDC : DEFAULT_TOPUP);
   const [prefix, setPrefix] = useState(TRADER_AGENT_ID);
   const [fund, setFund] = useState(DEFAULT_FUND_NEAR);
   const [touched, setTouched] = useState(false);
@@ -39,6 +40,8 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
   const prefixErr = validateAccountPrefix(prefix, owner || "owner");
   const fundErr = validateFund(fund);
   const valid = check.mandate !== null && !prefixErr && !fundErr && owner !== "";
+
+  if (mainnet) return <MainnetSetup master={check.master} masterError={touched ? check.errors.master : undefined} setMaster={setMaster} masterValue={master} touch={() => setTouched(true)} owner={owner} prefix={prefix} setPrefix={setPrefix} prefixErr={prefixErr} fund={fund} setFund={setFund} fundErr={fundErr} />;
 
   if (result) return <Credentials p={result} master={master} perTx={perTx} onDone={() => { clearPending(); setResult(null); onDone(); }} />;
 
@@ -139,6 +142,82 @@ function Credentials({ p, master, perTx, onDone }: { p: PendingKeyAgent; master:
           I saved it → Continue
         </Button>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * Mainnet: the trader's NEAR key is NOT generated in the browser (audit 2026-11-03 M6; a script in the page could read it).
+ * The dashboard only shows the exact CLI commands with the session mandate; the script prints the key once in the terminal.
+ */
+function MainnetSetup(p: {
+  master: string | null;
+  masterValue: string;
+  masterError: string | undefined;
+  setMaster: (v: string) => void;
+  touch: () => void;
+  owner: string;
+  prefix: string;
+  setPrefix: (v: string) => void;
+  prefixErr: string | null;
+  fund: string;
+  setFund: (v: string) => void;
+  fundErr: string | null;
+}) {
+  const [copied, setCopied] = useState(false);
+  const ready = p.master !== null && p.owner !== "" && !p.prefixErr && !p.fundErr;
+  const commands = ready && p.master ? mainnetSetupCommands({ owner: p.owner, vault: VAULT_ID, master: p.master, name: p.prefix, fundNear: p.fund }) : null;
+  return (
+    <Card aria-labelledby="trader-setup" className="flex flex-col gap-4">
+      <CardHeader id="trader-setup" title="Set up the trading agent (mainnet session)" />
+      <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
+        On mainnet the agent key is created in your terminal, not in this page. Enter your Hyperliquid account to get the exact commands.
+      </Callout>
+      <Field label="Your Hyperliquid account" hint="A dedicated account for the bot, already active on Hyperliquid, holding only the session amount." {...(p.masterError ? { error: p.masterError } : {})}>
+        {(a11y) => (
+          <Input {...a11y} mono placeholder="0x…" value={p.masterValue} onChange={(ev) => p.setMaster(ev.target.value)} onBlur={p.touch} state={p.masterError ? "error" : "default"} autoComplete="off" spellCheck={false} />
+        )}
+      </Field>
+      <details className="text-[13px] text-ink-secondary">
+        <summary className="cursor-pointer">Advanced</summary>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <Field label="Agent account" hint={p.owner ? subAccountId(p.prefix || "…", p.owner) : "Connect the owner wallet"} {...(p.prefixErr ? { error: p.prefixErr } : {})}>
+            {(a11y) => <Input {...a11y} mono value={p.prefix} onChange={(ev) => p.setPrefix(ev.target.value.toLowerCase())} state={p.prefixErr ? "error" : "default"} />}
+          </Field>
+          <Field label="Gas funding" hint="NEAR sent to the agent account for fees." {...(p.fundErr ? { error: p.fundErr } : {})}>
+            {(a11y) => <Input {...a11y} mono suffix="NEAR" value={p.fund} onChange={(ev) => p.setFund(ev.target.value)} state={p.fundErr ? "error" : "default"} />}
+          </Field>
+        </div>
+      </details>
+      <p className="m-0 text-xs text-ink-muted">
+        Session mandate, fixed: every top-up needs your approval (threshold 0), at most {SESSION_LIMIT_USDC} USDC per top-up and per day, 1 top-up a day, expires 47 hours after the command runs, one destination: your Hyperliquid account. Revoke the agent when the session ends.
+      </p>
+      {commands ? (
+        <>
+          <p className="m-0 text-xs text-ink-muted">
+            Run in the repository root. <span className="mono">OWNER_PRIVATE_KEY</span> is yours, read from the environment for that one run. The script prints the agent key once; put it in the worker&apos;s <span className="mono">.env</span> as <span className="mono">TRADER_NEAR_PRIVATE_KEY</span>, with <span className="mono">TRADER_NEAR_ACCOUNT_ID={subAccountId(p.prefix, p.owner)}</span> and <span className="mono">HL_MASTER_ADDRESS={p.master}</span>.
+          </p>
+          <pre tabIndex={0} aria-label="Mainnet setup commands" className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
+            {commands}
+          </pre>
+          <div>
+            <Button
+              size="sm"
+              icon={<Icons.Copy size={13} />}
+              onClick={() =>
+                void navigator.clipboard?.writeText(commands).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+              }
+            >
+              {copied ? "Copied" : "Copy commands"}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <p className="m-0 text-xs text-ink-subtle">Enter a valid Hyperliquid account{p.owner === "" ? " and connect the owner wallet" : ""} to see the commands.</p>
+      )}
     </Card>
   );
 }

@@ -201,6 +201,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
   let vaultView: VaultView | null = null;
   let perpOk = true;
   let apiWallet: StatusPieces["api_wallet"] = { address: cfg.apiWalletAddress, approved: false, name: null, valid_until_ms: null };
+  let otherAgents: StatusPieces["other_approved_agents"] = [];
   let pnl: ReturnType<typeof pnlSummary> | null = null;
   let eff: EffectiveLimits = effectiveLimits(input.rules?.rules ?? null, cfg.hard);
 
@@ -229,6 +230,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       state_reason: reason,
       state_detail: detail,
       api_wallet: apiWallet,
+      other_approved_agents: otherAgents,
       balances: {
         usdc_free: eq ? dec(eq.usdcFree) : "0",
         usdc_total: eq ? dec(eq.usdcTotal) : "0",
@@ -305,6 +307,10 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       warnings.push("HL read failed");
       return finish("error", "HL_READ_FAILED", errMsg(e));
     }
+    otherAgents = agents
+      .filter((a) => a.address.toLowerCase() !== cfg.apiWalletAddress.toLowerCase())
+      .slice(0, 20)
+      .map((a) => ({ address: a.address, name: a.name, valid_until_ms: a.validUntilMs }));
     const pairMap = new Map(spotPairs.map((p) => [p.name, p]));
     let vaultErr: string | null = null;
     try {

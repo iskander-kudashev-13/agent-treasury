@@ -20,6 +20,7 @@ import {
 } from "@/lib/agentSetup";
 import { recipientNames } from "@/lib/agentView";
 import { NETWORK, VAULT_ID } from "@/lib/config";
+import { mainnetKeyAgentCommands } from "@/lib/tradingView";
 import { generateAgentKey, isEd25519PublicKey, type AgentKey } from "@/lib/keygen";
 import { DEFAULT_FORM, validateMandateForm, type MandateForm } from "@/lib/mandateForm";
 import { useAgents, useRecipients } from "@/lib/useVault";
@@ -104,6 +105,21 @@ export function AddAgentWizard() {
 
   const typeOk = kind !== null && validateAgentName(name) === null && id !== "" && validateAgentId(id, existingIds) === null;
   const identityOk = kind === "Tee" ? pinErr === null : setup === "new" ? !prefixErr && !fundErr && !faErr && effectivePrefix !== "" && owner !== "" : !exAccErr && !exKeyErr;
+  // Mainnet: no key is ever generated in the browser; a Key agent with a new account is created by the CLI.
+  const cliOnly = NETWORK === "mainnet" && kind === "Key" && setup === "new";
+  const cliCommands = useMemo(() => {
+    if (!cliOnly || !mandateResult.mandate || !typeOk || !identityOk) return null;
+    return mainnetKeyAgentCommands({
+      owner,
+      vault: VAULT_ID,
+      name: effectivePrefix,
+      agentId: id,
+      displayName: name.trim(),
+      fundNear: fund,
+      mandateFile: `mandate.${id}.json`,
+      mandateScript: `cat > mandate.${id}.json <<'EOF'\n${JSON.stringify(mandateResult.mandate, null, 2)}\nEOF`,
+    });
+  }, [cliOnly, mandateResult.mandate, typeOk, identityOk, owner, effectivePrefix, id, name, fund]);
   const stepOk = [typeOk, identityOk, mandateResult.mandate !== null, true][step] ?? false;
   const steps = kind === "Key" && setup === "new" ? [...STEPS_BASE, "Connect"] : STEPS_BASE;
 
@@ -127,7 +143,7 @@ export function AddAgentWizard() {
   };
 
   const next = () => {
-    if (step === 2 && kind === "Key" && setup === "new" && !key) setKey(generateAgentKey()); // key exists from the review step on
+    if (step === 2 && kind === "Key" && setup === "new" && !key && NETWORK !== "mainnet") setKey(generateAgentKey()); // key exists from the review step on
     setStep((s) => Math.min(3, s + 1));
   };
   const back = () => setStep((s) => Math.max(0, s - 1));
@@ -354,7 +370,17 @@ export function AddAgentWizard() {
               ))}
             </ol>
           </div>
-          {kind === "Key" && setup === "new" && (
+          {cliCommands && (
+            <>
+              <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
+                On mainnet the agent key is created in your terminal, not in this page. Run these commands in the repository root; the script prints the agent key once.
+              </Callout>
+              <pre tabIndex={0} aria-label="Mainnet agent setup commands" className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
+                {cliCommands}
+              </pre>
+            </>
+          )}
+          {kind === "Key" && setup === "new" && !cliOnly && (
             <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
               After signing you will see the agent&apos;s private key once. Don&apos;t close the tab before you saved it. If your wallet redirects you away, the key is kept in this tab until you come back.
             </Callout>
@@ -378,7 +404,7 @@ export function AddAgentWizard() {
             Next
           </Button>
         ) : (
-          <Button variant="primary" disabled={!canAct || busy || !txs} loading={busy} onClick={() => void submit()}>
+          <Button variant="primary" disabled={!canAct || busy || !txs || cliOnly} loading={busy} onClick={() => void submit()}>
             Sign in wallet
           </Button>
         )}

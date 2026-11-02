@@ -2,8 +2,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { clearSession, loadSession } from "@/lib/assistantClient";
 import { POLL_MS, WORKER_URL } from "@/lib/config";
-import { ensureSession, fetchActiveRules, fetchTradingLog, fetchTradingStatus, TradingHttpError, type ConfirmedRules, type LogEntry, type TradingStatusResult } from "@/lib/tradingClient";
+import { ensureSession, fetchActiveRules, fetchHlApprovedAgents, TRADER_AGENT_ID, fetchTradingLog, fetchTradingStatus, TradingHttpError, type ConfirmedRules, type HlAgent, type LogEntry, type TradingStatus, type TradingStatusResult } from "@/lib/tradingClient";
 import { hashRuleSet } from "@/lib/tradingRules";
+import { checkHlAccount, trustedHlAccount, type AccountTrust } from "@/lib/tradingView";
+import { useAgents } from "@/lib/useVault";
 import { useWallet } from "@/features/wallet/WalletProvider";
 
 export const tradingKeys = {
@@ -78,4 +80,29 @@ export function useOwnerDetails() {
   }, [accountId, signMessage, qc]);
 
   return { signedIn: token !== null, signIn, signingIn, authError, log: q.data?.log ?? [], rules: q.data?.rules ?? null, rulesVerified: q.data?.rulesVerified ?? true, loading: token !== null && q.isPending, error: q.error ? errText(q.error) : null };
+}
+
+/**
+ * The worker is not trusted for where money goes (audit M7): the Hyperliquid account it reports must be the one the on-chain
+ * `hl-trader` allowlist pays. `trusted` is that on-chain address (null when the chain names none).
+ */
+export function useAccountTrust(status: TradingStatus | null): { trust: AccountTrust | null; trusted: string | null; loading: boolean } {
+  const agents = useAgents();
+  const trader = agents.data.find((a) => a.id === TRADER_AGENT_ID && a.status !== "Revoked") ?? null;
+  const trusted = trustedHlAccount(trader);
+  if (!status) return { trust: null, trusted, loading: agents.loading };
+  if (agents.loading) return { trust: null, trusted, loading: true };
+  return { trust: checkHlAccount(status.hl_account, trader), trusted, loading: false };
+}
+
+/** API wallets approved on the owner's HL account, read straight from Hyperliquid (not via the worker). Null while unknown. */
+export function useHlApprovedAgents(network: "mainnet" | "testnet", account: string | null): HlAgent[] | null {
+  const q = useQuery<HlAgent[]>({
+    queryKey: ["hl-agents", network, account],
+    queryFn: ({ signal }) => fetchHlApprovedAgents(network, account!, signal),
+    enabled: account !== null,
+    refetchInterval: POLL_MS * 3,
+    retry: false,
+  });
+  return q.data ?? null;
 }

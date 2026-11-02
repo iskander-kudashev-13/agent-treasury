@@ -1,7 +1,7 @@
 # Architecture
 
-Sources of truth: `docs/adr/0001`–`0004` (decisions and the exact contract interface), `docs/security/audit-2026-11-01.md`
-(trust boundaries), `contract/src/payment.rs` (`evaluate_payment`, the check order below). This file summarises them.
+Sources of truth: `docs/adr/0001`–`0005` (decisions and the exact contract interface; 0005 = Hyperliquid trading agent),
+`docs/security/audit-2026-11-01.md` and `docs/security/audit-2026-11-03-trading.md` (trust boundaries), `contract/src/payment.rs` (`evaluate_payment`, the check order below). This file summarises them.
 
 ## Components
 
@@ -19,6 +19,12 @@ flowchart LR
   vault[Vault contract\nNEAR, Rust] -- storage_deposit + ft_transfer --> usdc[USDC NEP-141]
   usdc --> deposit[1Click deposit account\n64-hex implicit]
   deposit -- NEAR Intents --> dest[Recipient on Base / Arb / Sol / NEAR]
+  trader[Trading module\nworker/src/trading, key agent hl-trader] -- request_payment hypercore + HL master\nfunction-call key --> vault
+  trader -- quote, deposit/submit, status --> oneclick
+  deposit -. NEAR Intents, hip1 USDC .-> hlmaster[Owner's HL master account]
+  trader -- order / cancel / scheduleCancel\nHL API wallet --> hlmaster
+  dash -- /trading/status, rules, kill --> trader
+  owner -. approveAgent / revoke, master EVM key .-> hlmaster
 ```
 
 | Component | Path | Role | Holds keys? |
@@ -28,6 +34,8 @@ flowchart LR
 | SDK | `sdk/` | `getBudget`, `listAllowedRecipients`, `quotePayment`, `requestPayment`, `getPaymentStatus`; key-agent setup and revoke scripts | Uses the agent's function-call key passed in by the caller |
 | MCP server | `mcp/` | Five `treasury_*` tools over stdio, wraps the SDK | Function-call key in the MCP client's env |
 | Dashboard | `dashboard/` | Owner UI. Reads views over RPC; owner calls through wallet-selector; quote check before Approve | None; the wallet signs |
+| Trading module | `worker/src/trading/` (same process as the worker, off unless `TRADING_ENABLED=true`, local mode only) | Key agent `hl-trader` with an `Allowlist` mandate (`hypercore` + the owner's HL master). Tops up the master through 1Click when free HL USDC is below the floor. Runs owner-signed (NEP-413) `RuleSetV1` rules in a deterministic tick: perp alarm, dead-man `scheduleCancel`, loss stop, risk guard, at most 2 spot orders per tick. HTTP `/trading/*` (ADR-0005) | `hl-trader` function-call key in `worker/.env`; HL API-wallet key in `TRADING_STATE_DIR/api-wallet.json` (0600). Both plain files on the operator's host |
+| Hyperliquid | external | HL master account (owned by the owner's EVM key) holds the trading USDC and positions; the API wallet signs orders for it | — |
 | NEAR AI Cloud | external | Assistant inference for `/ai/chat`; output is proposals the owner signs | NEAR AI key in worker env only |
 | 1Click | external, mainnet only | Quotes, deposit addresses, cross-chain delivery, refunds | — |
 
@@ -111,7 +119,7 @@ Example `detail` strings from the testnet vault: `"Per-payment limit for agent '
 
 ## Trust boundaries
 
-From ADR-0002, ADR-0003 §11 and the audit's trust-boundary table.
+From ADR-0002, ADR-0003 §11, ADR-0005 and the trust tables of both audits (2026-11-01, 2026-11-03 trading).
 
 | If this is compromised | It can | It cannot | Bounded by |
 |---|---|---|---|
@@ -122,6 +130,12 @@ From ADR-0002, ADR-0003 §11 and the audit's trust-boundary table.
 | Dashboard (XSS, dependency) | use the wallet login function-call key, which after the audit fixes can only pause or apply reversible restrictions (e.g. `remove_schedule`, `reject_payout` that keeps the date); show a misleading transaction | 1-yocto owner methods without a wallet confirmation | owner's wallet confirmation |
 | NEAR AI model | produce misleading proposals | sign or send anything | owner signature; proposals validated against fresh state |
 | 1Click | return a deposit address that pays elsewhere; keep funds; mis-report status | pull funds from the vault | the payer's mandate; refunds go to `refundTo = vault` |
+| `hl-trader` NEAR key (leaked from `worker/.env` or the dashboard during setup) | send up to its limits to **any** NEAR account: the vault checks only the declared `hypercore` destination, and the deposit address can be any 64-hex account (audit 2026-11-03 H1) | call other methods, exceed the mandate, approve | per-tx, daily amount and count, expiry, vault daily limit. With `approval_threshold` 0 (first mainnet session), every top-up waits for the owner's approval, which comes after the dashboard's 1Click quote check |
+| HL API-wallet key (leak, or the local host) | lose or route away **everything on the HL master**: trade at any price (wash trades on thin books), leveraged perps incl. HIP-3 (not detected), spot↔perp moves, possibly `vaultTransfer` to an attacker's HL vault (not verified), deploy / priority-bid burns (audit H2) | `withdraw3`, `usdSend`, `spotSend`, `approveAgent` (user-signed, master key only) | only the amount the vault sent to HL; `valid_until`; owner revokes it on HL with the master key |
+| Trading module host (local mode) | both of the above; skip its own hard limits, perp alarm and loss stop; replay older signed rule sets from the state dir | owner actions on NEAR or HL | vault mandate; HL balance |
+| Trading worker / `VITE_WORKER_URL` (wrong or stale) | show an attacker's API-wallet address for the owner to approve, or a wrong HL account (audit M7) | sign anything | owner compares the address with the worker console before approving |
+| NEAR AI model (trading) | propose aggressive rules inside the env hard limits | widen hard limits, change the funding size or destination, place orders | owner reviews the dashboard-rendered card and signs its hash |
+| Owner HL master EVM key | everything on HL: revoke the API wallet, withdraw, return funds | anything in the vault | nothing (second root of trust; use a hardware wallet) |
 | Owner full-access key | everything | — | nothing (use a hardware wallet or multisig as owner) |
 
 Key facts behind the table:
@@ -133,3 +147,7 @@ Key facts behind the table:
   owner actions (`revoke_agent`, `unbind_agent`, `withdraw`, `approve_payout`, `update_contract`, …) need 1 yoctoNEAR.
 - The owner is never locked out: `withdraw` ignores pause and agent state; `force_settle_transfer` settles a payout whose
   callback never ran (after 1 h).
+- Trading kill switch: `POST /trading/kill` halts the bot (sticky until new rules are signed), cancels all orders and
+  sets the dead-man to now + 6 s. It works while NEAR RPC is down, if the owner session is still valid. Then the
+  dashboard calls `pause_agent`, which needs RPC and the wallet. Positions stay open. The authoritative stop is revoking
+  the API wallet on Hyperliquid. Full list of what the vault does not protect: `README.md`.

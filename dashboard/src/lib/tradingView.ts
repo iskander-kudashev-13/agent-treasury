@@ -2,8 +2,8 @@
 import type { Accent } from "@/kit/tokens";
 import { normalizeAddress } from "./address";
 import { DEFAULT_FORM, validateMandateForm } from "./mandateForm";
-import type { TradingState } from "./tradingClient";
-import type { Mandate } from "./types";
+import { TRADER_AGENT_ID, type TradingState } from "./tradingClient";
+import type { AgentView, Mandate } from "./types";
 
 export const TRADER_AGENT_NAME = "Hyperliquid trader";
 export const DEFAULT_DAILY_FUNDING = "50";
@@ -116,6 +116,100 @@ export const ratio = (part: string, whole: string): number => {
 /* ───────────── Hyperliquid app ───────────── */
 
 export const hlAppUrl = (network: "mainnet" | "testnet", path = "API"): string => `https://${network === "mainnet" ? "app.hyperliquid.xyz" : "app.hyperliquid-testnet.xyz"}/${path}`;
-export const API_WALLET_DAYS = 30;
+/**
+ * The API wallet is short-lived on purpose (audit 2026-11-03 H2): whoever holds its key can trade perps, move funds between
+ * spot and perp and more on the master account, so it should expire within the session and be revoked after it.
+ */
+export const API_WALLET_HOURS = 47;
 /** Name the owner gives the API wallet in the HL UI (ADR-0005 §3): the bot reads `valid_until` from it. */
-export const apiWalletName = (nowMs: number, days = API_WALLET_DAYS): string => `agent-treasury valid_until ${nowMs + days * 86_400_000}`;
+export const apiWalletName = (nowMs: number, hours = API_WALLET_HOURS): string => `agent-treasury valid_until ${nowMs + hours * 3_600_000}`;
+
+/* ───────────── which HL account is the owner's? (audit M7) ───────────── */
+
+export type AccountTrust =
+  | { kind: "ok"; account: string }
+  /** The worker reports an account that is not the one the on-chain mandate pays. */
+  | { kind: "mismatch"; reported: string; onchain: string }
+  /** The chain cannot vouch for any account: no agent, or not exactly one `hypercore` allowlist entry. */
+  | { kind: "unverified"; reason: string };
+
+/** The single `hypercore` address of the trader's on-chain allowlist (lower case), or null. */
+export function trustedHlAccount(trader: AgentView | null): string | null {
+  if (!trader) return null;
+  // Same rule as the worker (funding.ts): exactly one allowlist entry, on hypercore, mode Allowlist, allowed_chains [hypercore].
+  const m = trader.mandate;
+  const only = m.allowlist.length === 1 ? m.allowlist[0] : undefined;
+  if (m.recipients_mode !== "Allowlist" || !only || only.chain.toLowerCase() !== "hypercore") return null;
+  if (m.allowed_chains.length !== 1 || m.allowed_chains[0]?.toLowerCase() !== "hypercore") return null;
+  return only.address.toLowerCase();
+}
+
+/** The worker is not trusted for where money goes: compare its `hl_account` with the vault's mandate allowlist. */
+export function checkHlAccount(reported: string, trader: AgentView | null): AccountTrust {
+  if (!trader) return { kind: "unverified", reason: "There is no hl-trader agent on this vault, so the account the worker reports cannot be checked against the chain." };
+  const onchain = trustedHlAccount(trader);
+  if (onchain === null) return { kind: "unverified", reason: "The hl-trader mandate does not have exactly one Hyperliquid address in its allowlist, so the account cannot be checked against the chain." };
+  const rep = reported.trim().toLowerCase();
+  return rep === onchain ? { kind: "ok", account: onchain } : { kind: "mismatch", reported: rep, onchain };
+}
+
+/* ───────────── mainnet: the key is made by the CLI, not the browser (audit M6) ───────────── */
+
+export const SESSION_LIMIT_USDC = "25";
+/** 47 h from the moment the command runs: inside the 48 h limit of the session decision. */
+export const SESSION_EXPIRY_MS = 47 * 3_600_000;
+
+export interface MainnetCommandInput {
+  owner: string;
+  vault: string;
+  master: string;
+  /** Sub-account prefix of the agent account. */
+  name: string;
+  fundNear: string;
+}
+
+/** The session mandate (ADR-0005 session decision): threshold 0, 25/25 USDC, 1 payment a day, <= 48 h, one HL address. */
+export function sessionMandateScript(master: string): string {
+  const mandate = `{
+  "daily_limit": "25000000",
+  "per_tx_limit": "25000000",
+  "approval_threshold": "0",
+  "max_payments_per_day": 1,
+  "allowed_chains": ["hypercore"],
+  "recipients_mode": "Allowlist",
+  "allowlist": [{ "chain": "hypercore", "address": "${master}", "label": "Owner HL" }],
+  "recipients": [],
+  "expires_at": "$(( $(date +%s) * 1000 + ${SESSION_EXPIRY_MS} ))"
+}`;
+  return `cat > mandate.hl-trader.session.json <<EOF\n${mandate}\nEOF`;
+}
+
+/**
+ * The exact commands for a mainnet Key agent: the owner key is read from the near-cli credentials file (or typed silently),
+ * never pasted inline (shell history), and a --dry-run precedes the real run.
+ */
+export function mainnetKeyAgentCommands(i: { owner: string; vault: string; name: string; agentId: string; displayName: string; fundNear: string; mandateFile: string; mandateScript: string }): string {
+  const args = `--owner ${i.owner} --vault ${i.vault} --name ${i.name} --agent-id ${i.agentId} --display-name "${i.displayName}" --network mainnet --fund ${i.fundNear} --mandate ${i.mandateFile}`;
+  return `cd sdk && pnpm install
+${i.mandateScript}
+# 1. dry run: prints the 3 transactions, sends nothing, needs no key
+pnpm setup-key-agent ${args} --dry-run
+# 2. your owner key, from the near-cli credentials file (or: read -rs OWNER_PRIVATE_KEY && export OWNER_PRIVATE_KEY)
+export OWNER_PRIVATE_KEY="$(jq -r .private_key ~/.near-credentials/mainnet/${i.owner}.json)"
+# 3. the real run
+pnpm setup-key-agent ${args} --confirm-mainnet`;
+}
+
+/** The exact commands to create `hl-trader` on mainnet. The private key is printed once by the script, never by the dashboard. */
+export function mainnetSetupCommands(i: MainnetCommandInput): string {
+  return mainnetKeyAgentCommands({
+    owner: i.owner,
+    vault: i.vault,
+    name: i.name,
+    agentId: TRADER_AGENT_ID,
+    displayName: TRADER_AGENT_NAME,
+    fundNear: i.fundNear,
+    mandateFile: "mandate.hl-trader.session.json",
+    mandateScript: sessionMandateScript(i.master),
+  });
+}

@@ -10,6 +10,7 @@ import { RulesConfirmer } from "./confirm.js";
 import type { ConfirmCtx } from "./confirm.js";
 import { Funder } from "./funding.js";
 import type { FundingClient } from "./funding.js";
+import { acquireStateDirLock } from "./lock.js";
 import { createNktkasHl } from "./hl/nktkas.js";
 import { createPairInfoProvider } from "./pairs.js";
 import { createProposer } from "./propose.js";
@@ -25,6 +26,8 @@ export interface TradingModule {
   /** Hard limits + pair data for the assistant tool; assign to `AiDeps.trading` before the app is created. */
   authoring: TradingAuthoring;
   routeDeps: TradingRouteDeps;
+  /** Exclusive lock on TRADING_STATE_DIR; released on process exit. */
+  release: () => void;
 }
 
 export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
@@ -32,6 +35,17 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
   const master = config.HL_MASTER_ADDRESS;
   if (!master) throw new Error("HL_MASTER_ADDRESS is required"); // config validation already guarantees it
   const hlNetwork = config.HL_NETWORK;
+
+  // One worker per state dir (audit M5). Throws TradingLockedError, so trading never starts twice.
+  const lock = acquireStateDirLock(config.TRADING_STATE_DIR);
+  process.once("exit", () => { lock.release(); });
+  // Release on SIGINT/SIGTERM too (docker stop); otherwise the lock outlives the process.
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.once(sig, () => {
+      lock.release();
+      process.exit(sig === "SIGINT" ? 130 : 143);
+    });
+  }
 
   const wallet = new ApiWalletManager({ stateDir: config.TRADING_STATE_DIR, envKey: config.HL_API_WALLET_PRIVATE_KEY });
   const createHl = (w: ApiWallet) => createNktkasHl({ network: hlNetwork, wallet: w.signer() });
@@ -136,7 +150,7 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
     proposeLimitPerMin: config.AI_RATE_LIMIT_PER_MIN,
     propose: createProposer(ai, authoring),
   };
-  return { service, authoring, routeDeps };
+  return { service, authoring, routeDeps, release: () => { lock.release(); } };
 }
 
 export { createTradingRouter };

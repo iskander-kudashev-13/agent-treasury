@@ -94,4 +94,4 @@ loop.schedule(config.LOOP_INTERVAL_MIN * 60_000, () => config.DRY_RUN || runtime
 trading?.service.start();
 
 console.log(`Server starting on port ${config.PORT}...`);
-serve({ fetch: app.fetch, port: config.PORT });
+serve({ fetch: app.fetch, port: config.PORT, hostname: config.HOST });

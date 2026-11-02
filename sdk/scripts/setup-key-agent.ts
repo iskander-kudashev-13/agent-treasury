@@ -1,9 +1,9 @@
 /**
  * AGENT_ACCESS 3.5 setup A: create a Key agent for a vault.
  *
- *   OWNER_PRIVATE_KEY=ed25519:... pnpm setup-key-agent -- --owner owner.testnet --vault vault.owner.testnet \
+ *   OWNER_PRIVATE_KEY=ed25519:... pnpm setup-key-agent --owner owner.testnet --vault vault.owner.testnet \
  *       --name procurement --mandate examples/mandate.procurement.json
- *   pnpm setup-key-agent -- --owner ... --vault ... --name procurement --mandate ... --dry-run   # no key needed, nothing sent
+ *   pnpm setup-key-agent --owner ... --vault ... --name procurement --mandate ... --dry-run   # no key needed, nothing sent
  *
  * What it does (3 transactions, see --dry-run):
  *   1. creates <name>.<owner> if absent (owner keeps a full-access key on it, so it can delete the agent key later)
@@ -13,6 +13,7 @@
  * The private key is printed ONCE to stdout. OWNER_PRIVATE_KEY is read from the environment only and never written anywhere.
  */
 import { parseArgs } from "node:util";
+import { stripLeadingDashDash } from "./key-agent-plan.js";
 import { Account, JsonRpcProvider, KeyPair, nearToYocto } from "near-api-js";
 import type { KeyPairString } from "near-api-js";
 import {
@@ -32,6 +33,7 @@ import {
 import type { Network } from "./key-agent-plan.js";
 
 const { values } = parseArgs({
+  args: stripLeadingDashDash(process.argv.slice(2)),
   options: {
     owner: { type: "string" },
     vault: { type: "string" },

@@ -1,6 +1,6 @@
 # Demo video script
 
-Total about 3.5 min: payroll 2.5 min (main), grant milestones 30 s, hackathon prizes 30 s, close 10 s.
+Total about 4.3 min: payroll 2.5 min (main), grant milestones 30 s, hackathon prizes 30 s, trading agent 40 s, close 10 s.
 Theme: an organisation has to pay people on different chains; an agent does the paying, the vault sets the rules.
 
 Markers: **[BUILT]** works today on testnet. **[MAINNET]** needs the mainnet demo vault and real 1Click with tiny
@@ -17,6 +17,9 @@ USDC moves on NEAR, nothing arrives on Base or Solana." Show the `SIMULATED 1CLI
 - Claude Code with the `agent-treasury` MCP server connected (`/mcp` shows it).
 - Worker running with `LOOP_INTERVAL_MIN=1`, or ready to trigger `POST /run`.
 - One crafted pending payout with a fake deposit address (see scene 6) prepared on the recording network.
+- Trading scene (Part 4): worker with `TRADING_ENABLED=true`, `hl-trader` created and funded, API wallet approved, HL
+  master already holding the delivered top-up (`/trading/status` `pnl.net_funded_usdc` > 0), no rules signed yet. On
+  mainnet this is steps 1–11 of `docs/commands.md` → "[MAINNET] Trading session runbook", each with the owner's OK.
 
 ## Part 1: Payroll (2:30)
 
@@ -84,6 +87,26 @@ Story: an organiser pays winners on whatever chain each winner wants.
 - [NOT BUILT] "upload a table (place, amount, chain, address), sign once". No CSV import or batch transaction exists today;
   each recipient and schedule is one owner transaction.
 Voice: "One treasury, winners on three chains, no bridges for anyone."
+
+## Part 4: Trading agent (0:40)
+
+Story: the same vault funds an agent that trades Hyperliquid spot, but the rules come from the owner, not from the model.
+- [BUILT, tested with fakes; MAINNET not run yet] **0:00–0:12 Chat → rules.** In the assistant panel, type: "Buy HYPE for
+  12 USDC every 4 hours. Never hold more than 25 USDC. Stop if I lose 5 USDC today." The `TradingRules` card appears. It
+  is rendered by the dashboard's own code, with the hash computed in the browser.
+  Voice: "The model only drafts the rules. It never places an order."
+- **0:12–0:20 Confirm.** Click Review & sign rules. The wallet signs a NEP-413 message with the rules hash.
+  Voice: "I sign the exact rules. From now on a deterministic engine runs them, with no AI in the loop."
+- **0:20–0:30 Status card.** Trading page: state `running`, the first IOC order (the interval rule fires at once),
+  position, P&L today, vault top-ups left today, dead-man timer. Optional cut to HL order history: the `cloid` starts with
+  the rules hash.
+- **0:30–0:40 Kill switch.** Click Stop trading. The timeline shows orders cancelled, then `pause_agent` signed in the
+  wallet. Status `halted`.
+  Voice (honesty line, say it as written): "What the vault cannot protect: money already on Hyperliquid. The vault limits
+  how much goes there per day. Whoever holds the bot's Hyperliquid key could still lose that balance, and positions stay
+  open after the kill switch. The real stop is revoking the key on Hyperliquid."
+- Fallback without mainnet: record on HL testnet with `ONECLICK_MODE=simulated` (README path F2) and say "Hyperliquid
+  testnet; the top-up is simulated". Do not show testnet fills as mainnet.
 
 ## Close (0:10)
 

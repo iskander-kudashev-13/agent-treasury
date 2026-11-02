@@ -9,7 +9,8 @@ import { KillSwitch } from "./KillSwitch";
 import { RulesCard } from "./RulesCard";
 import { pendingTrader, SetupCard } from "./SetupCard";
 import { StatusCard } from "./StatusCard";
-import { useOwnerDetails, useTradingStatus } from "./useTrading";
+import { AccountTrustCallout } from "./AccountTrust";
+import { useAccountTrust, useHlApprovedAgents, useOwnerDetails, useTradingStatus } from "./useTrading";
 
 /** `/trading`: set up, approve the bot's wallet, see status and rules, stop. Calm and linear (docs/research: one-screen setup). */
 export function Trading() {
@@ -24,6 +25,9 @@ export function Trading() {
   const recoveredNow = recovered !== null && !dismissed && trader?.account_id === recovered.account;
   const showSetup = !agents.loading && (trader === null || creating || recoveredNow);
   const live = status?.enabled ? status : null;
+  const { trust, trusted } = useAccountTrust(live);
+  const hlAgents = useHlApprovedAgents(live?.hl_network ?? "testnet", live && trust?.kind === "ok" ? trusted : null);
+  const accountOk = trust?.kind === "ok";
 
   return (
     <div className="flex flex-col gap-4">
@@ -53,7 +57,8 @@ export function Trading() {
         </Card>
       ) : live ? (
         <>
-          {(!live.api_wallet.approved || live.state === "awaiting_api_wallet") && <ApiWalletCard status={live} />}
+          <AccountTrustCallout trust={trust} />
+          {(!live.api_wallet.approved || live.state === "awaiting_api_wallet") && <ApiWalletCard status={live} accountOk={accountOk} hlAgents={hlAgents} />}
           <StatusCard
             status={live}
             log={details.log}
@@ -69,7 +74,7 @@ export function Trading() {
             }
           />
           <RulesCard status={live} rules={details.rules} verified={details.rulesVerified} signedIn={details.signedIn} signingIn={details.signingIn} signIn={() => void details.signIn()} error={details.authError ?? details.error} />
-          {live.api_wallet.approved && live.api_wallet.address && <ApiWalletCard status={live} />}
+          {live.api_wallet.approved && live.api_wallet.address && <ApiWalletCard status={live} accountOk={accountOk} hlAgents={hlAgents} />}
           <KillSwitch status={live} />
         </>
       ) : null}

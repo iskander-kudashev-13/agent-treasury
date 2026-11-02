@@ -36,6 +36,8 @@ const baseEnvShape = z.object({
     /** Default true: only dry quotes, never calls request_payout / report_payout_status. */
     DRY_RUN: boolFlag(true),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+    /** Bind address. Default localhost (audit L5); the Docker image sets 0.0.0.0. */
+    HOST: z.string().min(1).default("127.0.0.1"),
     /** Bearer token for POST /run. Unset = the endpoint is disabled. */
     WORKER_ADMIN_TOKEN: optionalString,
     DASHBOARD_ORIGIN: z.string().default("http://localhost:5173"),

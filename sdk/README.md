@@ -37,17 +37,22 @@ Rules baked in:
 ```bash
 pnpm install
 # print the 3 planned transactions, send nothing:
-pnpm setup-key-agent -- --owner owner.testnet --vault vault.owner.testnet --name procurement \
+pnpm setup-key-agent --owner owner.testnet --vault vault.owner.testnet --name procurement \
   --mandate examples/mandate.procurement.json --dry-run
 # for real (reads OWNER_PRIVATE_KEY from the environment for this run only; prints the agent key ONCE):
-OWNER_PRIVATE_KEY=ed25519:... pnpm setup-key-agent -- --owner owner.testnet --vault vault.owner.testnet \
+OWNER_PRIVATE_KEY=ed25519:... pnpm setup-key-agent --owner owner.testnet --vault vault.owner.testnet \
   --name procurement --mandate examples/mandate.procurement.json
 # revoke (vault.revoke_agent, then delete the access key):
-OWNER_PRIVATE_KEY=ed25519:... pnpm revoke-key-agent -- --owner owner.testnet --vault vault.owner.testnet \
+OWNER_PRIVATE_KEY=ed25519:... pnpm revoke-key-agent --owner owner.testnet --vault vault.owner.testnet \
   --agent-id procurement --public-key ed25519:...
 ```
 
 Mandate files use the contract JSON (amounts are USDC base units, 6 decimals; `"100000000"` = 100 USDC).
+`examples/mandate.hl-trader.session.json` is the mainnet Hyperliquid trading session mandate (approval_threshold 0, daily 25, per-tx 25,
+1 payment/day, allowlist `hypercore` + the owner's HL address). Before use replace the allowlist address with your HL master and
+`expires_at` (placeholder `REPLACE_WITH_UNIX_MS_NOW_PLUS_48H_MAX`, a unix ms string, at most 48 h ahead, e.g. `$(( $(date +%s) * 1000 + 172800000 ))`);
+the loader refuses the file until `expires_at` is a number.
+
 Setup B (bring your own account): the owner only calls `add_agent` with that `account_id`.
 
 ## Development

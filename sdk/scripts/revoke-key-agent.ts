@@ -1,18 +1,20 @@
 /**
  * Revokes a Key agent: vault.revoke_agent (terminal, immediate), then deletes its function-call key from the agent account.
  *
- *   OWNER_PRIVATE_KEY=ed25519:... pnpm revoke-key-agent -- --owner owner.testnet --vault vault.owner.testnet \
+ *   OWNER_PRIVATE_KEY=ed25519:... pnpm revoke-key-agent --owner owner.testnet --vault vault.owner.testnet \
  *       --agent-id procurement --public-key ed25519:...
  *   ... --dry-run     # prints the planned transactions, sends nothing
  * Deleting the key needs a full-access key on the agent account (setup-key-agent.ts leaves the owner's key there).
  */
 import { parseArgs } from "node:util";
+import { stripLeadingDashDash } from "./key-agent-plan.js";
 import { Account, JsonRpcProvider, KeyPair } from "near-api-js";
 import type { KeyPairString } from "near-api-js";
 import { ONE_YOCTO, OWNER_CALL_GAS, defaultRpc, planRevoke, printPlan, subAccountId, validateAgentId } from "./key-agent-plan.js";
 import type { Network } from "./key-agent-plan.js";
 
 const { values } = parseArgs({
+  args: stripLeadingDashDash(process.argv.slice(2)),
   options: {
     owner: { type: "string" },
     vault: { type: "string" },

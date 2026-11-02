@@ -4,7 +4,9 @@ A USDC vault contract on NEAR that AI agents can spend from only within an on-ch
 limit, daily limit, daily payment count, allowed chains, allowed recipients, approval threshold, expiry, pause.
 Agents ask the vault to pay; the vault checks the mandate and sends USDC to a NEAR Intents (1Click) deposit address, which
 delivers it on the recipient's chain (Base, Arbitrum, Solana, …). The first use case is payroll: one organisation pays
-people on different chains on a schedule, without a human signing each payment.
+people on different chains on a schedule, without a human signing each payment. The second is a Hyperliquid spot trading
+agent: the vault funds the owner's own Hyperliquid account, and a deterministic engine trades rules the owner signed
+(section "Trading agent (Hyperliquid)").
 
 Built for NEAR HACKATHON (Nov 2026). Tracks: `security`, `business`, `realworld`.
 
@@ -24,6 +26,7 @@ A leaked agent key or a prompt-injected model is capped by the mandate limits; o
 | **Shade Agent (TEE)** (`contract/src/agent.rs`, `worker/`) | The vault is the Shade Agent v2 contract (ADR-0001): `register_agent` verifies a TEE attestation (measurements + PPID) and binds a "Tee" agent slot. The payroll worker (TypeScript, `@neardefi/shade-agent-js` 2.2.0) registers into that slot. | Only **local mode** was run (no TEE, mock all-zero measurements, owner-whitelisted account; `requires_tee: false`). **Not deployed to Phala / no real attestation yet.** |
 | **NEAR Intents 1Click API** | Worker, SDK and MCP server request a real quote (`/v0/tokens`, `/v0/quote`), verify the quote echo before signing, pass the `depositAddress` to the vault, submit and poll `/v0/status`, then report the status. The dashboard looks up `/v0/status?depositAddress=` before the owner can approve a payment. | Read-only calls verified against mainnet 1Click (`pnpm dry-quote`). **No real cross-chain payout yet**: NEAR Intents has no testnet, so all testnet payouts used `ONECLICK_MODE=simulated` (fake 1Click; USDC moves on NEAR testnet to a random deposit account, nothing is delivered cross-chain). |
 | **NEAR AI Cloud** (`worker/src/ai`) | Optional assistant: `POST /ai/chat` (SSE) calls the OpenAI-compatible NEAR AI Cloud endpoint, reads the vault over RPC, and returns typed proposals that the owner signs in the wallet. Owner sign-in is NEP-413. The assistant has no key. | Built and unit-tested against a scripted fake model. **Not run against the live NEAR AI Cloud API** (no API key yet). |
+| **Trading agent** (`worker/src/trading`, ADR-0005) | Key agent `hl-trader` with an `Allowlist` mandate whose only destination is `hypercore` + the owner's Hyperliquid (HL) master address. It tops up that account through 1Click (NEAR USDC → HyperCore spot USDC). Rules are owner-signed with NEP-413 (same sign-in as the assistant). | Built; unit and e2e tests with fakes only. **Not run on HL testnet or HL mainnet yet.** |
 | **Wallet** (`dashboard/`) | Static SPA, `@near-wallet-selector` 10.1.4 (Meteor Wallet, MyNearWallet). View calls go over RPC; owner calls are signed in the wallet. | Used on testnet with Meteor Wallet. |
 
 ## Architecture
@@ -47,22 +50,56 @@ A leaked agent key or a prompt-injected model is capped by the mandate limits; o
  * TEE = Phala Cloud via shade-agent-cli; not deployed yet, local mode only.
  Agents get the deposit address from a fresh 1Click quote; the vault never calls 1Click.
  Optional: worker /ai → NEAR AI Cloud → proposals → owner signs.
+ Optional: worker /trading = key agent hl-trader → request_payment(hypercore, HL master) → 1Click → owner's HL account;
+           its engine trades HL spot with an HL API wallet (section "Trading agent (Hyperliquid)").
 ```
 
 Details, payment path, trust boundaries and the exact check order: [`docs/architecture.md`](docs/architecture.md).
+
+## What the vault does NOT protect
+
+From the pre-mainnet audit of the trading agent ([`docs/security/audit-2026-11-03-trading.md`](docs/security/audit-2026-11-03-trading.md),
+"Known limitations"). Items 2–7 are about the trading agent.
+
+1. **The allowlist pins the declared destination, not the real one, for Key agents** (`hl-trader` included). The vault
+   cannot see where a 1Click deposit address pays out. A stolen agent key can send up to its mandate limits to any NEAR
+   account. Only an owner approval (the dashboard checks the deposit address with 1Click first) or TEE-attested agent
+   code closes this.
+2. **Funds on Hyperliquid are not protected by the vault.** The vault limits only how much is sent there per day. The
+   bot's API wallet cannot withdraw or send to another address directly. But whoever holds its key can lose or route away
+   the whole HL balance: trading, leveraged perps (HIP-3 builder-dex perps are not detected), moving USDC between spot
+   and perp, wash trades against their own orders, and possibly `vaultTransfer` into an HL vault they lead (not verified).
+3. **The trader runs in local mode, with no TEE.** Limits, perp alarm and loss stop are code on the operator's machine,
+   and a compromised host can skip them. Keys sit in plain files (`worker/.env`, `TRADING_STATE_DIR/api-wallet.json`).
+4. **The kill switch halts the bot and pauses top-ups, but positions stay open.** The real stop is revoking the API
+   wallet on app.hyperliquid.xyz with the master key. The dashboard kill needs the worker to be reachable;
+   `pause_agent` also needs NEAR RPC.
+5. **Rules are owner-signed (NEP-413) and kept in worker storage, not on-chain.** The proof is the signed envelope plus
+   the `cloid` prefix (first 8 bytes of the rules hash) on every HL order.
+6. **The daily loss stop depends on reading HL ledger inflows.** A top-up must show up as an inflow, or that day's loss
+   figure is wrong. Which ledger type a 1Click landing produces has not been observed yet.
+7. **Profits do not flow back to the vault automatically.** The return is manual: HL `spotSend` → 1Click → vault, then
+   the two-phase `sync_surplus`.
+8. **Status reporting on local-mode vaults.** On a vault created with `allow_insecure_local_mode`, the whitelisted dev
+   worker may annotate Key agents' payout statuses (`Confirmed` / `Refunded` / `Failed`). Annotation only: refunds and
+   surplus are credited from the real token balance.
+9. **The owner's HL master EVM key is a second root of trust,** next to the NEAR owner key. Use hardware wallets for
+   both.
 
 ## Repo layout
 
 ```
 contract/     Rust vault contract (near-sdk 5.26.1, shade-attestation 0.2.0). cargo test on host; build.sh builds wasm
-worker/       TypeScript payroll agent: Hono HTTP API, Shade Agent registration, payout loop, 1Click client, /ai assistant
+worker/       TypeScript payroll agent: Hono HTTP API, Shade Agent registration, payout loop, 1Click client, /ai assistant,
+              src/trading (Hyperliquid spot trading agent, off by default)
 sdk/          TypeScript SDK for key agents (getBudget, quotePayment, requestPayment, getPaymentStatus, listAllowedRecipients)
               + scripts/setup-key-agent.ts, scripts/revoke-key-agent.ts
 mcp/          MCP server (stdio) for Claude Code / Claude Desktop: five treasury_* tools, built on sdk/
 dashboard/    Vite + React SPA for the owner: Treasury, Agents (+ wizard), Payments (schedules, recipients), Payouts, Policy
 design-kit/   design package (tokens, prototypes) the dashboard is built from
-docs/         architecture.md, comparison.md, demo-script.md, adr/ (0001–0004), security/audit-2026-11-01.md,
-              commands.md (every command used), deployments.md
+docs/         architecture.md, comparison.md, demo-script.md, adr/ (0001–0005), security/audit-2026-11-01.md,
+              security/audit-2026-11-03-trading.md, commands.md (every command used, incl. the mainnet trading
+              runbook), deployments.md, research/hyperliquid-trading.md, trading-rules-vectors.json
 skills/       empty for now (agent skill example not written yet; git does not track empty dirs, so absent in a clone)
 third_party/  upstream LICENSE + NOTICE of NearDeFi/shade-agent-template and the list of files derived from it
 CLAUDE.md, AGENT_ACCESS.md, UI_PLAN.md, DESIGN_AGENTS.md, UI_UPDATES.md   specs the code was built from
@@ -74,8 +111,9 @@ Each package has its own `pnpm-lock.yaml`; there is no root workspace.
 ## Quickstart
 
 Requirements (versions used): Rust stable (1.99.1) with `cargo`, Node.js ≥ 22 (tested with 23.11.0), pnpm 11.22.0,
-`near-cli-rs` 0.30.1 (`cargo install --locked near-cli-rs`, binary `near`) for path B. Paths A, B, C and D1 need no NEAR
-account, no keys and send no transactions (D2 and E send testnet transactions from your own accounts; nothing needs mainnet).
+`near-cli-rs` 0.30.1 (`cargo install --locked near-cli-rs`, binary `near`) for path B. Paths A, B, C, D1 and F1 need no
+NEAR account, no keys and send no transactions (D2, E and F2 send testnet transactions from your own accounts; nothing
+needs mainnet). Path F (trading agent) is in the section "Trading agent (Hyperliquid)".
 
 ### A. Run all tests offline
 
@@ -86,7 +124,7 @@ cd contract
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
-Expected: `test result: ok. 174 passed; 0 failed` (count on 2026-11-02; it grows as tests are added).
+Expected: `test result: ok. 174 passed; 0 failed` (count on 2026-11-03; it grows as tests are added).
 
 TypeScript packages. Build `sdk` before `mcp`, because `mcp` links `../sdk` by path:
 
@@ -96,14 +134,16 @@ for p in sdk mcp worker dashboard; do
 done
 ```
 
-Expected (2026-11-02), no network used by the tests (fake vault, fake 1Click, fake RPC):
+Expected (2026-11-03), no network used by the tests (fake vault, fake 1Click, fake RPC, fake Hyperliquid, fake model):
 
 | Package | `pnpm test` | `pnpm build` output |
 |---|---|---|
-| sdk | `Tests  80 passed (80)` | `sdk/dist/` |
+| sdk | `Tests  89 passed (89)` | `sdk/dist/` |
 | mcp | `Tests  17 passed (17)` | `mcp/dist/index.js` |
-| worker | `Tests  128 passed (128)` | `worker/dist/` |
-| dashboard | `Tests  237 passed (237)` | `dashboard/dist/` (`✓ built in …`) |
+| worker | `Tests  636 passed (636)` | `worker/dist/` |
+| dashboard | `Tests  333 passed (333)` | `dashboard/dist/` (`✓ built in …`) |
+
+The worker needs Node.js ≥ 22.12 (`@nktkas/hyperliquid` 0.33.3).
 
 Optional, read-only, mainnet 1Click (no key, no funds): `cd worker && pnpm dry-quote` → prints
 `token ok: USDC on near, 6 decimals`, `token ok: USDC on base, 6 decimals`, then a quote JSON with `"dry": true`,
@@ -215,7 +255,7 @@ Then ask Claude Code "What is my treasury budget?" → it calls `treasury_get_bu
 **D2. Paying (needs a key agent on a vault you own).** The `claudeagent` key is not public. To pay, create your own
 vault and key agent on testnet (this sends testnet transactions from your accounts):
 1. Deploy and initialise a vault: `docs/commands.md` → "Testnet deployment" (deploy + `new` in one transaction, `storage_deposit` on testnet USDC). Fund it from https://faucet.circle.com (NEAR Testnet) with `ft_transfer_call`, or use the dashboard's Treasury → Deposit.
-2. Create the key agent: dashboard Agents → Add agent (wizard), or `cd sdk && pnpm setup-key-agent -- --owner <OWNER> --vault <VAULT> --name procurement --mandate examples/mandate.procurement.json --dry-run` (drop `--dry-run` and set `OWNER_PRIVATE_KEY` in the environment to send). The private key is printed once.
+2. Create the key agent: dashboard Agents → Add agent (wizard), or `cd sdk && pnpm setup-key-agent --owner <OWNER> --vault <VAULT> --name procurement --mandate examples/mandate.procurement.json --dry-run` (drop `--dry-run` and set `OWNER_PRIVATE_KEY` in the environment to send). The private key is printed once.
 3. Add the MCP server with `TREASURY_AGENT_PRIVATE_KEY=<that key>` and `ONECLICK_MODE=simulated` (config: `mcp/README.md`). Never commit the key.
 4. Run the dashboard (path C) with `VITE_VAULT_CONTRACT=<VAULT>`, connect the owner wallet (Meteor Wallet worked; MyNearWallet did not connect on 2026-11-02).
 
@@ -234,6 +274,105 @@ measurements/PPID, recipient, schedule). Full sequence: `worker/README.md` secti
 "Testnet e2e run, part 1/2". Expected: `curl localhost:3000/status` shows `registration.state: "registered"` and
 `oneclickMode: "simulated"`; after the schedule's start time the next run creates a payout that ends `Confirmed`.
 
+## Trading agent (Hyperliquid)
+
+A second reference use case, switched off by default (`TRADING_ENABLED=false`). Design: [`docs/adr/0005-hyperliquid-trading-agent.md`](docs/adr/0005-hyperliquid-trading-agent.md).
+Read "What the vault does NOT protect" above first.
+
+What it does: trades **spot** HYPE/USDC on Hyperliquid (HL) with USDC from the vault, by rules the owner wrote in plain
+language and signed. The LLM never places orders and never sees a key.
+
+Flow:
+1. **Funding.** The worker's trading module is the Key agent `hl-trader`. Its mandate has one allowlist entry,
+   `hypercore` + the owner's dedicated HL master address. When free HL USDC falls below `TRADING_TOPUP_FLOOR_USDC`, it
+   calls `request_payment` for exactly `TRADING_TOPUP_USDC`. The vault checks the mandate, and 1Click delivers NEAR USDC
+   as HyperCore spot USDC to the master. With `approval_threshold` 0, every top-up waits for the owner, who approves it in
+   the dashboard after the 1Click quote check.
+2. **API wallet.** The worker generates an HL API wallet into `TRADING_STATE_DIR/api-wallet.json` (mode 0600). The
+   owner approves its address on app.hyperliquid.xyz → API with the master key. The bot trades only while HL lists it as
+   approved.
+3. **Rules.** The owner types rules in the assistant chat. NEAR AI calls `propose_trading_rules` and returns a
+   `RuleSetV1` JSON. The worker validates it against env hard limits (pair, max position, max order ≥ 10 USDC, daily
+   loss, orders per day). The dashboard renders the card with its own code and computes the rules hash.
+4. **Confirm.** The owner signs a NEP-413 message with that hash (full-access key of the vault owner).
+   `POST /trading/rules/confirm` checks the signature, the owner, a single-use nonce, the hash and the limits.
+5. **Engine.** A deterministic tick runs every `TRADING_TICK_SEC`, with no LLM involved. Each tick:
+   - reads the vault budget and HL state;
+   - checks the perp alarm, data freshness, API-wallet approval and on-chain pause or revoke;
+   - refreshes the `scheduleCancel` dead-man switch;
+   - applies the daily loss stop;
+   - places at most 2 orders inside a ±1 % band, each with `cloid` = rules-hash prefix + counter.
+6. **Stop.** The dashboard kill switch:
+   - calls `POST /trading/kill` (cancels all orders, halts until new rules are signed, dead-man at now + 6 s);
+   - then calls `pause_agent` on the vault;
+   - then tells the owner to revoke the API wallet on HL.
+
+   Positions stay open.
+
+### F. Run the trading agent locally
+
+**F1. Offline, with fakes (no network, no keys):**
+
+```bash
+cd worker && pnpm install --frozen-lockfile && pnpm exec vitest run test/trading
+```
+→ every test file passes (part of the 636 worker tests). `test/trading/e2e.test.ts` runs the whole path through
+`createTradingModule` + `createApp` with a fake HL, SDK, NEAR and model: chat → proposal → sign → confirm → IOC order →
+loss stop → kill. It also checks that a non-owner session cannot confirm or kill, and that a low HL balance with no
+rules triggers exactly one top-up to `hypercore` + the master.
+
+**F2. Against HL testnet, NEAR testnet and simulated 1Click.** This sends NEAR testnet transactions from your accounts
+and HL testnet actions from your HL master. You need:
+- a testnet vault you own (path D2.1);
+- a NEAR AI key;
+- an HL master address with testnet USDC. The faucet at https://app.hyperliquid-testnet.xyz/drip pays only addresses that
+  have deposited on HL mainnet before.
+
+Steps:
+1. Create the key agent. Copy `sdk/examples/mandate.hl-trader.json` to `/tmp/mandate.hl-trader.testnet.json` and set
+   `allowlist[0].address` to your HL master. Then run
+   `cd sdk && OWNER_PRIVATE_KEY=ed25519:… pnpm setup-key-agent --owner <OWNER> --vault <VAULT> --name hl-trader --mandate /tmp/mandate.hl-trader.testnet.json`
+   → it prints `TREASURY_AGENT_ACCOUNT=hl-trader.<OWNER>` and `TREASURY_AGENT_PRIVATE_KEY=ed25519:…` once.
+2. Create `worker/.env` (gitignored; never commit it):
+   ```bash
+   NEAR_NETWORK=testnet
+   VAULT_CONTRACT_ID=<VAULT>
+   RUN_MODE=local
+   ONECLICK_MODE=simulated              # top-ups move testnet USDC on NEAR only; nothing reaches HL testnet
+   DRY_RUN=true                         # payroll loop off; no SPONSOR_* needed for trading
+   AI_SESSION_SECRET=<openssl rand -hex 32>
+   NEARAI_API_KEY=<key>
+   DASHBOARD_ORIGIN=http://localhost:5173
+   TRADING_ENABLED=true
+   HL_NETWORK=testnet
+   HL_MASTER_ADDRESS=<HL master 0x…>
+   TRADING_STATE_DIR=./.trading-testnet
+   TRADER_NEAR_ACCOUNT_ID=hl-trader.<OWNER>
+   TRADER_NEAR_PRIVATE_KEY=<TREASURY_AGENT_PRIVATE_KEY from step 1>
+   ```
+3. Start the worker: `cd worker && pnpm build && node dist/index.js`
+   → `TRADING ENABLED: hl=testnet account=<HL master> agent=hl-trader api-wallet=0x…`.
+   `curl -s localhost:3000/trading/status | jq .state` → `"awaiting_api_wallet"`.
+4. Approve that `api-wallet` address on https://app.hyperliquid-testnet.xyz → API with the name
+   `agent-treasury valid_until <ms>`. Then `/trading/status` → `api_wallet.approved: true`, state `"no_rules"`.
+5. Start the dashboard (path C) with `VITE_VAULT_CONTRACT=<VAULT> VITE_WORKER_URL=http://localhost:3000 VITE_AI_ENABLED=true`.
+   Open `#/trading` and sign in as the owner. Type the rules in the assistant, for example "buy HYPE for 12 USDC every
+   hour, max position 40, stop at −5 today". Then Review & sign rules → state `"running"`.
+
+Known testnet limit: testnet HYPE/USDC had a very wide book (bid 8200 / ask 11355) when tested, so the spread gate skips
+every tick there. Use a testnet pair with a sane book in `TRADING_ALLOWED_PAIRS` and a lower
+`TRADING_MIN_PAIR_VOLUME_USDC` to see fills; which pair works was not checked. Drills (kill, `pause_agent`, `kill -9`,
+manual perp → `halted`) and their expected results: `docs/commands.md` → "Trading testnet drills".
+
+Mainnet: only with the owner's explicit OK for each step, following `docs/commands.md` →
+"[MAINNET] Trading session runbook" (vault ≤ 26 USDC, daily 25, one top-up, threshold 0, agent and API wallet ≤ 48 h,
+everything revoked afterwards).
+
+Status (2026-11-03): built. The rules DSL, engine, funding, confirmation, routes and dashboard are unit-tested and
+e2e-tested with fakes. Audit 2026-11-03 found 0 critical, 2 high (H1 mitigated by session config; H2 is an inherent HL
+limit, now documented) and 7 medium. M1 and M2 are fixed; the rest are tracked in ADR-0005 "Audit 2026-11-03 follow-up".
+**Not run on HL testnet or HL mainnet yet**; no real 1Click delivery to HyperCore has happened yet.
+
 ## Status
 
 What was run and verified (testnet, 2026-11-01/02, local mode, simulated 1Click):
@@ -250,7 +389,8 @@ What was run and verified (testnet, 2026-11-01/02, local mode, simulated 1Click)
 | Key agent: address not in allowlist | `Rejected RECIPIENT_NOT_ALLOWED` (by the contract) | `get_rejections` |
 | Key agent: 2.5 USDC (threshold 2) | `pending_approval ABOVE_THRESHOLD` → owner approved in dashboard → payout 2 `Confirmed` | `get_payout 2` |
 | Dashboard quote check on a simulated deposit address | Approve blocked ("1Click has no quote for this deposit address"); testnet-only simulated mode added with explicit acknowledgement | `dashboard/src/features/payouts/QuoteCheckPanel.tsx`; 404 from 1Click (path B) |
-| Offline tests | contract 174, sdk 80, mcp 17, worker 128, dashboard 237, all passing | path A |
+| Trading agent with fakes: chat → proposal → NEP-413 confirm → IOC order → loss stop → kill; top-up to `hypercore` + master | passing (offline) | `worker/test/trading/e2e.test.ts`, path F1 |
+| Offline tests | contract 174, sdk 91, mcp 17, worker 636, dashboard 343, all passing (2026-11-03) | path A |
 
 "Confirmed" in simulated mode means the worker/MCP reported success after USDC moved on NEAR testnet to a random
 64-hex deposit account. Nothing was delivered on Base, Solana or Arbitrum.
@@ -264,6 +404,9 @@ Not done yet:
 | NEAR AI Cloud assistant against the live API | not run (no API key); tested against a fake |
 | Owner pausing a key agent live (`AGENT_PAUSED`) and revocation in the e2e run | covered by contract unit tests, not run on testnet |
 | `skills/` example for external agents | not written |
+| Trading agent on HL testnet (12 h run + kill / `pause_agent` / `kill -9` / manual-perp drills) | not run; plan and expected results in `docs/commands.md` |
+| Trading session on HL mainnet (first real 1Click delivery to HyperCore, one trade) | not run; runbook written (`docs/commands.md` → "[MAINNET] Trading session runbook"), each step needs the owner's OK |
+| Trading audit findings M3, M5, M6, M7 | open or in progress (ADR-0005 "Audit 2026-11-03 follow-up") |
 | Payouts approved for a key agent stay `Sent` until someone polls 1Click | fix in progress (ADR-0002 amendment 2026-11-02: worker reports Key agents' payouts); not deployed to the testnet vault |
 
 ## Security model (summary)
@@ -278,7 +421,9 @@ Not done yet:
 - **Simulated 1Click** is refused unless the RPC reports `chain_id == "testnet"`.
 
 Full audit (0 critical; H1, H2, M1–M4, L1 fixed in code; trust-boundary table and known limitations):
-[`docs/security/audit-2026-11-01.md`](docs/security/audit-2026-11-01.md). Design decisions: [`docs/adr/`](docs/adr).
+[`docs/security/audit-2026-11-01.md`](docs/security/audit-2026-11-01.md). Trading agent audit (0 critical, 2 high, 7
+medium; conditional go for one tiny mainnet session): [`docs/security/audit-2026-11-03-trading.md`](docs/security/audit-2026-11-03-trading.md).
+Design decisions: [`docs/adr/`](docs/adr).
 
 Known limitations: Shade Agent v2 tooling is unmaintained upstream (versions pinned, ADR-0001); `shade-attestation`
 accepts any app-compose whose hash is approved; NEAR AI attestation is fetched but not verified by the worker; owner
@@ -300,7 +445,7 @@ Templates and adapted code:
 
 Main libraries (exact versions in `Cargo.toml` / `package.json`):
 - Contract: `near-sdk` 5.26.1, `shade-attestation` 0.2.0, `serde` 1.0.228, `hex` 0.4.3.
-- Worker: `@neardefi/shade-agent-js` 2.2.0, `@neardefi/shade-agent-cli` 2.4.0 (dev), `hono` 4.13.14, `@hono/node-server` 2.1.5, `@near-js/providers` / `@near-js/types` 2.5.1, `zod` 4.6.7, `dotenv` 18.0.9.
+- Worker: `@neardefi/shade-agent-js` 2.2.0, `@neardefi/shade-agent-cli` 2.4.0 (dev), `hono` 4.13.14, `@hono/node-server` 2.1.5, `@near-js/providers` / `@near-js/types` 2.5.1, `zod` 4.6.7, `dotenv` 18.0.9, `@nktkas/hyperliquid` 0.33.3 (Hyperliquid API client), `viem` 2.57.13 (secp256k1 API wallet), `agent-treasury-sdk` (`link:../sdk`, the trader's vault client).
 - SDK: `near-api-js` 7.4.0, `zod` 4.6.7.
 - MCP: `@modelcontextprotocol/server` 2.4.0 (`@modelcontextprotocol/client` 2.4.0 for tests), `zod` 4.6.7.
 - Dashboard: `react` / `react-dom` 19.3.1, `react-router-dom` 7.18.5, `@tanstack/react-query` 5.105.1, `@near-wallet-selector/{core,modal-ui,meteor-wallet,my-near-wallet}` 10.1.4, `@near-js/crypto` 2.5.1, `tailwindcss` 4.3.3, `vite` 8.3.5, `vite-plugin-node-polyfills` 0.28.0.
@@ -309,7 +454,8 @@ Main libraries (exact versions in `Cargo.toml` / `package.json`):
   the design-kit prototypes; not committed.
 
 External services: NEAR testnet RPC (FastNEAR), NEAR Intents 1Click API (`https://1click.chaindefuser.com`), NEAR AI
-Cloud (`https://cloud-api.near.ai/v1`, optional), Circle testnet USDC faucet.
+Cloud (`https://cloud-api.near.ai/v1`, optional), Circle testnet USDC faucet, Hyperliquid API
+(`https://api.hyperliquid.xyz`, `https://api.hyperliquid-testnet.xyz`; trading module only).
 
 AI-generated code: the code, tests and documentation in this repository were written with Claude Code agents (Anthropic
 Claude), directed and reviewed by the human author. Specs (`CLAUDE.md`, `AGENT_ACCESS.md`, `UI_*.md`, `DESIGN_AGENTS.md`)

@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { loadMandate, planRevoke, planSetup, printPlan, validateSubAccountName } from "../scripts/key-agent-plan.js";
+import { stripLeadingDashDash, loadMandate, planRevoke, planSetup, printPlan, validateSubAccountName } from "../scripts/key-agent-plan.js";
 
 const mandate = loadMandate(join(import.meta.dirname, "../examples/mandate.procurement.json"));
 
@@ -65,4 +66,37 @@ describe("mandate file validation", () => {
       validateSubAccountName("Bad.Name");
     }).toThrow();
   });
+});
+
+describe("hl-trader session mandate example (audit 2026-11-03 H1)", () => {
+  const path = join(import.meta.dirname, "../examples/mandate.hl-trader.session.json");
+  it("is rejected until expires_at is replaced", () => {
+    expect(() => loadMandate(path)).toThrow(/expires_at/);
+  });
+  it("has the session limits once expires_at is set", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sess-"));
+    const f = join(dir, "m.json");
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    writeFileSync(f, JSON.stringify({ ...raw, expires_at: String(Date.now() + 48 * 3_600_000) }));
+    expect(loadMandate(f)).toMatchObject({ approval_threshold: "0", daily_limit: "25000000", per_tx_limit: "25000000", max_payments_per_day: 1, allowed_chains: ["hypercore"], recipients_mode: "Allowlist" });
+  });
+});
+
+describe("pnpm `--` passthrough", () => {
+  it("strips one leading --", () => {
+    expect(stripLeadingDashDash(["--", "--owner", "a"])).toEqual(["--owner", "a"]);
+    expect(stripLeadingDashDash(["--owner", "a"])).toEqual(["--owner", "a"]);
+  });
+  it("both scripts accept the forms (dry-run, nothing sent)", () => {
+    for (const script of ["setup-key-agent", "revoke-key-agent"]) {
+      const base = script === "setup-key-agent"
+        ? ["--owner", "o.testnet", "--vault", "v.o.testnet", "--name", "x", "--mandate", join(import.meta.dirname, "../examples/mandate.procurement.json"), "--dry-run"]
+        : ["--owner", "o.testnet", "--vault", "v.o.testnet", "--agent-id", "x", "--public-key", "ed25519:11111111111111111111111111111111", "--dry-run"];
+      for (const args of [base, ["--", ...base]]) {
+        const r = spawnSync("pnpm", ["exec", "tsx", `scripts/${script}.ts`, ...args], { cwd: join(import.meta.dirname, ".."), encoding: "utf8", env: { ...process.env, OWNER_PRIVATE_KEY: "" } });
+        expect(r.stderr).not.toMatch(/ERR_PARSE_ARGS/);
+        expect(r.status).toBe(0);
+      }
+    }
+  }, 60_000);
 });

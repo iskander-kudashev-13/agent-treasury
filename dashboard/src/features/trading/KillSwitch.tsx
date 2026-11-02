@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button, Callout, Card, Icons, Modal, Timeline, type TimelineStep } from "@/kit";
 import { useAgentTx } from "@/features/agents/useAgentTx";
 import { useWallet } from "@/features/wallet/WalletProvider";
-import { ensureSession, killTrading, rotateApiWallet, TRADER_AGENT_ID, type KillResult, type TradingStatus } from "@/lib/tradingClient";
+import { killTrading, rotateApiWallet, withOwnerSession, TRADER_AGENT_ID, type KillResult, type TradingStatus } from "@/lib/tradingClient";
 import { hlAppUrl } from "@/lib/tradingView";
 import { tradingKeys } from "./useTrading";
 
@@ -37,8 +37,8 @@ export function KillSwitch({ status }: { status: TradingStatus }) {
     setRun({ kill: { state: "active" }, pause: TODO });
     let kill: Step;
     try {
-      const session = await ensureSession(accountId, signMessage);
-      const r = await killTrading(session.token, "dashboard kill switch");
+      // An expired owner session (1 h) is renewed inline: one extra wallet prompt, then the kill is retried once.
+      const r = await withOwnerSession(accountId, signMessage, (token) => killTrading(token, "dashboard kill switch"));
       setKilled(r);
       const failed = [r.steps.cancel_all === "failed" && "cancel all orders", r.steps.schedule_cancel === "failed" && "dead-man timer", r.steps.state_saved === "failed" && "saving the halt (a restart could forget it; stop the worker and revoke its API wallet)"].filter(Boolean);
       kill = failed.length === 0 ? { state: "done", detail: `Halted. ${r.cancelled_orders} order${r.cancelled_orders === 1 ? "" : "s"} cancelled.` } : { state: "failed", detail: `Halted, but ${failed.join(" and ")} failed. Orders also auto-cancel within minutes (dead-man timer) and on the bot's next check.` };
@@ -56,8 +56,7 @@ export function KillSwitch({ status }: { status: TradingStatus }) {
     if (!accountId) return;
     setRotateErr(null);
     try {
-      const s = await ensureSession(accountId, signMessage);
-      setRotated(await rotateApiWallet(s.token));
+      setRotated(await withOwnerSession(accountId, signMessage, (token) => rotateApiWallet(token)));
       void qc.invalidateQueries({ queryKey: tradingKeys.all });
     } catch (e) {
       setRotateErr(e instanceof Error ? e.message : String(e));
@@ -81,7 +80,7 @@ export function KillSwitch({ status }: { status: TradingStatus }) {
               <button type="button" className="cursor-pointer text-ok underline" onClick={() => void rotate()}>
                 rotate it
               </button>{" "}
-              to give the bot a new one that you must approve again.
+              to give the bot a new one that you must approve again (rotating does not revoke the old wallet on Hyperliquid: remove it there too).
               {rotated && <span className="mono mt-1 block text-xs break-all">New address: {rotated}</span>}
               {rotateErr && <span className="mt-1 block text-danger-text">{rotateErr}</span>}
             </>
@@ -133,7 +132,7 @@ export function KillSwitch({ status }: { status: TradingStatus }) {
           </div>
         ) : (
           <p className="m-0">
-            The bot cancels every open order and stays halted until you confirm new rules. Then your wallet asks you to pause the agent on the vault. You will be asked to sign in once if you have not yet.
+            The bot cancels every open order and stays halted until you confirm new rules. Then your wallet asks you to pause the agent on the vault. If your sign-in has expired you will be asked to sign in again once.
           </p>
         )}
       </Modal>
