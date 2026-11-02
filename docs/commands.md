@@ -127,3 +127,65 @@ Worker TEE hardening (audit H1/M3): after the worker registered and its attestat
 ```bash
 near contract call-function as-transaction <VAULT> pin_agent json-args '{"agent_id":"payroll"}' prepaid-gas '30 Tgas' attached-deposit '1 yoctoNEAR' sign-as <OWNER> network-config <NETWORK> sign-with-keychain send
 ```
+
+## Testnet deployment (2026-11-01)
+
+```bash
+# accounts via faucet (keys saved to ~/.near-credentials/testnet, never committed)
+near account create-account sponsor-by-faucet-service at-owner-11012309.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
+near account create-account sponsor-by-faucet-service at-vault-11012309.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
+# vault storage for ~1 MB wasm
+near tokens at-owner-11012309.testnet send-near at-vault-11012309.testnet '3 NEAR' network-config testnet sign-with-legacy-keychain send
+# deploy + init in ONE transaction (new is #[private]: nobody can front-run init)
+cd contract && ./build.sh && cd ..
+near contract deploy at-vault-11012309.testnet use-file contract/target-wasm/near/agent_treasury_vault.wasm \
+  with-init-call new json-args '{"owner_id":"at-owner-11012309.testnet","treasury_token":"3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af","policy":{"daily_limit":"1000000000","min_payment":"500000","overdue_grace_ms":"259200000"},"requires_tee":false,"attestation_expiration_time_ms":"604800000","storage_deposit_yocto":null,"allow_insecure_local_mode":true}' \
+  prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+# register the vault on testnet USDC so it can receive ft_transfer_call
+near contract call-function as-transaction 3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af storage_deposit \
+  json-args '{"account_id":"at-vault-11012309.testnet","registration_only":true}' prepaid-gas '30.0 Tgas' attached-deposit '0.00125 NEAR' \
+  sign-as at-owner-11012309.testnet network-config testnet sign-with-legacy-keychain send
+# check: a non-agent gets a machine-readable rejection, no money moves
+near contract call-function as-transaction at-vault-11012309.testnet request_payment \
+  json-args '{"chain":"base","address":"0x1111111111111111111111111111111111111111","amount":"1000000","memo":null,"schedule_id":null,"deposit_address":"78afe8ceccf6cf20593f2afb36fb195339855e29b7661795c5e6024ffe4376a6","deposit_expires_at_ms":null}' \
+  prepaid-gas '150.0 Tgas' attached-deposit '0 NEAR' sign-as at-owner-11012309.testnet network-config testnet sign-with-legacy-keychain send
+# → {"Rejected":{"reason":"AGENT_NOT_FOUND","detail":"The calling account is not an agent of this vault."}}
+```
+
+## Testnet e2e run, part 1 (2026-11-01): payroll agent in local mode
+
+```bash
+near account create-account sponsor-by-faucet-service at-sponsor-11012309.testnet autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
+# worker/.env (gitignored): RUN_MODE=local, ONECLICK_MODE=simulated, DRY_RUN=false, LOOP_INTERVAL_MIN=1,
+#   VAULT_CONTRACT_ID=at-vault-11012309.testnet, AGENT_ID=payroll, SPONSOR_* from ~/.near-credentials
+cd worker && pnpm build && node dist/index.js      # prints "Agent account ID: 99d14ac4…1dc3"
+# owner setup (each 1 yoctoNEAR, sign-as at-owner-11012309.testnet):
+#   add_recipient {label "Maria (test)", base, nep141:base-0x8335…913.omft.near, 0x…dead}  → id 0
+#   add_agent {id payroll, kind Tee, account_id null, mandate Fixed [0], 50/day, 10/tx, threshold 5, 10/day}
+#   whitelist_agent_for_local {account_id: <agent account>}
+#   approve_measurements {all-zero mock: 96 hex zeros ×5, app_compose_hash_payload 64 zeros}
+#   approve_ppids {["000…0" (32 zeros)]}
+# → worker registers by itself: get_agent(payroll).tee.valid == true
+#   add_schedule {recipient 0, 1 USDC, Once, start_at now+2min, agent payroll}
+# → next run: vault answers Rejected INSUFFICIENT_BALANCE (vault has no USDC yet), nothing moves
+```
+
+## Testnet e2e run, part 2 (2026-11-02): first payout
+
+```bash
+# owner got 20 testnet USDC from https://faucet.circle.com (NEAR Testnet), deposited 10 via dashboard Treasury -> Deposit
+#   (= ft_transfer_call on the USDC contract to at-vault-11012309.testnet, amount 10000000)
+# dashboard RPC: rpc.testnet.near.org answers browser preflight with 429 and no CORS header -> use https://test.rpc.fastnear.com
+cd worker && pnpm build && node dist/index.js   # RUN_MODE=local, ONECLICK_MODE=simulated
+# → run 1: schedule 0 (Maria) dry quote ok → request_payout → payout 0 Sent → deposit/submit → reported Confirmed
+near contract call-function as-read-only at-vault-11012309.testnet get_payout json-args '{"payout_id":"0"}' network-config testnet now
+near contract call-function as-read-only at-vault-11012309.testnet get_balance json-args '{}' network-config testnet now   # 9000000
+```
+# test recipients (addresses are dummies; 1Click is simulated on testnet), asset ids from GET /v0/tokens
+#   add_recipient {"recipient":{label, destination_chain, destination_asset, destination_address}}  (1 yoctoNEAR, owner)
+#   1 Alex (test)  sol  nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near  1nc1nerator11111111111111111111111111111111
+#   2 Kenji (test) arb  nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near 0x0000000000000000000000000000000000000b0b
+#   3 Priya (test) base nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near 0x0000000000000000000000000000000000000a11
+# update_mandate payroll: allowed_chains [base, sol, arb], recipients [0,1,2,3], limits unchanged (50/day, 10/tx, threshold 5)
+# add_schedule with amount above per_tx_limit is refused by the contract itself:
+#   → "Smart contract panicked: Amount exceeds payroll's per-payment limit (10)"

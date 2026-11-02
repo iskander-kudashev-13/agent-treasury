@@ -65,6 +65,11 @@ export async function createAgentRuntime(config: Config, log: (m: string) => voi
       : {}),
     // Fixed agent account id for LOCAL mode only (insecure dev mode). In TEE the SDK derives keys inside dstack.
     ...(config.RUN_MODE === "local" && config.SPONSOR_PRIVATE_KEY ? { derivationPath: config.SPONSOR_PRIVATE_KEY } : {}),
+    // Workaround for @neardefi/shade-agent-js 2.2.0: with numKeys = 1 there are no additional keys, and
+    // `[].every(usedRandom)` is true, so in LOCAL mode (first key derived from the path, not random) the SDK throws
+    // "First key and additional keys disagree on derivation method" on every call. Asking for one additional key makes
+    // it path-derived too. TEE mode is unaffected (all keys random), so keep the SDK default there.
+    ...(config.RUN_MODE === "local" ? { numKeys: 2 } : {}),
   });
   log(`Agent account ID: ${agent.accountId()}`);
 
@@ -123,7 +128,9 @@ export async function createAgentRuntime(config: Config, log: (m: string) => voi
     }
     void (async () => {
       try {
-        if ((await agent.balance()) < 0.2 && canSpend) await agent.fund(0.3);
+        // register_agent attaches 300 TGas; NEAR pre-charges prepaid gas at the current gas price (≈0.3 NEAR on
+        // testnet), so keep a margin above that or every registration fails with "does not have enough balance".
+        if ((await agent.balance()) < 0.5 && canSpend) await agent.fund(1);
       } catch (e) {
         log(`funding failed: ${e instanceof Error ? e.message : String(e)}`);
       }
