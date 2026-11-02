@@ -1,34 +1,39 @@
 import { useT } from "@/i18n";
 import { Link } from "react-router-dom";
 import { usdcGrouped } from "@/lib/amount";
-import { agentPath } from "@/lib/agentKind";
+import { agentPath, botPath, TRADING_CONNECT_PATH } from "@/lib/agentKind";
+import { BotStatePill, PnlValue, useTradingRows } from "@/features/trading/BotRows";
+import { PnlSparkline } from "@/kit";
+import { sparkNumbers } from "@/lib/tradingMetrics";
 import { spendNumbers, stateOf } from "@/lib/agentView";
 import type { AgentView } from "@/lib/types";
 import { Button, Card, CardHeader, EmptyState, Pill, SpendBar, StatusPill } from "@/kit";
 import { useOwner } from "@/features/owner/OwnerProvider";
 
-/** Agents: active / paused counts and one compact row each. Trading agents join here via `agentPath`. */
+/** Agents: active / paused counts and one compact row each. Trading agents show their P&L and a small curve. */
 export function HomeAgents({ agents, vaultPaused }: { agents: AgentView[]; vaultPaused: boolean }) {
   const t = useT();
   const { canAct } = useOwner();
   const live = agents.filter((a) => a.status !== "Revoked");
-  const paused = live.filter((a) => a.status === "Paused").length;
+  const trading = useTradingRows();
+  const paused = live.filter((a) => a.status === "Paused").length + trading.bots.filter((b) => b.state !== "running").length;
+  const total = live.length + trading.bots.length;
   return (
     <Card aria-labelledby="h-agents" className="flex flex-col gap-3">
       <CardHeader
         id="h-agents"
         title={t("treasury.agentsTitle")}
         badge={
-          live.length > 0 && (
+          total > 0 && (
             <>
-              <Pill accent="ok">{t("home.activeN", { n: live.length - paused })}</Pill>
+              <Pill accent="ok">{t("home.activeN", { n: total - paused })}</Pill>
               {paused > 0 && <Pill accent="warn">{t("home.pausedN", { n: paused })}</Pill>}
             </>
           )
         }
         actions={<Link to="/agents" className="text-[13px]">{t("treasury.viewAll")}</Link>}
       />
-      {live.length === 0 ? (
+      {total === 0 ? (
         <EmptyState
           title={t("treasury.noAgents")}
           action={canAct ? <Link to="/agents/new"><Button variant="primary">{t("page.addAgent")}</Button></Link> : undefined}
@@ -50,8 +55,17 @@ export function HomeAgents({ agents, vaultPaused }: { agents: AgentView[]; vault
               </li>
             );
           })}
+          {trading.bots.map((b) => (
+            <li key={b.id} className="flex items-center gap-3">
+              <Link to={botPath(b.id)} className="min-w-0 flex-1 truncate font-medium text-ink">{b.name}</Link>
+              <div className="w-20 shrink-0"><PnlSparkline values={sparkNumbers(b.spark)} label={t("trading.bots.sparkAria", { name: b.name })} height={24} /></div>
+              <PnlValue value={b.pnl_total_usdc} className="text-sm" />
+              <BotStatePill state={b.state} />
+            </li>
+          ))}
         </ul>
       )}
+      {trading.showConnect && <Link to={TRADING_CONNECT_PATH} className="text-[13px]">{t("trading.bots.connectRow")}</Link>}
     </Card>
   );
 }

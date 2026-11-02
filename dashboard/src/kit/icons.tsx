@@ -32,6 +32,7 @@ export const Plus = make("Plus", <path d="M12 5v14M5 12h14" />);
 export const ArrowDown = make("ArrowDown", <path d="M12 5v14M5 12l7 7 7-7" />);
 export const ArrowUp = make("ArrowUp", <path d="M12 19V5M5 12l7-7 7 7" />);
 export const ChevronRight = make("ChevronRight", <path d="m9 18 6-6-6-6" />);
+export const ChevronLeft = make("ChevronLeft", <path d="m15 18-6-6 6-6" />);
 export const ExternalLink = make("ExternalLink", <><path d="M15 3h6v6M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></>);
 export const Copy = make("Copy", <><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>);
 export const ShieldCheck = make("ShieldCheck", <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="m9 12 2 2 4-4" /></>);
@@ -47,3 +48,5 @@ export const Send = make("Send", <path d="m22 2-7 20-4-9-9-4zM22 2 11 13" />);
 export const Pause = make("Pause", <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>, true);
 export const Play = make("Play", <path d="M7 5v14l12-7z" />, true);
 export const Loader = make("Loader", <path d="M21 12a9 9 0 1 1-6.2-8.6" />);
+
+export const TrendingUp = make("TrendingUp", <><path d="m22 7-8.5 8.5-5-5L2 17" /><path d="M16 7h6v6" /></>);

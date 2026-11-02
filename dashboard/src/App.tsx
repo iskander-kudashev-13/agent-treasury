@@ -13,7 +13,8 @@ import { PaymentsPage } from "@/pages/PaymentsPage";
 import { PayoutDetailPage } from "@/pages/PayoutDetailPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { TradingGuidePage } from "@/pages/TradingGuidePage";
-import { TradingPage } from "@/pages/TradingPage";
+import { TradingBotPage } from "@/pages/TradingBotPage";
+import { TradingConnectPage } from "@/pages/TradingConnectPage";
 import { HomePage } from "@/pages/HomePage";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
@@ -42,7 +43,9 @@ export function App() {
                     <Route path="payouts" element={<Navigate to="/payments?tab=history" replace />} />
                     <Route path="treasury" element={<Navigate to="/" replace />} />
                     <Route path="payouts/:id" element={<PayoutDetailPage />} />
-                    <Route path="trading" element={<TradingPage />} />
+                    <Route path="trading" element={<Navigate to="/agents?kind=trading" replace />} />
+                    <Route path="trading/connect" element={<TradingConnectPage />} />
+                    <Route path="trading/bots/:id" element={<TradingBotPage />} />
                     <Route path="trading/guide" element={<TradingGuidePage />} />
                     <Route path="settings" element={<SettingsPage />} />
                     <Route path="policy" element={<Navigate to="/settings" replace />} />

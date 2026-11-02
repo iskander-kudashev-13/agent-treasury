@@ -7,6 +7,7 @@ import { t } from "@/i18n";
 import { clearSession, loadSession, signInWithWallet, type AiSession, type SignMessageFn } from "./assistantClient";
 import { NETWORK, VAULT_ID, WORKER_URL } from "./config";
 import { confirmationMessage, hashRuleSet, parseRuleSet, type RuleSetV1 } from "./tradingRules";
+import type { HistoryRange } from "./tradingMetrics";
 
 export const TRADER_AGENT_ID = "hl-trader";
 
@@ -431,4 +432,280 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
   });
   if (!isObj(j)) throw new Error(t("trading.err.unexpectedConfirm"));
   return { active: parseConfirmed(j.active), state: str(j.state) };
+}
+
+/* ───────────── bots (ADR-0006 §8) ───────────── */
+
+export type BotState = "draft" | "running" | "stopped_today" | "halted" | "archived" | "blocked";
+const BOT_STATES: readonly string[] = ["draft", "running", "stopped_today", "halted", "archived", "blocked"];
+export const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,15}$/;
+
+/**
+ * `GET /trading/bots`. The public view carries only id, name, state and pairs (owner default 4): the money fields are `null` and
+ * `spark` is empty until the request is made with the owner session.
+ */
+export interface BotSummary {
+  id: string;
+  name: string;
+  state: BotState;
+  state_reason: string | null;
+  pairs: string[];
+  pnl_today_usdc: string | null;
+  pnl_total_usdc: string | null;
+  position_usdc: string | null;
+  /** 24 hourly `pnl_total` closes, oldest first. */
+  spark: string[];
+  created_at_ms: number;
+  archived_at_ms: number | null;
+  last_fill_ms: number | null;
+}
+export interface BotPosition {
+  pair: string;
+  size: string;
+  avg_cost: string | null;
+  mid: string;
+  value_usdc: string;
+}
+export interface BotPair {
+  name: string;
+  /** Hyperliquid coin for `candleSnapshot` ("@107", "PURR/USDC"); "" when unknown. */
+  coin: string;
+  sz_decimals: number;
+}
+export interface BotLimits {
+  max_position_usdc: string;
+  max_order_usdc: string;
+  daily_loss_stop_usdc: string;
+  max_orders_per_day: number;
+}
+export interface BotDetail {
+  bot: BotSummary;
+  rules: ConfirmedRules | null;
+  rules_history: { hash: string; name: string; confirmed_at_ms: number; superseded_at_ms: number | null }[];
+  limits: { bot: BotLimits | null; account: (BotLimits & { price_band_bps: number }) | null };
+  today: { orders: number; loss_usdc: string };
+  positions: BotPosition[];
+  pairs: BotPair[];
+  open_orders: TradingOrder[];
+  hl_network: "mainnet" | "testnet";
+}
+export interface HistoryPoint {
+  t: number;
+  pnl: string;
+  lo: string;
+  hi: string;
+  today: string;
+  val: string;
+  px: Record<string, string>;
+}
+export interface BotHistory {
+  range: HistoryRange;
+  bucket_ms: number;
+  points: HistoryPoint[];
+}
+export interface BotFill {
+  tid: number | null;
+  oid: number;
+  cloid: string | null;
+  rule_id: string | null;
+  time_ms: number;
+  pair: string;
+  side: "buy" | "sell";
+  price: string;
+  size: string;
+  fee_usdc: string;
+  fee_token: string;
+  realized_usdc: string | null;
+}
+export interface BotFills {
+  fills: BotFill[];
+  next_cursor: string | null;
+}
+export interface BotMetrics {
+  range: HistoryRange;
+  from_ms: number;
+  to_ms: number;
+  closed_trades: number;
+  /** "0.5714"; null when no trade closed in the range. */
+  win_rate: string | null;
+  avg_trade_usdc: string | null;
+  realized_usdc: string;
+  pnl_change_usdc: string;
+  max_drawdown_usdc: string;
+  turnover_usdc: string;
+  fees_usdc: string;
+  fills: number;
+  orders: number;
+}
+export interface BotKillResult {
+  bot_id: string;
+  state: string;
+  cancelled_orders: number;
+  steps: { cancel: "ok" | "failed"; state_saved: "ok" | "failed" };
+}
+
+const DEC = /^-?\d+(\.\d+)?$/;
+const dec = (v: unknown, d = "0"): string => (typeof v === "string" && DEC.test(v) ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : d);
+const decOrNull = (v: unknown): string | null => (typeof v === "string" && DEC.test(v) ? v : null);
+
+export function parseBotSummary(j: unknown): BotSummary | null {
+  if (!isObj(j) || typeof j.id !== "string" || !BOT_ID_RE.test(j.id) || typeof j.state !== "string" || !BOT_STATES.includes(j.state)) return null;
+  return {
+    id: j.id,
+    name: str(j.name, j.id, 60),
+    state: j.state as BotState,
+    state_reason: strOrNull(j.state_reason, 100),
+    pairs: arr(j.pairs, 10).flatMap((p) => (typeof p === "string" ? [p.slice(0, 40)] : [])),
+    pnl_today_usdc: decOrNull(j.pnl_today_usdc),
+    pnl_total_usdc: decOrNull(j.pnl_total_usdc),
+    position_usdc: decOrNull(j.position_usdc),
+    spark: arr(j.spark, 48).flatMap((x) => (decOrNull(x) !== null ? [x as string] : [])),
+    created_at_ms: num(j.created_at_ms),
+    archived_at_ms: numOrNull(j.archived_at_ms),
+    last_fill_ms: numOrNull(j.last_fill_ms),
+  };
+}
+
+export function parseBots(j: unknown): BotSummary[] | null {
+  if (!isObj(j) || !Array.isArray(j.bots)) return null;
+  return arr(j.bots, 10).flatMap((x) => {
+    const b = parseBotSummary(x);
+    return b ? [b] : [];
+  });
+}
+
+const parseLimits = (v: unknown): BotLimits | null => {
+  if (!isObj(v)) return null;
+  return { max_position_usdc: dec(v.max_position_usdc), max_order_usdc: dec(v.max_order_usdc), daily_loss_stop_usdc: dec(v.daily_loss_stop_usdc), max_orders_per_day: num(v.max_orders_per_day) };
+};
+
+function parseOrders(v: unknown): TradingOrder[] {
+  return arr(v, 50).flatMap((x): TradingOrder[] =>
+    isObj(x) ? [{ oid: num(x.oid), cloid: str(x.cloid), pair: str(x.pair), side: x.side === "sell" ? "sell" : "buy", price: str(x.price, "0"), size: str(x.size, "0"), placed_at_ms: num(x.placed_at_ms), rule_id: strOrNull(x.rule_id, 32) }] : [],
+  );
+}
+
+export function parseBotDetail(j: unknown): BotDetail | null {
+  if (!isObj(j)) return null;
+  const bot = parseBotSummary(j.bot);
+  if (!bot) return null;
+  const lim = obj(j.limits);
+  const acc = parseLimits(lim.account);
+  const today = obj(j.today);
+  return {
+    bot,
+    rules: isObj(j.rules) ? parseConfirmed(j.rules) : null,
+    rules_history: arr(j.rules_history, 70).flatMap((x) => (isObj(x) && typeof x.hash === "string" ? [{ hash: x.hash.slice(0, 64), name: str(x.name, "", 80), confirmed_at_ms: num(x.confirmed_at_ms), superseded_at_ms: numOrNull(x.superseded_at_ms) }] : [])),
+    limits: { bot: parseLimits(lim.bot), account: acc ? { ...acc, price_band_bps: num(obj(lim.account).price_band_bps) } : null },
+    today: { orders: num(today.orders), loss_usdc: dec(today.loss_usdc) },
+    positions: arr(j.positions, 20).flatMap((x) => (isObj(x) ? [{ pair: str(x.pair), size: dec(x.size), avg_cost: decOrNull(x.avg_cost), mid: dec(x.mid), value_usdc: dec(x.value_usdc) }] : [])),
+    pairs: arr(j.pairs, 10).flatMap((x) => (isObj(x) && typeof x.name === "string" ? [{ name: x.name.slice(0, 40), coin: str(x.coin, "", 40), sz_decimals: num(x.sz_decimals) }] : [])),
+    open_orders: parseOrders(j.open_orders),
+    hl_network: j.hl_network === "mainnet" ? "mainnet" : "testnet",
+  };
+}
+
+const RANGE_LIST: readonly string[] = ["1h", "1d", "1w", "1m", "all"];
+const asRange = (v: unknown, d: HistoryRange): HistoryRange => (typeof v === "string" && RANGE_LIST.includes(v) ? (v as HistoryRange) : d);
+
+export function parseBotHistory(j: unknown, range: HistoryRange): BotHistory | null {
+  if (!isObj(j) || !Array.isArray(j.points)) return null;
+  const points = arr(j.points, 3000).flatMap((x): HistoryPoint[] => {
+    if (!isObj(x) || typeof x.t !== "number" || !Number.isFinite(x.t)) return [];
+    const pnl = dec(x.pnl);
+    const px: Record<string, string> = {};
+    for (const [k, v] of Object.entries(obj(x.px)).slice(0, 10)) if (decOrNull(v) !== null) px[k.slice(0, 40)] = v as string;
+    return [{ t: x.t, pnl, lo: dec(x.lo, pnl), hi: dec(x.hi, pnl), today: dec(x.today), val: dec(x.val), px }];
+  });
+  return { range: asRange(j.range, range), bucket_ms: num(j.bucket_ms), points };
+}
+
+export function parseBotFill(x: unknown): BotFill | null {
+  if (!isObj(x) || (x.side !== "buy" && x.side !== "sell") || typeof x.price !== "string" || !DEC.test(x.price) || typeof x.size !== "string" || !DEC.test(x.size)) return null;
+  return {
+    tid: numOrNull(x.tid),
+    oid: num(x.oid),
+    cloid: strOrNull(x.cloid, 40),
+    rule_id: strOrNull(x.rule_id, 32),
+    time_ms: num(x.time_ms),
+    pair: str(x.pair, "", 40),
+    side: x.side,
+    price: x.price,
+    size: x.size,
+    fee_usdc: dec(x.fee_usdc),
+    fee_token: str(x.fee_token, "USDC", 20),
+    realized_usdc: decOrNull(x.realized_usdc),
+  };
+}
+
+export function parseBotFills(j: unknown): BotFills | null {
+  if (!isObj(j) || !Array.isArray(j.fills)) return null;
+  return { fills: arr(j.fills, 200).flatMap((x) => { const f = parseBotFill(x); return f ? [f] : []; }), next_cursor: strOrNull(j.next_cursor, 200) };
+}
+
+export function parseBotMetrics(j: unknown, range: HistoryRange): BotMetrics | null {
+  if (!isObj(j)) return null;
+  return {
+    range: asRange(j.range, range),
+    from_ms: num(j.from_ms),
+    to_ms: num(j.to_ms),
+    closed_trades: num(j.closed_trades),
+    win_rate: decOrNull(j.win_rate),
+    avg_trade_usdc: decOrNull(j.avg_trade_usdc),
+    realized_usdc: dec(j.realized_usdc),
+    pnl_change_usdc: dec(j.pnl_change_usdc),
+    max_drawdown_usdc: dec(j.max_drawdown_usdc),
+    turnover_usdc: dec(j.turnover_usdc),
+    fees_usdc: dec(j.fees_usdc),
+    fills: num(j.fills),
+    orders: num(j.orders),
+  };
+}
+
+export function parseBotKill(j: unknown): BotKillResult | null {
+  if (!isObj(j) || typeof j.bot_id !== "string") return null;
+  const s = obj(j.steps);
+  return { bot_id: j.bot_id, state: str(j.state), cancelled_orders: num(j.cancelled_orders), steps: { cancel: s.cancel === "ok" ? "ok" : "failed", state_saved: s.state_saved === "ok" ? "ok" : "failed" } };
+}
+
+const botPath = (id: string): string => {
+  if (!BOT_ID_RE.test(id)) throw new Error(t("trading.err.badBotId"));
+  return `/bots/${id}`;
+};
+const sig = (signal?: AbortSignal) => (signal ? { signal } : {});
+
+/** Public; sends the owner token when there is one so the worker can add P&L and sparklines. 404 = a worker without bots (see `tradingBots.ts`). */
+export async function fetchBots(token?: string | null, signal?: AbortSignal): Promise<BotSummary[]> {
+  const r = parseBots(await request("/bots", { ...(token ? { token } : {}), ...sig(signal) }));
+  if (!r) throw new Error(t("trading.err.unexpectedBots"));
+  return r;
+}
+export async function fetchBot(token: string, id: string, signal?: AbortSignal): Promise<BotDetail> {
+  const r = parseBotDetail(await request(botPath(id), { token, ...sig(signal) }));
+  if (!r) throw new Error(t("trading.err.unexpectedBots"));
+  return r;
+}
+export async function fetchBotHistory(token: string, id: string, range: HistoryRange, signal?: AbortSignal): Promise<BotHistory> {
+  const r = parseBotHistory(await request(`${botPath(id)}/history?range=${range}`, { token, ...sig(signal) }), range);
+  if (!r) throw new Error(t("trading.err.unexpectedBots"));
+  return r;
+}
+export async function fetchBotFills(token: string, id: string, q: { cursor?: string | null; limit?: number; from_ms?: number } = {}, signal?: AbortSignal): Promise<BotFills> {
+  const p = new URLSearchParams({ limit: String(Math.min(200, Math.max(1, q.limit ?? 50))) });
+  if (q.cursor) p.set("cursor", q.cursor);
+  if (q.from_ms !== undefined) p.set("from_ms", String(Math.max(0, Math.floor(q.from_ms))));
+  const r = parseBotFills(await request(`${botPath(id)}/fills?${p.toString()}`, { token, ...sig(signal) }));
+  if (!r) throw new Error(t("trading.err.unexpectedBots"));
+  return r;
+}
+export async function fetchBotMetrics(token: string, id: string, range: HistoryRange, signal?: AbortSignal): Promise<BotMetrics> {
+  const r = parseBotMetrics(await request(`${botPath(id)}/metrics?range=${range}`, { token, ...sig(signal) }), range);
+  if (!r) throw new Error(t("trading.err.unexpectedBots"));
+  return r;
+}
+/** Stops one bot: its orders are cancelled and it halts; the other bots keep running. */
+export async function killBot(token: string, id: string, reason?: string): Promise<BotKillResult> {
+  const r = parseBotKill(await request(`${botPath(id)}/kill`, { method: "POST", token, body: reason ? { reason } : {} }));
+  if (!r) throw new Error(t("trading.err.unexpectedKill"));
+  return r;
 }

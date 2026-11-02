@@ -11,7 +11,7 @@ import { useNow } from "@/lib/useNow";
 import { useAgents, usePendingApprovals } from "@/lib/useVault";
 import { GuideLinks } from "./Intro";
 import { KillSwitch } from "./KillSwitch";
-import { RulesBody, RulesCard } from "./RulesCard";
+import { RulesBody } from "./RulesCard";
 import { RulesHelp } from "./RulesHelp";
 import { pendingTrader, SetupCard } from "./SetupCard";
 import { SetupRow, Stepper } from "./Steps";
@@ -20,10 +20,10 @@ import { AccountTrustCallout } from "./AccountTrust";
 import { useAccountTrust, useHlApprovedAgents, useOwnerDetails, useTradingStatus } from "./useTrading";
 
 /**
- * `/trading`: an intro (what it is, where the money goes, what is protected, which wallet is which), a six-step setup with live
- * state, and, once rules are signed, the running view (status, event feed, rules in sentences) and the kill switch.
+ * `/trading/connect` (ADR-0006 §9): the one-time Hyperliquid connection. A six-step setup with live state, the account status
+ * and event feed once rules are signed, and the account kill switch. The strategies themselves live in the Agents list.
  */
-export function Trading() {
+export function Connect() {
   const t = useT();
   const agents = useAgents();
   const pendingApprovals = usePendingApprovals();
@@ -129,7 +129,6 @@ export function Trading() {
               )
             }
           />
-          <RulesCard status={live} rules={details.rules} verified={details.rulesVerified} signedIn={details.signedIn} signingIn={details.signingIn} signIn={() => void details.signIn()} error={details.authError ?? details.error} pair={pair} help={help} log={details.log} />
         </>
       )}
 
