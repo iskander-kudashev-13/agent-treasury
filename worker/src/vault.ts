@@ -151,6 +151,11 @@ export interface Vault {
   /** Newest `limit` payouts of this agent (scan window), oldest first. */
   getRecentPayouts(limit: number): Promise<VaultPayout[]>;
   /**
+   * `Sent` payouts of Key agents created after `sinceMs` (all agents, paged backwards), oldest first. The worker finishes
+   * them because a Key agent's process (MCP in a chat client) is often gone after the owner approves (ADR-0002).
+   */
+  getSentKeyAgentPayouts(opts: { sinceMs: number; pageSize: number; maxPages: number }): Promise<VaultPayout[]>;
+  /**
    * Sends `request_payout({schedule_id, deposit_address, deposit_expires_at_ms})`. `result` is the parsed `PaymentResult` (undefined if the call result was not understood).
    * A rejection of the promise is AMBIGUOUS (the tx may still have executed): callers must re-read vault state,
    * never blindly retry.
@@ -238,6 +243,30 @@ export class NearVault implements Vault {
     const count = await this.v("get_agent_payouts_count", { agent_id: this.agentId }, z.number().int().nonnegative());
     const from = Math.max(0, count - limit);
     return this.v("get_payouts", { from_index: from, limit, agent_id: this.agentId }, z.array(payoutSchema));
+  }
+
+  async getSentKeyAgentPayouts(opts: { sinceMs: number; pageSize: number; maxPages: number }) {
+    // Payout ids are creation order, but a Key payout becomes `Sent` only when the owner approves it (up to 72 h
+    // later, MAX_APPROVAL_AGE). A fixed "newest N" window would lose it on a busy vault, so page backwards until the
+    // payouts are older than `sinceMs` (creation time), bounded by `maxPages`.
+    const count = Number(await this.v("get_payouts_count", {}, u64));
+    const sent: VaultPayout[] = [];
+    let end = count;
+    for (let page = 0; end > 0 && page < opts.maxPages; page++) {
+      const from = Math.max(0, end - opts.pageSize);
+      const batch = await this.v("get_payouts", { from_index: from, limit: end - from }, z.array(payoutSchema));
+      sent.push(...batch.filter((p) => p.status === "Sent"));
+      end = from;
+      if (batch.length === 0 || batch.every((p) => Number(p.created_at_ms) < opts.sinceMs)) break;
+    }
+    // Look up only the agents that appear here (no assumption about the number of agents in the vault).
+    const ids = [...new Set(sent.map((p) => p.agent_id))];
+    const kinds = new Map<string, string>();
+    for (const id of ids) {
+      const a = await this.v("get_agent", { agent_id: id }, z.looseObject({ kind: z.string() }).nullable());
+      if (a) kinds.set(id, a.kind);
+    }
+    return sent.filter((p) => kinds.get(p.agent_id) === "Key").sort((a, b) => Number(a.id) - Number(b.id));
   }
 
   async requestPayment(args: PaymentArgs) {

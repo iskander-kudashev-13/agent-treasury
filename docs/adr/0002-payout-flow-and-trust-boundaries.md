@@ -47,3 +47,29 @@ vault one receipt *before* `ft_on_transfer` runs here, so a single read can incl
 again. Both methods are now two-phase: the first call records a probe of untracked tokens; a second call at least 60 s
 later credits `min(first, second)` (for a refund: the refund amount only if the confirmed untracked amount covers it).
 An outflow settling between the reads clears the probe. The dashboard guides the owner through the two steps.
+
+## Amendment (2026-11-02): status reporting for Key agents' payouts
+
+Found in the testnet e2e run: a Key agent (MCP server inside a chat client) gets `pending_approval` and returns at
+once. When the owner approves later, the vault transfers to the deposit address and the payout is `Sent`, but nobody
+polls 1Click or calls `report_payout_status`: the payout stays `Sent` until the agent happens to ask for its status.
+
+Decision: `report_payout_status` may also be called by an **attested TEE agent** (kind `Tee`, `Active`, registration
+valid now: attestation not expired, measurements and PPID approved, local-mode whitelist when TEE is not required),
+**only for payouts created by Key agents**. TEE agents still report only their own payouts. Owner and creator rights
+are unchanged. The worker's reconcile step (each run) scans the newest `reconcileWindow` vault payouts for `Sent`
+payouts of Key agents and reports the terminal status it reads from 1Click itself.
+
+Why this is safe: the report is an annotation and never moves money. The worker's code is attested, and it uses the
+same 1Click status check as for its own payouts. A false report can only mislabel a payout, but a false `Confirmed`
+is final: `credit_refund` needs `Refunded`/`Failed`, and status only moves from `Sent`. Recovery for refunded tokens
+behind a wrong `Confirmed` is `sync_surplus` (owner credits the vault's untracked token surplus, not linked to the
+payout). The same was already true for creator reports; the owner can always check the Intents explorer.
+
+Scan: payout ids are creation order, while a Key payout becomes `Sent` when approved (up to 72 h later,
+`MAX_APPROVAL_AGE_MS`). The worker pages `get_payouts` backwards until a page is entirely older than 14 days
+(`KEY_RECONCILE_HORIZON_MS`, max 20 pages of 100) and looks up `get_agent` only for agents seen there. Older `Sent`
+payouts are left to the owner. On testnet with simulated 1Click the worker reports `SUCCESS` for any address; do not
+share a simulated-mode worker with a testnet vault used for real-mode tests. Rejected alternatives:
+MCP keeps polling (the process is usually gone), owner reports by hand (kills autonomy), a separate reporter role in
+the policy (extra state and UI for the same trust level).

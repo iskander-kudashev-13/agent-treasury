@@ -117,6 +117,13 @@ export class FakeVault implements Vault {
   getRecentPayouts(limit: number) {
     return Promise.resolve(this.payouts.slice(-limit).map((p) => ({ ...p })));
   }
+  /** Sent payouts of Key agents (other agents' payouts the worker may finish). */
+  keyAgentPayouts: VaultPayout[] = [];
+  keyAgentListFails = false;
+  getSentKeyAgentPayouts() {
+    if (this.keyAgentListFails) return Promise.reject(new Error("rpc down"));
+    return Promise.resolve(this.keyAgentPayouts.filter((p) => p.status === "Sent").map((p) => ({ ...p })));
+  }
 
   private addPayout(a: PaymentCall, status: VaultPayout["status"]) {
     const sch = this.schedules.find((x) => x.id === a.scheduleId);
@@ -176,7 +183,7 @@ export class FakeVault implements Vault {
       return Promise.reject(new Error("report failed"));
     }
     this.reports.push(a);
-    const p = this.payouts.find((x) => x.id === a.payoutId);
+    const p = this.payouts.find((x) => x.id === a.payoutId) ?? this.keyAgentPayouts.find((x) => x.id === a.payoutId);
     if (p) p.status = a.status;
     return Promise.resolve();
   }

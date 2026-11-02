@@ -33,6 +33,13 @@ export interface LoopSettings {
   reconcileWindow: number;
 }
 
+/**
+ * How far back (by creation time) the worker looks for Key agents' `Sent` payouts. Approval is possible up to 72 h
+ * after creation (contract MAX_APPROVAL_AGE); the rest covers a worker that was down for a while. Older ones are left
+ * to the owner (dashboard) to finish.
+ */
+export const KEY_RECONCILE_HORIZON_MS = 14 * 24 * 60 * 60_000;
+
 export interface LoopDeps {
   vault: Vault;
   oneclick: OneClickPort;
@@ -379,8 +386,8 @@ export class PayoutLoop {
     const report = statusToReport(final);
     if (!report) throw new Abort(`unexpected terminal status ${final.status}`);
     res.destinationTxHash = final.swapDetails?.destinationChainTxHashes?.[0]?.hash;
-    await this.report(res.payoutId, report.status, report.txHash);
-    step(`reported ${report.status}`);
+    const mine = await this.report(res.payoutId, report.status, report.txHash);
+    step(mine ? `reported ${report.status}` : "already reported by someone else (the vault keeps their status)");
     res.outcome = report.status === "Confirmed" ? "confirmed" : report.status === "Refunded" ? "refunded" : "failed";
     res.message = `1Click ${final.status}`;
   }
@@ -404,14 +411,24 @@ export class PayoutLoop {
     }
   }
 
-  /** report_payout_status is idempotent on the contract, so a bounded retry is safe. */
-  private async report(payoutId: string, status: ReportedStatus, txHash: string | undefined): Promise<void> {
+  /**
+   * report_payout_status is idempotent on the contract, so a bounded retry is safe. Returns false when someone else
+   * already wrote a terminal status (the vault's status may differ from ours, so callers must not record ours).
+   */
+  private async report(payoutId: string, status: ReportedStatus, txHash: string | undefined): Promise<boolean> {
     let last: unknown;
     for (let i = 0; i < 3; i++) {
       try {
         await this.deps.vault.reportPayoutStatus({ payoutId, status, txHash });
-        return;
+        return true;
       } catch (e) {
+        // Someone else (the Key agent's MCP, the owner) already reported a terminal status first: nothing to retry.
+        if (/not in Sent state/.test(errMsg(e))) {
+          this.log(`payout ${payoutId} already reported by someone else`);
+          return false;
+        }
+        // Not allowed (e.g. our attestation expired): retrying will not help.
+        if (/Only the agent that created the payout/.test(errMsg(e))) throw e;
         last = e;
         await this.sleep(1000 * (i + 1));
       }
@@ -419,17 +436,30 @@ export class PayoutLoop {
     throw new Error(`report_payout_status failed after retries: ${errMsg(last)}`);
   }
 
-  /** Pick up `Sent` payouts whose terminal status was never reported (earlier poll timeout, crash). */
+  /**
+   * Pick up `Sent` payouts whose terminal status was never reported: this agent's own (earlier poll timeout, crash)
+   * and Key agents' payouts approved by the owner after the agent's process went away. The vault lets an attested
+   * TEE agent report the latter (ADR-0002 "Status reporting"); the status always comes from 1Click itself.
+   */
   private async reconcileSent(rec: RunRecord): Promise<void> {
     const { vault, oneclick, settings } = this.deps;
-    const recent = await vault.getRecentPayouts(settings.reconcileWindow);
-    for (const p of recent) {
+    const own = await vault.getRecentPayouts(settings.reconcileWindow);
+    let keyAgents: VaultPayout[] = [];
+    try {
+      keyAgents = await vault.getSentKeyAgentPayouts({ sinceMs: this.now() - KEY_RECONCILE_HORIZON_MS, pageSize: 100, maxPages: 20 });
+    } catch (e) {
+      this.log(`reconcile: could not list Key agents' payouts: ${errMsg(e)}`);
+    }
+    const seen = new Set<string>();
+    for (const p of [...own, ...keyAgents]) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
       if (p.status !== "Sent" || p.deposit_address === null) continue;
       try {
         const s = await oneclick.getStatus(p.deposit_address);
         const report = isTerminal(s.status) ? statusToReport(s) : undefined;
         if (!report) continue;
-        await this.report(p.id, report.status, report.txHash);
+        if (!(await this.report(p.id, report.status, report.txHash))) continue;
         rec.reconciled.push({ payoutId: p.id, status: report.status });
         this.log(`reconciled payout ${p.id}: ${report.status}`);
       } catch (e) {

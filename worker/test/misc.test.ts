@@ -127,3 +127,126 @@ describe("simulated 1Click", () => {
     expect((await sim.findToken("nep141:base-0xabc.omft.near"))?.blockchain).toBe("base");
   });
 });
+
+describe("NearVault.getSentKeyAgentPayouts", () => {
+  it("pages backwards over all payouts until they are older than sinceMs, keeps Sent payouts of Key agents", async () => {
+    const { NearVault } = await import("../src/vault.js");
+    // 250 payouts: ids 0..249, created_at = id. Key agent "claude" has Sent payouts 5 (too old) and 180, 240.
+    const all = Array.from({ length: 250 }, (_, i) => ({
+      id: String(i), agent_id: i % 2 === 0 ? "claude" : "payroll", recipient_id: null, amount: "1",
+      status: [5, 180, 240, 241].includes(i) ? "Sent" : "Confirmed", deposit_address: "d", agent_account: null, tx_hash: null,
+      created_at_ms: String(i), updated_at_ms: String(i),
+    }));
+    const calls: [string, Record<string, unknown>][] = [];
+    const view = (m: string, a: Record<string, unknown>) => {
+      calls.push([m, a]);
+      if (m === "get_payouts_count") return Promise.resolve(String(all.length));
+      if (m === "get_payouts") return Promise.resolve(all.slice(a.from_index as number, (a.from_index as number) + (a.limit as number)));
+      if (m === "get_agent") return Promise.resolve(a.agent_id === "claude" ? { kind: "Key" } : { kind: "Tee" });
+      return Promise.reject(new Error(m));
+    };
+    const v = new NearVault({ view, call: () => Promise.reject(new Error("no")), takeLastTxHash: () => undefined }, "payroll");
+    const res = await v.getSentKeyAgentPayouts({ sinceMs: 100, pageSize: 100, maxPages: 20 });
+    expect(res.map((p) => p.id)).toEqual(["180", "240"]);
+    // Whole-vault scan (no agent_id), stops after the first page that is entirely older than sinceMs.
+    expect(calls.filter(([m]) => m === "get_payouts").map(([, a]) => a)).toEqual([
+      { from_index: 150, limit: 100 },
+      { from_index: 50, limit: 100 },
+      { from_index: 0, limit: 50 },
+    ]);
+    // Only the agents seen among Sent payouts are looked up.
+    expect(calls.filter(([m]) => m === "get_agent").map(([, a]) => a.agent_id).sort()).toEqual(["claude", "payroll"]);
+  });
+
+  it("respects maxPages", async () => {
+    const { NearVault } = await import("../src/vault.js");
+    let pages = 0;
+    const view = (m: string, a: Record<string, unknown>) => {
+      if (m === "get_payouts_count") return Promise.resolve("10000");
+      if (m === "get_payouts") {
+        pages++;
+        return Promise.resolve([{ id: String(a.from_index), agent_id: "x", recipient_id: null, amount: "1", status: "Confirmed", deposit_address: null, agent_account: null, tx_hash: null, created_at_ms: "999999", updated_at_ms: "1" }]);
+      }
+      return Promise.resolve(null);
+    };
+    const v = new NearVault({ view, call: () => Promise.reject(new Error("no")), takeLastTxHash: () => undefined }, "payroll");
+    await v.getSentKeyAgentPayouts({ sinceMs: 0, pageSize: 100, maxPages: 3 });
+    expect(pages).toBe(3);
+  });
+});
+
+describe("NearVault.getSentKeyAgentPayouts paging (tester)", () => {
+  const mk = (id: number, agent_id: string, status: string, created: number) => ({
+    id: String(id), agent_id, recipient_id: null, amount: "1", status, deposit_address: "d", agent_account: null, tx_hash: null,
+    created_at_ms: String(created), updated_at_ms: String(created),
+  });
+  /** View that pages like the contract (`get_payouts` honours from_index + limit, `get_agent` returns null if unknown). */
+  function pagedView(agents: Record<string, string>, payouts: ReturnType<typeof mk>[]) {
+    const calls: [string, Record<string, unknown>][] = [];
+    const view = (m: string, a: Record<string, unknown>) => {
+      calls.push([m, a]);
+      if (m === "get_payouts_count") return Promise.resolve(String(payouts.length));
+      if (m === "get_payouts") {
+        const from = Number(a.from_index ?? 0);
+        return Promise.resolve(payouts.slice(from, from + Number(a.limit ?? 50)));
+      }
+      if (m === "get_agent") {
+        const kind = agents[String(a.agent_id)];
+        return Promise.resolve(kind ? { id: a.agent_id, kind } : null);
+      }
+      if (m === "get_agents") return Promise.reject(new Error("get_agents must not be needed"));
+      return Promise.reject(new Error(m));
+    };
+    const pages = () => calls.filter(([m]) => m === "get_payouts").map(([, a]) => a);
+    return { view, calls, pages };
+  }
+  const near = async (view: (m: string, a: Record<string, unknown>) => Promise<unknown>) => {
+    const { NearVault } = await import("../src/vault.js");
+    return new NearVault({ view, call: () => Promise.reject(new Error("no")), takeLastTxHash: () => undefined }, "payroll");
+  };
+
+  it("pages backwards past newer payouts to find an old Key payout approved late, stops once a page is older than sinceMs", async () => {
+    // 250 payouts, created_at = 1000 + id. A Key payout #10 (old, approved later → Sent) sits deep in the log.
+    const payouts = Array.from({ length: 250 }, (_, i) => mk(i, "payroll", "Confirmed", 1000 + i));
+    payouts[10] = mk(10, "claude", "Sent", 1010);
+    payouts[200] = mk(200, "claude", "Sent", 1200);
+    const { view, pages } = pagedView({ claude: "Key", payroll: "Tee" }, payouts);
+    const v = await near(view);
+    const res = await v.getSentKeyAgentPayouts({ sinceMs: 1005, pageSize: 100, maxPages: 20 });
+    expect(res.map((p) => p.id)).toEqual(["10", "200"]);
+    expect(pages()).toEqual([
+      { from_index: 150, limit: 100 },
+      { from_index: 50, limit: 100 },
+      { from_index: 0, limit: 50 },
+    ]);
+    // sinceMs newer than a whole page: stops after it (page [150, 250) is all >= 1150, page [50, 150) all < 1150).
+    const second = pagedView({ claude: "Key" }, payouts);
+    const res2 = await (await near(second.view)).getSentKeyAgentPayouts({ sinceMs: 1150, pageSize: 100, maxPages: 20 });
+    expect(second.pages()).toHaveLength(2);
+    expect(res2.map((p) => p.id)).toEqual(["200"]);
+  });
+
+  it("is bounded by maxPages", async () => {
+    const payouts = Array.from({ length: 500 }, (_, i) => mk(i, "claude", i === 0 ? "Sent" : "Confirmed", 1000 + i));
+    const { view, pages } = pagedView({ claude: "Key" }, payouts);
+    const res = await (await near(view)).getSentKeyAgentPayouts({ sinceMs: 0, pageSize: 100, maxPages: 2 });
+    expect(pages()).toHaveLength(2);
+    expect(res).toEqual([]);
+  });
+
+  it("does not depend on the number of agents: looks up only agents that own Sent payouts; drops Tee and unknown agents", async () => {
+    // Regression for the earlier one-page get_agents (200) lookup: a vault may hold any number of agents.
+    const payouts = [mk(0, "late-key", "Sent", 5), mk(1, "payroll", "Sent", 5), mk(2, "gone", "Sent", 5), mk(3, "late-key", "Sent", 5)];
+    const { view, calls } = pagedView({ "late-key": "Key", payroll: "Tee" }, payouts);
+    const res = await (await near(view)).getSentKeyAgentPayouts({ sinceMs: 0, pageSize: 100, maxPages: 20 });
+    expect(res.map((p) => p.id)).toEqual(["0", "3"]);
+    const looked = calls.filter(([m]) => m === "get_agent").map(([, a]) => a.agent_id);
+    expect(looked.sort()).toEqual(["gone", "late-key", "payroll"]);
+  });
+
+  it("empty vault: no pages, no agent lookups", async () => {
+    const { view, calls } = pagedView({}, []);
+    expect(await (await near(view)).getSentKeyAgentPayouts({ sinceMs: 0, pageSize: 100, maxPages: 20 })).toEqual([]);
+    expect(calls.map(([m]) => m)).toEqual(["get_payouts_count"]);
+  });
+});

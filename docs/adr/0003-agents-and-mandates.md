@@ -93,7 +93,7 @@ Rejection     { agent_id, at: U64, reason, detail, chain, address, amount: U128 
 Agent calls:
 - `request_payment({ chain, address, amount, memo?, recipient_id?, deposit_address, deposit_expires_at_ms? }) -> PaymentResult` (attach 100–150 TGas, no deposit)
 - `request_payout({ recipient_id, deposit_address, amount }) -> PaymentResult` (wrapper)
-- `report_payout_status({ payout_id, status: "Confirmed"|"Refunded"|"Failed", tx_hash? })` (creating agent or owner)
+- `report_payout_status({ payout_id, status: "Confirmed"|"Refunded"|"Failed", tx_hash? })` (creating agent, owner, or an attested TEE agent for Key agents' payouts — ADR-0002 amendment 2026-11-02)
 - `register_agent({ agent_id, attestation })` (Tee only)
 
 Owner calls (1 yoctoNEAR unless marked *no deposit*):

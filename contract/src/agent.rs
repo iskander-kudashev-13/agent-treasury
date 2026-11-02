@@ -395,6 +395,17 @@ impl Contract {
         }
     }
 
+    /// `caller` is bound to an Active TEE agent whose registration is valid right now (attestation not expired,
+    /// measurements and PPID still approved, local-mode whitelist if TEE is not required).
+    pub(crate) fn is_valid_tee_caller(&self, caller: &AccountId) -> bool {
+        self.agent_by_account.get(caller).and_then(|id| self.agents.get(id)).is_some_and(|a| {
+            a.kind == AgentKind::Tee
+                && a.status == AgentStatus::Active
+                && a.account_id.as_ref() == Some(caller)
+                && self.agent_tee_reasons(a).is_empty()
+        })
+    }
+
     pub(crate) fn tee_invalid_reasons(&self, account_id: &AccountId, t: &TeeRegistration) -> Vec<AgentRemovalReason> {
         let mut reasons = Vec::new();
         if t.valid_until_ms < block_timestamp_ms() {

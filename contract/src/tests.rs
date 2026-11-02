@@ -2071,15 +2071,78 @@ fn pause_does_not_block_in_flight_callback() {
 
 // --- status reports ------------------------------------------------------------------------------
 
+const REPORT_DENIED: &str =
+    "Only the agent that created the payout, an attested TEE agent (for Key agents' payouts) or the owner";
+
+/// An attested TEE worker may finish a Key agent's payout (ADR-0002 "Status reporting"); never another TEE agent's.
+#[test]
+fn attested_tee_agent_reports_key_agents_payouts_only() {
+    let (mut h, sids) = H::with_payroll(1);
+    // Key agent payout: the attested worker may report it; money does not move.
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    let before = h.money();
+    h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id), PayoutStatus::Confirmed, Some("0xabc".into()));
+    assert_eq!(h.payout(id).status, PayoutStatus::Confirmed);
+    assert_eq!(h.money(), before, "status reports never move money");
+    // A second TEE agent cannot report the first TEE agent's payout.
+    let rid2 = h.add_recipient(evm_addr(0x30));
+    h.add_tee("payroll2", None, fixed_mandate(vec![rid2]));
+    h.trust_local(&tee_acc2());
+    assert!(h.register("payroll2", &tee_acc2()));
+    let tee_payout = h.paid_sched(sids[0]);
+    expect_panic(
+        || h.as_(&tee_acc2(), NO_DEPOSIT).report_payout_status(U64(tee_payout), PayoutStatus::Confirmed, None),
+        REPORT_DENIED,
+    );
+    // Paused worker loses the right; resumed gets it back.
+    let id2 = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.as_owner_no_deposit().pause_agent(PAYROLL.into());
+    expect_panic(
+        || h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id2), PayoutStatus::Confirmed, None),
+        REPORT_DENIED,
+    );
+    h.as_owner().resume_agent(PAYROLL.into());
+    h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id2), PayoutStatus::Refunded, None);
+    assert_eq!(h.payout(id2).status, PayoutStatus::Refunded);
+    // Expired attestation loses the right.
+    let id3 = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.advance(ATTESTATION_TTL + 1);
+    expect_panic(
+        || h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id3), PayoutStatus::Confirmed, None),
+        REPORT_DENIED,
+    );
+    // Revoked worker loses the right.
+    assert!(h.register(PAYROLL, &tee_acc()));
+    h.as_owner().revoke_agent(PAYROLL.into());
+    expect_panic(
+        || h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id3), PayoutStatus::Confirmed, None),
+        REPORT_DENIED,
+    );
+    // Only terminal statuses from Sent, as for everyone else.
+    h.as_owner_no_deposit().report_payout_status(U64(id3), PayoutStatus::Failed, None);
+}
+
+/// A TEE agent that is not whitelisted for local mode (TEE not required) is not a valid reporter.
+#[test]
+fn tee_reporter_must_be_whitelisted_in_local_mode() {
+    let (mut h, _) = H::with_payroll(1);
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.as_owner_no_deposit().remove_agent_from_whitelist_for_local(tee_acc());
+    expect_panic(
+        || h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id), PayoutStatus::Confirmed, None),
+        REPORT_DENIED,
+    );
+}
+
 #[test]
 fn report_payout_status_by_creator_owner_and_others() {
     let (mut h, _) = H::with_payroll(1);
     h.add_key("ops", key_acc2(), open_mandate());
     let id = h.paid(&key_acc(), &Req::open(AMOUNT));
-    for who in [key_acc2(), tee_acc(), stranger(), token()] {
+    for who in [key_acc2(), stranger(), token()] {
         expect_panic(
             || h.as_(&who, NO_DEPOSIT).report_payout_status(U64(id), PayoutStatus::Confirmed, None),
-            "Only the agent that created the payout or the owner",
+            REPORT_DENIED,
         );
     }
     assert_eq!(h.payout(id).status, PayoutStatus::Sent);
@@ -2099,7 +2162,7 @@ fn report_payout_status_by_creator_owner_and_others() {
     h.as_owner().revoke_agent(PROCUREMENT.into());
     expect_panic(
         || h.as_(&key_acc(), NO_DEPOSIT).report_payout_status(U64(id3), PayoutStatus::Confirmed, None),
-        "Only the agent that created the payout or the owner",
+        REPORT_DENIED,
     );
     h.as_owner_no_deposit().report_payout_status(U64(id3), PayoutStatus::Failed, None);
     expect_panic(
@@ -4267,4 +4330,215 @@ fn l1_sync_surplus_does_not_double_count_in_flight_deposit() {
     h.advance(SURPLUS_CONFIRM_MS);
     assert_eq!(h.surplus_cb(actual), 0);
     assert!(h.c.balance + h.c.in_flight <= actual);
+}
+
+// --- status reports by an attested TEE agent for Key agents' payouts (ADR-0002 amendment 2026-11-02) -----------
+
+/// `who` reports `status` for payout `id` (no tx hash).
+fn tee_reports(h: &mut H, who: &AccountId, id: PayoutId, status: PayoutStatus) {
+    h.as_(who, NO_DEPOSIT).report_payout_status(U64(id), status, None);
+}
+
+fn tee_report_denied(h: &mut H, who: &AccountId, id: PayoutId) {
+    expect_panic(|| tee_reports(h, who, id, PayoutStatus::Confirmed), REPORT_DENIED);
+    assert_eq!(h.payout(id).status, PayoutStatus::Sent, "a denied report leaves the payout Sent");
+}
+
+/// The actual e2e scenario: Key agent parks a payout, owner approves later, the worker finishes it.
+#[test]
+fn tee_reporter_finishes_owner_approved_key_payout() {
+    let (mut h, _) = H::with_payroll(1);
+    let id = h.pending(&key_acc(), &Req::open(LARGE));
+    h.approve(id);
+    h.settle(id, true);
+    assert_eq!(h.payout(id).status, PayoutStatus::Sent);
+    let before = h.money();
+    h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id), PayoutStatus::Confirmed, Some("0xdest".into()));
+    let p = h.payout(id);
+    assert_eq!((p.status, p.tx_hash.as_deref()), (PayoutStatus::Confirmed, Some("0xdest")));
+    assert_eq!(h.money(), before, "status reports never move money");
+    assert!(get_logs().iter().any(|l| l.contains("payout_status_reported")), "{:?}", get_logs());
+}
+
+/// Trust anchors removed after registration: the worker loses the reporting right at once, and regains it when the
+/// owner approves them again (no re-registration needed, the stored registration becomes valid again).
+#[test]
+fn tee_reporter_loses_right_when_measurements_or_ppid_unapproved() {
+    let (mut h, _) = H::with_payroll(1);
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.as_owner_no_deposit().remove_measurements(create_mock_full_measurements_hex());
+    tee_report_denied(&mut h, &tee_acc(), id);
+    h.as_owner().approve_measurements(create_mock_full_measurements_hex());
+    h.as_owner_no_deposit().remove_ppids(vec![Ppid::default()]);
+    tee_report_denied(&mut h, &tee_acc(), id);
+    h.as_owner().approve_ppids(vec![Ppid::default()]);
+    tee_reports(&mut h, &tee_acc(), id, PayoutStatus::Confirmed);
+    assert_eq!(h.payout(id).status, PayoutStatus::Confirmed);
+}
+
+/// `unbind_agent` and a re-bind to a new enclave account: the old account loses the right, the new one gets it.
+#[test]
+fn tee_reporter_right_follows_the_bound_account() {
+    let (mut h, _) = H::with_payroll(1);
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.trust_local(&tee_acc2());
+    h.as_owner().unbind_agent(PAYROLL.into());
+    // Still whitelisted and trust anchors approved, but no longer bound to any slot.
+    tee_report_denied(&mut h, &tee_acc(), id);
+    tee_report_denied(&mut h, &tee_acc2(), id);
+    assert!(h.register(PAYROLL, &tee_acc2()));
+    tee_report_denied(&mut h, &tee_acc(), id);
+    tee_reports(&mut h, &tee_acc2(), id, PayoutStatus::Confirmed);
+
+    // Takeover after the old attestation expired (no unbind): old account loses the right too.
+    let mut h = H::new();
+    h.as_owner().update_attestation_expiration_time(U64(1_000));
+    h.add_tee(PAYROLL, None, open_mandate());
+    h.trust_local(&tee_acc());
+    h.trust_local(&tee_acc2());
+    assert!(h.register(PAYROLL, &tee_acc()));
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.advance(1_001);
+    tee_report_denied(&mut h, &tee_acc(), id);
+    assert!(h.register(PAYROLL, &tee_acc2()));
+    // Even if the old account refreshed its whitelist status, it is not bound anymore.
+    tee_report_denied(&mut h, &tee_acc(), id);
+    tee_reports(&mut h, &tee_acc2(), id, PayoutStatus::Refunded);
+}
+
+/// An account is bound to at most one agent, so a Key agent account can never also be a TEE reporter (and could not
+/// use that to report other Key agents' payouts).
+#[test]
+fn key_and_tee_accounts_are_disjoint() {
+    let (mut h, _) = H::with_payroll(1);
+    expect_panic(|| drop(h.add_key("dup", tee_acc(), open_mandate())), "Account is already bound to an agent");
+    expect_panic(
+        || drop(h.add_tee("dup-tee", Some(key_acc()), open_mandate())),
+        "Account is already bound to an agent",
+    );
+    h.add_tee("payroll2", None, open_mandate());
+    h.trust_local(&key_acc());
+    expect_panic(|| h.register("payroll2", &key_acc()), "Account is already bound to another agent");
+    // The Key agent (even whitelisted for local mode) still cannot report another Key agent's payout.
+    h.add_key("ops", key_acc2(), open_mandate());
+    let other = h.paid(&key_acc2(), &Req::open(AMOUNT));
+    tee_report_denied(&mut h, &key_acc(), other);
+    tee_reports(&mut h, &tee_acc(), other, PayoutStatus::Confirmed);
+}
+
+/// Payouts of a Key agent that are not `Sent` cannot be finished by the TEE reporter.
+#[test]
+fn tee_reporter_rejected_for_key_payouts_not_sent() {
+    let (mut h, _) = H::with_payroll(1);
+    let pending = h.pending(&key_acc(), &Req::open(LARGE));
+    for s in [PayoutStatus::Confirmed, PayoutStatus::Refunded, PayoutStatus::Failed] {
+        expect_panic(|| tee_reports(&mut h, &tee_acc(), pending, s), "Payout is not in Sent state");
+    }
+    // Approved, transfer in flight.
+    h.approve(pending);
+    assert_eq!(h.payout(pending).status, PayoutStatus::Transferring);
+    expect_panic(|| tee_reports(&mut h, &tee_acc(), pending, PayoutStatus::Confirmed), "Payout is not in Sent state");
+    // Rejected by the owner.
+    let rejected = h.pending(&key_acc(), &Req::open(LARGE));
+    h.as_owner_no_deposit().reject_payout(U64(rejected), None);
+    expect_panic(|| tee_reports(&mut h, &tee_acc(), rejected, PayoutStatus::Confirmed), "Payout is not in Sent state");
+    // Transfer failed (reservation released): cannot be relabelled Confirmed/Refunded.
+    let failed = h.submit(&key_acc(), &Req::open(AMOUNT));
+    h.settle(failed, false);
+    expect_panic(|| tee_reports(&mut h, &tee_acc(), failed, PayoutStatus::Confirmed), "Payout is not in Sent state");
+    expect_panic(|| tee_reports(&mut h, &tee_acc(), failed, PayoutStatus::Refunded), "Payout is not in Sent state");
+    // Non-terminal statuses are refused for the reporter like for everyone.
+    let sent = h.paid(&key_acc(), &Req::open(AMOUNT));
+    for s in [PayoutStatus::Sent, PayoutStatus::Transferring, PayoutStatus::PendingApproval, PayoutStatus::Rejected] {
+        expect_panic(|| tee_reports(&mut h, &tee_acc(), sent, s), "Status must be Confirmed, Refunded or Failed");
+    }
+    let long = "x".repeat(MAX_TX_HASH_LEN + 1);
+    expect_panic(
+        || h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(sent), PayoutStatus::Confirmed, Some(long.clone())),
+        "tx_hash too long",
+    );
+    assert_eq!(h.payout(sent).status, PayoutStatus::Sent);
+}
+
+/// Same status again is a no-op (keeps the first tx_hash); a conflicting later report by anyone is refused.
+#[test]
+fn tee_reporter_repeat_is_idempotent_and_final() {
+    let (mut h, _) = H::with_payroll(1);
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id), PayoutStatus::Confirmed, Some("0x1".into()));
+    h.advance(10);
+    h.as_(&tee_acc(), NO_DEPOSIT).report_payout_status(U64(id), PayoutStatus::Confirmed, Some("0x2".into()));
+    // The creator reporting the same status afterwards is also a no-op.
+    h.as_(&key_acc(), NO_DEPOSIT).report_payout_status(U64(id), PayoutStatus::Confirmed, None);
+    let p = h.payout(id);
+    assert_eq!((p.tx_hash.as_deref(), p.updated_at_ms), (Some("0x1"), U64(T0)));
+    for who in [tee_acc(), key_acc(), owner()] {
+        expect_panic(|| tee_reports(&mut h, &who, id, PayoutStatus::Refunded), "Payout is not in Sent state");
+    }
+}
+
+/// Refunded reported by the worker for a Key agent's payout → the owner's two-phase `credit_refund` still works.
+#[test]
+fn tee_reported_refund_can_be_credited_by_owner() {
+    let (mut h, _) = H::with_payroll(1);
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    let balance = h.c.balance;
+    tee_reports(&mut h, &tee_acc(), id, PayoutStatus::Refunded);
+    // The TEE reporter has no owner rights over refunds.
+    expect_panic(|| drop(h.as_(&tee_acc(), ONE_YOCTO).credit_refund(U64(id), None)), "Caller is not the owner");
+    // The refund arrived: the token balance shows AMOUNT untracked on both reads.
+    assert!(h.refund_two_phase(id, AMOUNT, balance + AMOUNT, balance + AMOUNT));
+    assert_eq!(h.c.balance, balance + AMOUNT);
+    assert!(h.payout(id).refund_credited);
+}
+
+/// Payouts of a revoked Key agent that already left the vault can still be finished by the worker (the creator
+/// itself lost the right); it is an annotation, the funds are already at 1Click.
+#[test]
+fn tee_reporter_may_finish_revoked_key_agents_sent_payout() {
+    let (mut h, _) = H::with_payroll(1);
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    h.as_owner().revoke_agent(PROCUREMENT.into());
+    expect_panic(|| tee_reports(&mut h, &key_acc(), id, PayoutStatus::Confirmed), REPORT_DENIED);
+    tee_reports(&mut h, &tee_acc(), id, PayoutStatus::Confirmed);
+    assert_eq!(h.payout(id).status, PayoutStatus::Confirmed);
+}
+
+/// Vault with `requires_tee = true` (no local whitelist): the reporter right needs a stored registration that is
+/// still valid. Registration with a real TDX quote cannot run in unit tests, so it is injected into state.
+#[test]
+fn tee_mode_vault_reporter_needs_valid_registration() {
+    near_sdk::mock::with_mocked_blockchain(|b| drop(b.take_storage()));
+    testing_env!(H::ctx_at(&vault(), NO_DEPOSIT, T0, Gas::from_tgas(300)).build());
+    let c = Contract::new(owner(), token(), default_policy(), true, U64(ATTESTATION_TTL), None, None);
+    let mut h = H { c, now: T0 };
+    h.fund(FUND);
+    h.add_key(PROCUREMENT, key_acc(), open_mandate());
+    h.as_owner().approve_measurements(create_mock_full_measurements_hex());
+    h.as_owner().approve_ppids(vec![Ppid::default()]);
+    let worker = acc(&dep(0x41));
+    let pinned_unregistered = acc(&dep(0x42));
+    h.add_tee(PAYROLL, None, open_mandate());
+    h.add_tee("pinned", Some(pinned_unregistered.clone()), open_mandate());
+    // Inject what a successful `register_agent` stores.
+    h.c.agent_by_account.insert(worker.clone(), PAYROLL.to_string());
+    {
+        let a = h.agent_mut(PAYROLL);
+        a.account_id = Some(worker.clone());
+        a.tee = Some(TeeRegistration {
+            measurements: create_mock_full_measurements_hex(),
+            ppid: Ppid::default(),
+            valid_until_ms: T0 + ATTESTATION_TTL,
+        });
+    }
+    let id = h.paid(&key_acc(), &Req::open(AMOUNT));
+    // Bound to a slot but never attested: not a reporter.
+    tee_report_denied(&mut h, &pinned_unregistered, id);
+    // Expired attestation: not a reporter.
+    h.advance(ATTESTATION_TTL + 1);
+    tee_report_denied(&mut h, &worker, id);
+    // Refreshed (valid again), no whitelist needed in TEE mode.
+    h.agent_mut(PAYROLL).tee.as_mut().unwrap().valid_until_ms = h.now + ATTESTATION_TTL;
+    tee_reports(&mut h, &worker, id, PayoutStatus::Confirmed);
+    assert_eq!(h.payout(id).status, PayoutStatus::Confirmed);
 }

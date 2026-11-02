@@ -222,17 +222,27 @@ impl Contract {
         U128(verified)
     }
 
-    /// The agent that created a payout (its current account) or the owner reports the final 1Click status.
-    /// Annotation only: it never moves money. `Sent` → `Confirmed` | `Refunded` | `Failed`; same status again = no-op.
+    /// The agent that created a payout (its current account), the owner, or, for payouts of Key agents, an attested
+    /// TEE agent reports the final 1Click status. Annotation only: it never moves money.
+    /// `Sent` → `Confirmed` | `Refunded` | `Failed`; same status again = no-op.
+    ///
+    /// Why TEE agents may report for Key agents (docs/adr/0002 §"Status reporting"): a Key agent's process (an MCP
+    /// server inside a chat client) is often gone by the time the owner approves its payout, so nobody would finish
+    /// it. The worker runs continuously in an attested enclave and reads the status from 1Click itself. It cannot
+    /// report for other TEE agents (they report their own), and a revoked/paused/expired worker loses the right.
     pub fn report_payout_status(&mut self, payout_id: U64, status: PayoutStatus, tx_hash: Option<String>) {
         let caller = env::predecessor_account_id();
         let creator =
             self.payout_ref(payout_id.0).unwrap_or_else(|| env::panic_str("Payout not found")).agent_id.clone();
-        let is_creator = self
-            .agents
-            .get(&creator)
-            .is_some_and(|a| a.status != AgentStatus::Revoked && a.account_id.as_ref() == Some(&caller));
-        require!(caller == self.owner_id || is_creator, "Only the agent that created the payout or the owner");
+        let creator_agent = self.agents.get(&creator);
+        let is_creator =
+            creator_agent.is_some_and(|a| a.status != AgentStatus::Revoked && a.account_id.as_ref() == Some(&caller));
+        let is_tee_reporter =
+            creator_agent.is_some_and(|a| a.kind == AgentKind::Key) && self.is_valid_tee_caller(&caller);
+        require!(
+            caller == self.owner_id || is_creator || is_tee_reporter,
+            "Only the agent that created the payout, an attested TEE agent (for Key agents' payouts) or the owner"
+        );
         require!(
             matches!(status, PayoutStatus::Confirmed | PayoutStatus::Refunded | PayoutStatus::Failed),
             "Status must be Confirmed, Refunded or Failed"
