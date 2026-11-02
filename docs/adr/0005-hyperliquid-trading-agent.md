@@ -489,3 +489,16 @@ In TEE mode later, the hard-limit env vars must be pinned in the measured compos
   - `mcp/package.json`, `dashboard/src/lib/address.ts`;
   - ADR-0001 to ADR-0004.
 - This ADR draws on the research doc and code only; I did not fetch upstream HL documentation in this session.
+
+## Owner decisions (2026-11-02)
+
+1. Mainnet session: deploy the vault to mainnet with tiny limits (one deployment serves payroll and trading demos);
+   every mainnet step needs the owner's explicit confirmation of the exact action.
+2. Top-ups run on their own within the mandate: `approval_threshold = 25 USDC` (= per-tx limit), 50 USDC/day,
+   2 top-ups/day, destination = the owner's HL master address only.
+3. Hard limits as proposed: max position 50 USDC, max order 20 USDC, daily loss stop 10 USDC, pairs HYPE/USDC only,
+   spot only, min 24 h volume 1M USDC.
+4. The owner creates a dedicated HL master EVM account for the bot and shares only its address; we never receive its
+   private key.
+5. Strategy authoring: natural language in the assistant chat → AI proposes the DSL rule set → owner confirms
+   (NEP-413) → deterministic engine. The LLM never places orders.

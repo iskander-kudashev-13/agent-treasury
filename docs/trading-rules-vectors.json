@@ -1,0 +1,2684 @@
+{
+  "$comment": "Shared test vectors for Rules DSL v1 (docs/adr/0005-hyperliquid-trading-agent.md). Used by worker/test/trading/*.test.ts and the dashboard. canonical = keys sorted, no whitespace, UTF-8; sha256 = hex(sha256(canonical)); describe = lines of the English rendering. invalid[].layer 'schema' = parse errors independent of env; 'limits' = needs `context`. errors = the exact set of codes (sorted, unique) expected.",
+  "version": 1,
+  "context": {
+    "hard": {
+      "maxPositionUsdc": "50",
+      "maxOrderUsdc": "20",
+      "dailyLossUsdc": "10",
+      "maxOrdersPerDay": 20,
+      "allowedPairs": [
+        "HYPE/USDC",
+        "PURR/USDC",
+        "PERPLIKE/USDC",
+        "THIN/USDC"
+      ],
+      "minPairVolumeUsdc": "1000000",
+      "priceBandBps": 100
+    },
+    "pairs": {
+      "HYPE/USDC": {
+        "name": "HYPE/USDC",
+        "assetId": 10107,
+        "szDecimals": 2,
+        "volume24hUsdc": "25000000"
+      },
+      "PURR/USDC": {
+        "name": "PURR/USDC",
+        "assetId": 10000,
+        "szDecimals": 0,
+        "volume24hUsdc": "2000000"
+      },
+      "PERPLIKE/USDC": {
+        "name": "PERPLIKE/USDC",
+        "assetId": 5,
+        "szDecimals": 2,
+        "volume24hUsdc": "9000000"
+      },
+      "THIN/USDC": {
+        "name": "THIN/USDC",
+        "assetId": 10200,
+        "szDecimals": 2,
+        "volume24hUsdc": "999999.99"
+      }
+    }
+  },
+  "valid": [
+    {
+      "name": "adr example: HYPE dip buyer",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "canonical": "{\"limits\":{\"daily_loss_stop_usdc\":\"5\",\"max_order_usdc\":\"10\",\"max_orders_per_day\":3,\"max_position_usdc\":\"40\"},\"name\":\"HYPE dip buyer\",\"pairs\":[\"HYPE/USDC\"],\"rules\":[{\"action\":{\"order\":{\"type\":\"ioc\"},\"side\":\"buy\",\"size\":{\"usdc\":\"10\"}},\"cooldown\":\"1d\",\"id\":\"dip\",\"pair\":\"HYPE/USDC\",\"when\":{\"op\":\"lte\",\"pct\":\"-3\",\"type\":\"price_change\",\"window\":\"1d\"}}],\"version\":1}",
+      "sha256": "91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea",
+      "describe": [
+        "Rule set: HYPE dip buyer",
+        "Pairs: HYPE/USDC",
+        "Max position: 40 USDC",
+        "Max order: 10 USDC",
+        "Daily loss stop: 5 USDC",
+        "Max orders per day: 3",
+        "Rule 1 [dip] on HYPE/USDC",
+        "  When: price change over 1 day is at or below -3%",
+        "  Do: Buy 10 USDC of HYPE as an immediate-or-cancel limit order at the market price, inside the price band",
+        "  Cooldown: 1 day"
+      ]
+    },
+    {
+      "name": "same rule set with scrambled key order",
+      "input": {
+        "rules": [
+          {
+            "cooldown": "1d",
+            "action": {
+              "order": {
+                "type": "ioc"
+              },
+              "size": {
+                "usdc": "10"
+              },
+              "side": "buy"
+            },
+            "when": {
+              "pct": "-3",
+              "op": "lte",
+              "window": "1d",
+              "type": "price_change"
+            },
+            "pair": "HYPE/USDC",
+            "id": "dip"
+          }
+        ],
+        "limits": {
+          "max_orders_per_day": 3,
+          "daily_loss_stop_usdc": "5",
+          "max_order_usdc": "10",
+          "max_position_usdc": "40"
+        },
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "name": "HYPE dip buyer",
+        "version": 1
+      },
+      "canonical": "{\"limits\":{\"daily_loss_stop_usdc\":\"5\",\"max_order_usdc\":\"10\",\"max_orders_per_day\":3,\"max_position_usdc\":\"40\"},\"name\":\"HYPE dip buyer\",\"pairs\":[\"HYPE/USDC\"],\"rules\":[{\"action\":{\"order\":{\"type\":\"ioc\"},\"side\":\"buy\",\"size\":{\"usdc\":\"10\"}},\"cooldown\":\"1d\",\"id\":\"dip\",\"pair\":\"HYPE/USDC\",\"when\":{\"op\":\"lte\",\"pct\":\"-3\",\"type\":\"price_change\",\"window\":\"1d\"}}],\"version\":1}",
+      "sha256": "91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea",
+      "describe": [
+        "Rule set: HYPE dip buyer",
+        "Pairs: HYPE/USDC",
+        "Max position: 40 USDC",
+        "Max order: 10 USDC",
+        "Daily loss stop: 5 USDC",
+        "Max orders per day: 3",
+        "Rule 1 [dip] on HYPE/USDC",
+        "  When: price change over 1 day is at or below -3%",
+        "  Do: Buy 10 USDC of HYPE as an immediate-or-cancel limit order at the market price, inside the price band",
+        "  Cooldown: 1 day"
+      ]
+    },
+    {
+      "name": "all trigger and order kinds, two pairs, non-ASCII name",
+      "input": {
+        "version": 1,
+        "name": "Zażółć DCA + take profit",
+        "pairs": [
+          "HYPE/USDC",
+          "PURR/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "45.5",
+          "max_order_usdc": "12.25",
+          "daily_loss_stop_usdc": "7.5",
+          "max_orders_per_day": 10
+        },
+        "rules": [
+          {
+            "id": "dca",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "interval",
+              "every": "1w"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "12.25"
+              },
+              "order": {
+                "type": "limit",
+                "offset_pct": "0.5",
+                "ttl": "4h"
+              }
+            }
+          },
+          {
+            "id": "tp-half",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "position_pnl",
+              "op": "gte",
+              "pct": "12.5"
+            },
+            "action": {
+              "side": "sell",
+              "size": {
+                "position_pct": "50"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          },
+          {
+            "id": "cut",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "position_pnl",
+              "op": "lte",
+              "pct": "-8"
+            },
+            "action": {
+              "side": "sell",
+              "size": {
+                "position_pct": "100"
+              },
+              "order": {
+                "type": "limit",
+                "offset_pct": "0",
+                "ttl": "15m"
+              }
+            },
+            "cooldown": "4h"
+          },
+          {
+            "id": "floor",
+            "pair": "PURR/USDC",
+            "when": {
+              "type": "price",
+              "op": "lte",
+              "usdc": "0.123456"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10.5"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1h"
+          },
+          {
+            "id": "pump",
+            "pair": "PURR/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "4h",
+              "op": "gte",
+              "pct": "5.25"
+            },
+            "action": {
+              "side": "sell",
+              "size": {
+                "position_pct": "25.5"
+              },
+              "order": {
+                "type": "limit",
+                "offset_pct": "10",
+                "ttl": "1d"
+              }
+            },
+            "cooldown": "15m"
+          }
+        ]
+      },
+      "canonical": "{\"limits\":{\"daily_loss_stop_usdc\":\"7.5\",\"max_order_usdc\":\"12.25\",\"max_orders_per_day\":10,\"max_position_usdc\":\"45.5\"},\"name\":\"Zażółć DCA + take profit\",\"pairs\":[\"HYPE/USDC\",\"PURR/USDC\"],\"rules\":[{\"action\":{\"order\":{\"offset_pct\":\"0.5\",\"ttl\":\"4h\",\"type\":\"limit\"},\"side\":\"buy\",\"size\":{\"usdc\":\"12.25\"}},\"id\":\"dca\",\"pair\":\"HYPE/USDC\",\"when\":{\"every\":\"1w\",\"type\":\"interval\"}},{\"action\":{\"order\":{\"type\":\"ioc\"},\"side\":\"sell\",\"size\":{\"position_pct\":\"50\"}},\"cooldown\":\"1d\",\"id\":\"tp-half\",\"pair\":\"HYPE/USDC\",\"when\":{\"op\":\"gte\",\"pct\":\"12.5\",\"type\":\"position_pnl\"}},{\"action\":{\"order\":{\"offset_pct\":\"0\",\"ttl\":\"15m\",\"type\":\"limit\"},\"side\":\"sell\",\"size\":{\"position_pct\":\"100\"}},\"cooldown\":\"4h\",\"id\":\"cut\",\"pair\":\"HYPE/USDC\",\"when\":{\"op\":\"lte\",\"pct\":\"-8\",\"type\":\"position_pnl\"}},{\"action\":{\"order\":{\"type\":\"ioc\"},\"side\":\"buy\",\"size\":{\"usdc\":\"10.5\"}},\"cooldown\":\"1h\",\"id\":\"floor\",\"pair\":\"PURR/USDC\",\"when\":{\"op\":\"lte\",\"type\":\"price\",\"usdc\":\"0.123456\"}},{\"action\":{\"order\":{\"offset_pct\":\"10\",\"ttl\":\"1d\",\"type\":\"limit\"},\"side\":\"sell\",\"size\":{\"position_pct\":\"25.5\"}},\"cooldown\":\"15m\",\"id\":\"pump\",\"pair\":\"PURR/USDC\",\"when\":{\"op\":\"gte\",\"pct\":\"5.25\",\"type\":\"price_change\",\"window\":\"4h\"}}],\"version\":1}",
+      "sha256": "8ca193916451177fc4468d9dfc240a5b398678b4f7a76213f43caf851c7a9da1",
+      "describe": [
+        "Rule set: Zażółć DCA + take profit",
+        "Pairs: HYPE/USDC, PURR/USDC",
+        "Max position: 45.5 USDC",
+        "Max order: 12.25 USDC",
+        "Daily loss stop: 7.5 USDC",
+        "Max orders per day: 10",
+        "Rule 1 [dca] on HYPE/USDC",
+        "  When: every 1 week (first run when the rules are activated)",
+        "  Do: Buy 12.25 USDC of HYPE as a limit order 0.5% below the market price, cancelled after 4 hours",
+        "  Cooldown: 1 week",
+        "Rule 2 [tp-half] on HYPE/USDC",
+        "  When: position P&L is at or above +12.5% (vs average cost of fills under this rule set; never when flat)",
+        "  Do: Sell 50% of the HYPE position as an immediate-or-cancel limit order at the market price, inside the price band",
+        "  Cooldown: 1 day",
+        "Rule 3 [cut] on HYPE/USDC",
+        "  When: position P&L is at or below -8% (vs average cost of fills under this rule set; never when flat)",
+        "  Do: Sell 100% of the HYPE position as a limit order at the market price, cancelled after 15 minutes",
+        "  Cooldown: 4 hours",
+        "Rule 4 [floor] on PURR/USDC",
+        "  When: price is at or below 0.123456 USDC",
+        "  Do: Buy 10.5 USDC of PURR as an immediate-or-cancel limit order at the market price, inside the price band",
+        "  Cooldown: 1 hour",
+        "Rule 5 [pump] on PURR/USDC",
+        "  When: price change over 4 hours is at or above +5.25%",
+        "  Do: Sell 25.5% of the PURR position as a limit order 10% above the market price, cancelled after 1 day",
+        "  Cooldown: 15 minutes"
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "name": "not an object",
+      "layer": "schema",
+      "input": "nope",
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "wrong version",
+      "layer": "schema",
+      "input": {
+        "version": 2,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_VERSION"
+      ]
+    },
+    {
+      "name": "unknown top-level key",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ],
+        "extra": 1
+      },
+      "errors": [
+        "UNKNOWN_KEY"
+      ]
+    },
+    {
+      "name": "unknown nested key",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              },
+              "leverage": "5"
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "UNKNOWN_KEY"
+      ]
+    },
+    {
+      "name": "empty name",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_NAME"
+      ]
+    },
+    {
+      "name": "name over 60 chars",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_NAME"
+      ]
+    },
+    {
+      "name": "name with newline",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "a\nb",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_NAME"
+      ]
+    },
+    {
+      "name": "name with surrounding space",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": " padded",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "NAME_WHITESPACE"
+      ]
+    },
+    {
+      "name": "no pairs",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "NO_PAIRS"
+      ]
+    },
+    {
+      "name": "four pairs",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "A/USDC",
+          "B/USDC",
+          "C/USDC",
+          "D/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "TOO_MANY_PAIRS"
+      ]
+    },
+    {
+      "name": "pair not quoted in USDC",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDT"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_PAIR"
+      ]
+    },
+    {
+      "name": "perp-style pair name",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_PAIR"
+      ]
+    },
+    {
+      "name": "duplicate pair",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC",
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "DUPLICATE_PAIR"
+      ]
+    },
+    {
+      "name": "decimal with 7 places",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40.1234567",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_DECIMAL"
+      ]
+    },
+    {
+      "name": "decimal with exponent",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "4e1",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_DECIMAL"
+      ]
+    },
+    {
+      "name": "negative decimal",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "-40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_DECIMAL"
+      ]
+    },
+    {
+      "name": "decimal as number",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": 40,
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "empty decimal",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_DECIMAL"
+      ]
+    },
+    {
+      "name": "signed decimal with 3 places",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3.123"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_SIGNED_DECIMAL"
+      ]
+    },
+    {
+      "name": "signed decimal with plus",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "+3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_SIGNED_DECIMAL"
+      ]
+    },
+    {
+      "name": "max_orders_per_day zero",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 0
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "MAX_ORDERS_RANGE"
+      ]
+    },
+    {
+      "name": "max_orders_per_day 51",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 51
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "MAX_ORDERS_RANGE"
+      ]
+    },
+    {
+      "name": "max_orders_per_day fractional",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 1.5
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "MAX_ORDERS_RANGE"
+      ]
+    },
+    {
+      "name": "max_order below HL minimum",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "9.99",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "MAX_ORDER_BELOW_MIN",
+        "RULE_SIZE_ABOVE_MAX_ORDER"
+      ]
+    },
+    {
+      "name": "daily loss stop zero",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "0",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "LOSS_STOP_NOT_POSITIVE"
+      ]
+    },
+    {
+      "name": "max position zero",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "0.0",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "MAX_POSITION_NOT_POSITIVE"
+      ]
+    },
+    {
+      "name": "no rules",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": []
+      },
+      "errors": [
+        "NO_RULES"
+      ]
+    },
+    {
+      "name": "six rules",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "r0",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          },
+          {
+            "id": "r1",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          },
+          {
+            "id": "r2",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          },
+          {
+            "id": "r3",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          },
+          {
+            "id": "r4",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          },
+          {
+            "id": "r5",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "TOO_MANY_RULES"
+      ]
+    },
+    {
+      "name": "rule id uppercase",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "Dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_RULE_ID"
+      ]
+    },
+    {
+      "name": "rule id too long",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "aaaaaaaaaaaaaaaaa",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "BAD_RULE_ID"
+      ]
+    },
+    {
+      "name": "duplicate rule id",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          },
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "DUPLICATE_RULE_ID"
+      ]
+    },
+    {
+      "name": "rule pair not listed",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "PURR/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "RULE_PAIR_NOT_LISTED"
+      ]
+    },
+    {
+      "name": "missing cooldown",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            }
+          }
+        ]
+      },
+      "errors": [
+        "COOLDOWN_REQUIRED"
+      ]
+    },
+    {
+      "name": "cooldown outside enum",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "2d"
+          }
+        ]
+      },
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "cooldown on interval rule",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "interval",
+              "every": "1d"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "COOLDOWN_NOT_ALLOWED"
+      ]
+    },
+    {
+      "name": "unknown trigger type",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "rsi",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "window outside enum",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1w",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "price zero",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price",
+              "op": "lte",
+              "usdc": "0"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "PRICE_NOT_POSITIVE"
+      ]
+    },
+    {
+      "name": "pct below -100",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-100.01"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "PCT_BELOW_MINUS_100"
+      ]
+    },
+    {
+      "name": "position_pct on buy",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "position_pct": "50"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "POSITION_PCT_ON_BUY"
+      ]
+    },
+    {
+      "name": "position_pct 0.5",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "sell",
+              "size": {
+                "position_pct": "0.5"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "POSITION_PCT_RANGE"
+      ]
+    },
+    {
+      "name": "position_pct 100.5",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "sell",
+              "size": {
+                "position_pct": "100.5"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "POSITION_PCT_RANGE"
+      ]
+    },
+    {
+      "name": "size with both usdc and position_pct",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10",
+                "position_pct": "5"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "rule size below 10",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "9.99"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "RULE_SIZE_BELOW_MIN"
+      ]
+    },
+    {
+      "name": "rule size above max_order",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10.01"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "RULE_SIZE_ABOVE_MAX_ORDER"
+      ]
+    },
+    {
+      "name": "limit offset above 10",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "limit",
+                "offset_pct": "10.01",
+                "ttl": "1h"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "OFFSET_RANGE"
+      ]
+    },
+    {
+      "name": "limit without ttl",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "limit",
+                "offset_pct": "1"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "ioc with ttl",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc",
+                "ttl": "1h"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "UNKNOWN_KEY"
+      ]
+    },
+    {
+      "name": "max_position above hard limit",
+      "layer": "limits",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "50.000001",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "LIMIT_MAX_POSITION"
+      ]
+    },
+    {
+      "name": "max_order above hard limit",
+      "layer": "limits",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "20.01",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "LIMIT_MAX_ORDER"
+      ]
+    },
+    {
+      "name": "daily loss above hard limit",
+      "layer": "limits",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "10.01",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "LIMIT_DAILY_LOSS"
+      ]
+    },
+    {
+      "name": "orders per day above hard limit",
+      "layer": "limits",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "HYPE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 21
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "HYPE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "LIMIT_MAX_ORDERS"
+      ]
+    },
+    {
+      "name": "pair not in allowlist",
+      "layer": "limits",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "DOGE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "DOGE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "PAIR_NOT_ALLOWED"
+      ]
+    },
+    {
+      "name": "pair is a perp asset id",
+      "layer": "limits",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "PERPLIKE/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "PERPLIKE/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "PAIR_PERP"
+      ]
+    },
+    {
+      "name": "pair below minimum volume",
+      "layer": "limits",
+      "input": {
+        "version": 1,
+        "name": "HYPE dip buyer",
+        "pairs": [
+          "THIN/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "40",
+          "max_order_usdc": "10",
+          "daily_loss_stop_usdc": "5",
+          "max_orders_per_day": 3
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "THIN/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "PAIR_LOW_VOLUME"
+      ]
+    }
+  ]
+}
