@@ -1,4 +1,5 @@
 // Display logic for an agent: trust line, state, spend, "today" counters. Pure and unit-tested.
+import { t } from "@/i18n";
 import { shortId } from "@/kit/tokens";
 import type { AgentView, Rejection } from "./types";
 
@@ -21,10 +22,10 @@ export function measurementsLabel(m: unknown): string {
 }
 
 export function trustOf(a: AgentView): Trust {
-  if (a.kind === "Key") return { kind: "key", tone: "neutral", registered: true, line: `Key · ${a.public_key ? shortId(a.public_key, 12, 4) : (a.account_id ?? "no account")}` };
-  if (!a.tee || !a.account_id) return { kind: "tee", tone: "warn", registered: false, line: "TEE · waiting for registration" };
-  if (!a.tee.valid) return { kind: "tee", tone: "warn", registered: true, line: `TEE · attestation not valid · ${measurementsLabel(a.tee.measurements)}` };
-  return { kind: "tee", tone: "ok", registered: true, line: `TEE · verified ${measurementsLabel(a.tee.measurements)}` };
+  if (a.kind === "Key") return { kind: "key", tone: "neutral", registered: true, line: t("trust.key", { what: a.public_key ? shortId(a.public_key, 12, 4) : (a.account_id ?? t("trust.noAccount")) }) };
+  if (!a.tee || !a.account_id) return { kind: "tee", tone: "warn", registered: false, line: t("trust.teeWaiting") };
+  if (!a.tee.valid) return { kind: "tee", tone: "warn", registered: true, line: t("trust.teeInvalid", { m: measurementsLabel(a.tee.measurements) }) };
+  return { kind: "tee", tone: "ok", registered: true, line: t("trust.teeVerified", { m: measurementsLabel(a.tee.measurements) }) };
 }
 
 export type RowState = "active" | "paused" | "revoked" | "waiting";

@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { useState } from "react";
 import { formatNear, parseNear } from "@/lib/vaultFunds";
 import { isAccountId } from "@/lib/trustAnchors";
@@ -16,6 +17,7 @@ function nearOrError(v: string): { yocto: string | null; error: string | null } 
 
 /** Storage deposit, NEAR withdrawal and ownership transfer. */
 export function OwnerAdmin({ info }: { info: ContractInfo | null }) {
+  const t = useT();
   const { canAct, busy, act, accountId } = useOwner();
   const [near, setNear] = useState("");
   const [storage, setStorage] = useState("");
@@ -27,54 +29,54 @@ export function OwnerAdmin({ info }: { info: ContractInfo | null }) {
   const canAccept = Boolean(info?.proposed_owner) && accountId === info?.proposed_owner;
   return (
     <Card aria-labelledby="admin-title" className="flex flex-col gap-4">
-      <CardHeader id="admin-title" title="Owner admin" />
+      <CardHeader id="admin-title" title={t("admin.title")} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="flex flex-col gap-2">
-          <Field label="Withdraw NEAR" error={n.error} hint="Only NEAR not locked for storage can leave.">
+          <Field label={t("admin.withdrawNear")} error={n.error} hint={t("admin.withdrawHint")}>
             {(a) => <Input {...a} mono inputMode="decimal" suffix="NEAR" value={near} onChange={(e) => setNear(e.target.value)} />}
           </Field>
-          <Button disabled={!canAct || busy || n.yocto === null} onClick={() => n.yocto && void act("withdraw_near", { amount: n.yocto }).then((ok) => ok && setNear(""))} title="1 yocto">
-            Withdraw NEAR
+          <Button disabled={!canAct || busy || n.yocto === null} onClick={() => n.yocto && void act("withdraw_near", { amount: n.yocto }).then((ok) => ok && setNear(""))} title={t("pol.oneYocto")}>
+            {t("admin.withdrawNear")}
           </Button>
         </div>
         <div className="flex flex-col gap-2">
-          <Field label="Storage deposit" error={s.error} hint={`Currently ${info ? formatNear(info.storage_deposit_yocto) : "?"} NEAR per record.`}>
+          <Field label={t("admin.storageDeposit")} error={s.error} hint={t("admin.storageHint", { amount: info ? formatNear(info.storage_deposit_yocto) : "?" })}>
             {(a) => <Input {...a} mono inputMode="decimal" suffix="NEAR" value={storage} onChange={(e) => setStorage(e.target.value)} />}
           </Field>
-          <Button disabled={!canAct || busy || s.yocto === null} onClick={() => s.yocto && void act("set_storage_deposit_yocto", { storage_deposit_yocto: s.yocto }).then((ok) => ok && setStorage(""))} title="1 yocto">
-            Set storage deposit
+          <Button disabled={!canAct || busy || s.yocto === null} onClick={() => s.yocto && void act("set_storage_deposit_yocto", { storage_deposit_yocto: s.yocto }).then((ok) => ok && setStorage(""))} title={t("pol.oneYocto")}>
+            {t("admin.setStorage")}
           </Button>
         </div>
         <div className="flex flex-col gap-2">
-          <Field label="Transfer ownership" hint={info?.proposed_owner ? `Pending: ${info.proposed_owner} must accept.` : "The new owner must accept in their wallet."} error={next && !nextOk ? "Not a valid account id" : undefined}>
-            {(a) => <Input {...a} mono value={next} onChange={(e) => setNext(e.target.value.trim())} placeholder="account id" />}
+          <Field label={t("admin.transfer")} hint={info?.proposed_owner ? t("admin.pending", { account: info.proposed_owner }) : t("admin.newMustAccept")} error={next && !nextOk ? t("admin.invalidAccount") : undefined}>
+            {(a) => <Input {...a} mono value={next} onChange={(e) => setNext(e.target.value.trim())} placeholder={t("admin.accountPlaceholder")} />}
           </Field>
           <Button variant="danger" disabled={!canAct || busy || !nextOk} onClick={() => setConfirm(true)}>
-            Propose new owner
+            {t("admin.propose")}
           </Button>
         </div>
       </div>
       {canAccept && (
-        <Callout accent="info" action={<Button variant="primary" disabled={busy} onClick={() => void act("accept_owner")}>Accept ownership</Button>}>
-          {info?.owner_id} proposed you as the new owner of this vault.
+        <Callout accent="info" action={<Button variant="primary" disabled={busy} onClick={() => void act("accept_owner")}>{t("admin.accept")}</Button>}>
+          {t("admin.proposedYou", { owner: info?.owner_id ?? "" })}
         </Callout>
       )}
       <Modal
         open={confirm}
         danger
         onClose={() => !busy && setConfirm(false)}
-        title="Propose a new owner?"
+        title={t("admin.proposeTitle")}
         footer={
           <>
             {busy && <SigningHint />}
-            <Button onClick={() => setConfirm(false)} disabled={busy}>Cancel</Button>
+            <Button onClick={() => setConfirm(false)} disabled={busy}>{t("common.cancel")}</Button>
             <Button variant="danger-fill" disabled={busy} onClick={() => void act("propose_owner", { proposed_owner: next }).then((ok) => { if (ok) { setConfirm(false); setNext(""); } })}>
-              Propose {next}
+              {t("admin.proposeBtn", { account: next })}
             </Button>
           </>
         }
       >
-        <span className="mono break-all">{next}</span> will become the owner once it accepts. It can then withdraw funds and change every rule. You stay owner until then.
+        {rich("admin.proposeBody", { account: <span className="mono break-all">{next}</span> })}
       </Modal>
     </Card>
   );

@@ -3,6 +3,7 @@
  * defensively, only the ten known types/methods are accepted, and deposit/gas from the wire are ignored (calls.ts decides).
  * Free text (title, summary, labels) is only ever rendered as plain text.
  */
+import { t } from "@/i18n";
 import { describeFrequency, shortDate } from "./frequency";
 import { usdcGrouped } from "@/lib/amount";
 import { isAssistantMethod, type AssistantMethod, type PlannedCall } from "./calls";
@@ -162,7 +163,7 @@ export function orderBatch(items: BatchItem[], signed: ReadonlySet<string> = new
   const ids = new Set(items.map((i) => i.id));
   for (const it of items) {
     for (const d of it.depends_on) {
-      if (!ids.has(d) && !signed.has(d)) problems.push(`"${it.title ?? it.id}" depends on ${d}, which is not queued. Queue it too or discard this change.`);
+      if (!ids.has(d) && !signed.has(d)) problems.push(t("pr.dependsOn", { title: it.title ?? it.id, dep: d }));
     }
   }
   // Recipient creators keep their relative order by predicted id.
@@ -176,7 +177,7 @@ export function orderBatch(items: BatchItem[], signed: ReadonlySet<string> = new
   while (pending.length > 0) {
     const idx = pending.findIndex((it) => it.depends_on.every((d) => done.has(d) || signed.has(d) || !ids.has(d)));
     if (idx === -1) {
-      problems.push("The changes depend on each other in a loop.");
+      problems.push(t("pr.loop"));
       ordered.push(...pending);
       break;
     }
@@ -188,7 +189,7 @@ export function orderBatch(items: BatchItem[], signed: ReadonlySet<string> = new
   if (nextRecipientId !== null) {
     const created = ordered.filter((i) => i.recipientId !== null).map((i) => i.recipientId as number);
     created.forEach((id, n) => {
-      if (id !== nextRecipientId + n) problems.push(`The vault's recipient list changed since the assistant prepared this (expected id ${nextRecipientId + n}, got ${id}). Ask the assistant again.`);
+      if (id !== nextRecipientId + n) problems.push(t("pr.recipientChanged", { expected: nextRecipientId + n, got: id }));
     });
   }
   return { ordered, problems: [...new Set(problems)] };
@@ -209,9 +210,9 @@ export interface CardRow {
 }
 
 const fmtEnd = (end: unknown): string => {
-  if (end === "Never") return "No end";
-  if (isObj(end) && isObj(end.AfterCount)) return `After ${String(end.AfterCount.count)} payments`;
-  if (isObj(end) && isObj(end.On)) return `On ${shortDate(Number(end.On.at))}`;
+  if (end === "Never") return t("pr.noEnd");
+  if (isObj(end) && isObj(end.AfterCount)) return t("pr.afterN", { count: Number(end.AfterCount.count) });
+  if (isObj(end) && isObj(end.On)) return t("pr.onDate", { date: shortDate(Number(end.On.at)) });
   return "—";
 };
 
@@ -224,40 +225,40 @@ export function proposalRows(p: Proposal, look: RowLookups): CardRow[] {
     const freq = s.frequency as Parameters<typeof describeFrequency>[0];
     const start = Number(s.start_at);
     const rows: CardRow[] = [
-      { label: "Recipient", to: look.recipient(Number(s.recipient_id)) },
-      { label: "Amount", to: `${usdcGrouped(String(s.amount), 0)} USDC` },
-      { label: "Frequency", to: describeFrequency(freq, start) },
-      { label: "Starts", to: `${shortDate(start)} ${new Date(start).toISOString().slice(11, 16)} UTC` },
-      { label: "Ends", to: fmtEnd(s.end) },
-      { label: "Paid by", to: look.agent(String(s.agent_id)) },
+      { label: t("pr.rowRecipient"), to: look.recipient(Number(s.recipient_id)) },
+      { label: t("pr.rowAmount"), to: `${usdcGrouped(String(s.amount), 0)} USDC` },
+      { label: t("pr.rowFrequency"), to: describeFrequency(freq, start) },
+      { label: t("pr.rowStarts"), to: `${shortDate(start)} ${new Date(start).toISOString().slice(11, 16)} UTC` },
+      { label: t("pr.rowEnds"), to: fmtEnd(s.end) },
+      { label: t("pr.rowPaidBy"), to: look.agent(String(s.agent_id)) },
     ];
-    if (p.next_dates.length > 0) rows.push({ label: "Next payments", to: p.next_dates.map(shortDate).join(" · ") });
+    if (p.next_dates.length > 0) rows.push({ label: t("pr.rowNext"), to: p.next_dates.map(shortDate).join(" · ") });
     return rows;
   };
   switch (p.type) {
     case "AddRecipient": {
       const r = a.recipient as Record<string, unknown>;
       return [
-        { label: "Name", to: String(r.label) },
-        { label: "Chain", to: String(r.destination_chain) },
-        { label: "Address", to: String(r.destination_address) },
+        { label: t("pr.rowName"), to: String(r.label) },
+        { label: t("pr.rowChain"), to: String(r.destination_chain) },
+        { label: t("pr.rowAddress"), to: String(r.destination_address) },
       ];
     }
     case "AddSchedule":
       return scheduleRows();
     case "UpdateSchedule":
-      return [{ label: "Schedule", to: `#${String(a.schedule_id)}` }, ...scheduleRows()];
+      return [{ label: t("pr.rowSchedule"), to: `#${String(a.schedule_id)}` }, ...scheduleRows()];
     case "PauseSchedule":
     case "EndSchedule":
-      return [{ label: "Schedule", to: `#${String(a.schedule_id)}` }];
+      return [{ label: t("pr.rowSchedule"), to: `#${String(a.schedule_id)}` }];
     case "UpdateMandate":
-      return p.diff.length > 0 ? p.diff.map((d) => ({ label: d.label, from: d.from, to: d.to })) : [{ label: "Agent", to: look.agent(String(a.agent_id)) }];
+      return p.diff.length > 0 ? p.diff.map((d) => ({ label: d.label, from: d.from, to: d.to })) : [{ label: t("pr.rowAgent"), to: look.agent(String(a.agent_id)) }];
     case "PauseAgent":
     case "ResumeAgent":
-      return [{ label: "Agent", to: look.agent(String(a.agent_id)) }];
+      return [{ label: t("pr.rowAgent"), to: look.agent(String(a.agent_id)) }];
     case "PauseVault":
-      return [{ label: "Effect", to: "No agent can pay until you resume" }];
+      return [{ label: t("pr.rowEffect"), to: t("pr.effectPause") }];
     case "ResumeVault":
-      return [{ label: "Effect", to: "Agents can pay again" }];
+      return [{ label: t("pr.rowEffect"), to: t("pr.effectResume") }];
   }
 }

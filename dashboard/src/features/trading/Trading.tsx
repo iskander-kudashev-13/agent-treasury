@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { useState } from "react";
 import { Callout, Card, EmptyState, Pill, Skeleton } from "@/kit";
 import { QueryErrors } from "@/features/layout/QueryErrors";
@@ -14,6 +15,7 @@ import { useAccountTrust, useHlApprovedAgents, useOwnerDetails, useTradingStatus
 
 /** `/trading`: set up, approve the bot's wallet, see status and rules, stop. Calm and linear (docs/research: one-screen setup). */
 export function Trading() {
+  const t = useT();
   const agents = useAgents();
   const { status, loading, error, refresh } = useTradingStatus();
   const details = useOwnerDetails();
@@ -31,28 +33,28 @@ export function Trading() {
 
   return (
     <div className="flex flex-col gap-4">
-      <QueryErrors sources={[{ label: "agents", error: agents.error, refresh: agents.refresh }]} />
+      <QueryErrors sources={[{ label: t("src.agents"), error: agents.error, refresh: agents.refresh }]} />
 
       {showSetup && <SetupCard created={recoveredNow ? recovered : null} onCreated={() => setCreating(true)} onDone={() => { setCreating(false); setDismissed(true); }} />}
 
       {WORKER_URL === "" ? (
-        <EmptyState title="Worker not configured">Set VITE_WORKER_URL so the dashboard can reach the trading agent.</EmptyState>
+        <EmptyState title={t("trading.page.workerNotConfigured")}>{t("trading.page.setWorkerUrl")}</EmptyState>
       ) : loading ? (
         <Card className="flex flex-col gap-3">
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-24 w-full" />
         </Card>
       ) : error ? (
-        <Callout accent="danger" action={<button type="button" className="cursor-pointer text-sm underline" onClick={() => void refresh()}>Retry</button>}>
-          Couldn&apos;t reach the trading agent. {error}
+        <Callout accent="danger" action={<button type="button" className="cursor-pointer text-sm underline" onClick={() => void refresh()}>{t("common.retry")}</button>}>
+          {t("trading.page.cantReach", { error })}
         </Callout>
       ) : status && !status.enabled ? (
         <Card className="flex flex-col gap-2">
           <h2 className="m-0 flex items-center gap-2 text-[15px] font-semibold">
-            Trading worker <Pill>off</Pill>
+            {t("trading.page.workerOff")} <Pill>{t("trading.page.off")}</Pill>
           </h2>
           <p className="m-0 text-sm text-ink-secondary">
-            The worker has trading switched off. Set <span className="mono">TRADING_ENABLED=true</span> in its <span className="mono">.env</span> (with the agent credentials from the setup above) and restart it.
+            {rich("trading.page.workerOffBody", { flag: <span className="mono">TRADING_ENABLED=true</span>, env: <span className="mono">.env</span> })}
           </p>
         </Card>
       ) : live ? (
@@ -65,10 +67,10 @@ export function Trading() {
             logLoading={details.loading}
             logHint={
               details.signedIn ? (
-                "No decisions yet."
+                t("trading.page.noDecisions")
               ) : (
                 <button type="button" className="cursor-pointer underline" disabled={details.signingIn} onClick={() => void details.signIn()}>
-                  {details.signingIn ? "Confirm in wallet…" : "Sign in to see the bot's decisions"}
+                  {details.signingIn ? t("common.confirmInWallet") : t("trading.page.signInDecisions")}
                 </button>
               )
             }

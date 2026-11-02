@@ -1,5 +1,7 @@
 // AI assistant pieces: proposal card, batch bar, suggestion chip, typing indicator. DESIGN_SYSTEM.md §4, UI_UPDATES §6.
+import { useT } from "@/i18n";
 import type { ReactNode } from "react";
+import type { MessageKey } from "@/i18n";
 import { AlertTriangle, Check, ChevronRight, Sparkles } from "./icons";
 import { Button, cx } from "./primitives";
 
@@ -11,7 +13,7 @@ const STATUS_STYLE: Record<ProposalStatus, string> = {
   queued: "border-ai-active-line bg-ai-active text-ai-text",
   signed: "border-ok/50 bg-ok-tint text-ok",
 };
-const STATUS_LABEL: Record<ProposalStatus, string> = { draft: "draft", queued: "Queued", signed: "Signed" };
+const STATUS_LABEL: Record<ProposalStatus, MessageKey> = { draft: "kit.propDraft", queued: "kit.propQueued", signed: "kit.propSigned" };
 
 /**
  * Structured change the assistant prepared. Nothing is sent until the owner signs.
@@ -34,13 +36,14 @@ export function ProposalCard({
   danger?: boolean;
   actions?: ReactNode;
 }) {
+  const t = useT();
   return (
     <article className={cx("card-in flex flex-col gap-3 rounded-card border bg-surface p-4", danger ? "border-danger/60" : "border-line", status === "signed" && "just-signed")}>
       <header className="flex items-center gap-2">
         <h3 className="m-0 flex-1 text-sm font-semibold">{title}</h3>
         <span className={cx("inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px]", STATUS_STYLE[status])}>
           {status === "signed" && <Check size={11} strokeWidth={3} />}
-          {STATUS_LABEL[status]}
+          {t(STATUS_LABEL[status])}
         </span>
       </header>
       <dl className="m-0 flex flex-col gap-1.5">
@@ -74,18 +77,19 @@ export function ProposalCard({
 
 /** Default action row for a draft proposal. */
 export function ProposalActions({ onEdit, onDiscard, onQueue }: { onEdit?: () => void; onDiscard: () => void; onQueue: () => void }) {
+  const t = useT();
   return (
     <>
       {onEdit && (
         <Button size="sm" variant="ghost" onClick={onEdit}>
-          Edit in form
+          {t("kit.editInForm")}
         </Button>
       )}
       <Button size="sm" variant="secondary" onClick={onDiscard}>
-        Discard
+        {t("kit.discard")}
       </Button>
       <Button size="sm" variant="primary" icon={<Check size={14} />} onClick={onQueue}>
-        Add to batch
+        {t("kit.addToBatch")}
       </Button>
     </>
   );
@@ -93,15 +97,16 @@ export function ProposalActions({ onEdit, onDiscard, onQueue }: { onEdit?: () =>
 
 /** Slides up above the chat input when ≥ 1 change is queued. */
 export function BatchBar({ count, onReview }: { count: number; onReview: () => void }) {
+  const t = useT();
   if (count <= 0) return null;
   return (
     <div className="slide-up flex items-center gap-3 rounded-card border border-ai-active-line bg-ai-active px-3 py-2.5">
       <span className="mono flex size-6 items-center justify-center rounded-full bg-ok text-xs font-semibold text-ok-on">{count}</span>
       <span className="flex-1 text-[13px] text-ai-text">
-        {count} {count === 1 ? "change" : "changes"} ready to sign
+        {t("kit.changesReady", { count })}
       </span>
       <Button size="sm" variant="primary" onClick={onReview}>
-        Review &amp; sign <ChevronRight size={14} />
+        {t("kit.reviewSign")} <ChevronRight size={14} />
       </Button>
     </div>
   );
@@ -121,8 +126,9 @@ export function SuggestionChip({ children, onClick, active }: { children: ReactN
 }
 
 export function TypingDots() {
+  const t = useT();
   return (
-    <span role="status" aria-label="Assistant is thinking" className="inline-flex items-center gap-1 py-1">
+    <span role="status" aria-label={t("kit.thinking")} className="inline-flex items-center gap-1 py-1">
       {[0, 1, 2].map((i) => (
         <span key={i} className="typing-dot size-1.5 rounded-full bg-ai-text" style={{ animationDelay: `${i * 0.15}s` }} />
       ))}
@@ -130,7 +136,10 @@ export function TypingDots() {
   );
 }
 
-export const AssistantFooter = () => <p className="m-0 text-center text-[11px] text-ink-subtle">The assistant only prepares changes. Nothing happens until you sign.</p>;
+export function AssistantFooter() {
+  const t = useT();
+  return <p className="m-0 text-center text-[11px] text-ink-subtle">{t("kit.assistantFooter")}</p>;
+}
 
 /** Chat bubble. `streaming` shows the blinking block caret. */
 export function Message({ from, children, streaming }: { from: "user" | "assistant"; children: ReactNode; streaming?: boolean }) {

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { view } from "@/lib/rpc";
@@ -20,35 +21,36 @@ import { payoutLabel, payoutSource } from "@/lib/payoutView";
 const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19);
 
 function CreditRefund({ p }: { p: Payout }) {
+  const t = useT();
   const [amt, setAmt] = useState("");
   const { raw, err } = useMemo((): { raw: string | null; err: string | null } => {
     if (!amt.trim()) return { raw: null, err: null };
     try {
       const r = parseUsdc(amt);
-      if (BigInt(r) === 0n || BigInt(r) > BigInt(p.amount)) return { raw: null, err: "Amount must be in (0, payout amount]" };
+      if (BigInt(r) === 0n || BigInt(r) > BigInt(p.amount)) return { raw: null, err: t("pd.amountRange") };
       return { raw: r, err: null };
     } catch (e) {
       return { raw: null, err: e instanceof Error ? e.message : String(e) };
     }
-  }, [amt, p.amount]);
+  }, [amt, p.amount, t]);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Input className="!h-8 !w-44" mono inputMode="decimal" placeholder={`full (${formatUsdc(p.amount)})`} value={amt} onChange={(e) => setAmt(e.target.value)} aria-label="partial refund amount" />
+        <Input className="!h-8 !w-44" mono inputMode="decimal" placeholder={t("pd.full", { amount: formatUsdc(p.amount) })} value={amt} onChange={(e) => setAmt(e.target.value)} aria-label={t("pd.partialAria")} />
         {err && <span className="text-xs text-danger-text">{err}</span>}
       </div>
       <TwoPhaseAction
         key={`${p.id}-${raw ?? "full"}`}
         method="credit_refund"
         args={{ payout_id: p.id, ...(raw ? { amount: raw } : {}) }}
-        title="Credit refund"
-        startLabel="Credit refund (step 1 of 2)"
-        confirmLabel="Confirm credit"
+        title={t("pd.creditRefund")}
+        startLabel={t("pd.creditRefundStart")}
+        confirmLabel={t("surplus.confirm")}
         disabled={err !== null}
         snapshot={async () => ({ refundCredited: (await view<Payout | null>("get_payout", { payout_id: p.id }))?.refund_credited === true })}
         isCredited={(b, a) => credited("refund", b as { refundCredited?: boolean }, a as { refundCredited?: boolean })}
-        doneText="Refund credited back to the vault balance."
-        notCreditedText="The refund has not been received by the vault yet (or only part of it). Nothing was credited. Wait for the tokens to arrive, then start over."
+        doneText={t("pd.refundDone")}
+        notCreditedText={t("pd.refundNone")}
       />
     </div>
   );
@@ -56,6 +58,7 @@ function CreditRefund({ p }: { p: Payout }) {
 
 /** `/payouts/:id` body: header, timeline (PayoutDetail.dc.html), facts, owner actions. */
 export function PayoutDetail({ payout: p, recipients, agents }: { payout: Payout; recipients: RecipientView[]; agents: AgentView[] }) {
+  const t = useT();
   const { canAct, busy, act } = useOwner();
   const [now] = useState(() => Date.now());
   const [dlg, setDlg] = useState<"approve" | "reject" | null>(null);
@@ -93,12 +96,12 @@ export function PayoutDetail({ payout: p, recipients, agents }: { payout: Payout
   return (
     <div className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
       <Link to="/payouts" className="text-[13px]">
-        ← Back to payouts
+        {t("page.backToPayouts")}
       </Link>
       <Card padding="none" className={p.status === "Confirmed" ? "shadow-[0_0_0_1px_#2ECC71,0_0_22px_rgba(46,204,113,0.35)]" : ""}>
         <div className="flex flex-col gap-2.5 border-b border-line px-5 py-5">
           <div className="flex items-center gap-2 text-xs text-ink-muted">
-            <span>Payout</span>
+            <span>{t("pd.payout")}</span>
             <span className="mono">#{p.id}</span>
             <SourceTag source={payoutSource(p)} />
           </div>
@@ -121,19 +124,19 @@ export function PayoutDetail({ payout: p, recipients, agents }: { payout: Payout
       </Card>
 
       <Card className="flex flex-col gap-3">
-        <h3 className="m-0 text-[15px] font-semibold">Details</h3>
+        <h3 className="m-0 text-[15px] font-semibold">{t("pd.details")}</h3>
         <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
-          <dt className="text-ink-muted">Requested by</dt>
+          <dt className="text-ink-muted">{t("po.requestedBy")}</dt>
           <dd className="m-0">
             <Link to={`/agents/${encodeURIComponent(p.agent_id)}`}>{agentLabel(agents, p.agent_id)}</Link>
           </dd>
-          <dt className="text-ink-muted">Destination</dt>
+          <dt className="text-ink-muted">{t("po.destination")}</dt>
           <dd className="m-0 break-all">
             <span className="mono text-xs">{p.address}</span>
           </dd>
           {p.deposit_address && (
             <>
-              <dt className="text-ink-muted">Deposit address</dt>
+              <dt className="text-ink-muted">{t("po.depositAddress")}</dt>
               <dd className="m-0">
                 <Hash value={p.deposit_address} />
               </dd>
@@ -141,16 +144,16 @@ export function PayoutDetail({ payout: p, recipients, agents }: { payout: Payout
           )}
           {p.deposit_expires_at_ms && (
             <>
-              <dt className="text-ink-muted">Deposit valid until</dt>
+              <dt className="text-ink-muted">{t("pd.depositValidUntil")}</dt>
               <dd className={`m-0 ${expired ? "text-danger-text" : ""}`}>
                 {formatTime(p.deposit_expires_at_ms)}
-                {expired && p.status === "PendingApproval" ? " (expired: reject it)" : ""}
+                {expired && p.status === "PendingApproval" ? t("pd.expiredRejectShort") : ""}
               </dd>
             </>
           )}
           {p.tx_hash && (
             <>
-              <dt className="text-ink-muted">Destination tx</dt>
+              <dt className="text-ink-muted">{t("pd.destTx")}</dt>
               <dd className="m-0">
                 <Hash value={p.tx_hash} />
               </dd>
@@ -158,43 +161,43 @@ export function PayoutDetail({ payout: p, recipients, agents }: { payout: Payout
           )}
           {p.memo && (
             <>
-              <dt className="text-ink-muted">Memo</dt>
+              <dt className="text-ink-muted">{t("po.memo")}</dt>
               <dd className="m-0 break-words whitespace-pre-wrap">{p.memo}</dd>
             </>
           )}
-          <dt className="text-ink-muted">Created</dt>
+          <dt className="text-ink-muted">{t("pd.created")}</dt>
           <dd className="m-0">{formatTime(p.created_at_ms)}</dd>
-          <dt className="text-ink-muted">Updated</dt>
+          <dt className="text-ink-muted">{t("pd.updated")}</dt>
           <dd className="m-0">{formatTime(p.updated_at_ms)}</dd>
         </dl>
       </Card>
 
       {(p.status === "PendingApproval" || canCreditRefund(p) || isStuckTransfer(p, now)) && (
         <Card className="flex flex-col gap-3">
-          <h3 className="m-0 text-[15px] font-semibold">Owner actions</h3>
+          <h3 className="m-0 text-[15px] font-semibold">{t("pd.ownerActions")}</h3>
           {p.status === "PendingApproval" && (
             <div className="flex gap-2">
-              <Button onClick={() => setDlg("reject")}>Reject</Button>
+              <Button onClick={() => setDlg("reject")}>{t("po.reject")}</Button>
               <Button variant="approve" onClick={() => setDlg("approve")}>
-                Approve
+                {t("po.approve")}
               </Button>
             </div>
           )}
           {canCreditRefund(p) && <CreditRefund p={p} />}
           {isStuckTransfer(p, now) && (
             <div className="flex flex-col gap-2">
-              <p className="m-0 text-[13px] text-ink-muted">The transfer has been in flight for over an hour and its callback never ran. Check the deposit address on a NEAR explorer, then settle it.</p>
+              <p className="m-0 text-[13px] text-ink-muted">{t("pd.stuck")}</p>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" disabled={!canAct || busy} onClick={() => void act("force_settle_transfer", { payout_id: p.id, sent: true })} title="1 yocto: tokens reached the deposit address">
-                  Tokens left, mark Sent
+                <Button size="sm" disabled={!canAct || busy} onClick={() => void act("force_settle_transfer", { payout_id: p.id, sent: true })} title={t("pd.tokensLeftTitle")}>
+                  {t("pd.tokensLeft")}
                 </Button>
-                <Button size="sm" variant="danger" disabled={!canAct || busy} onClick={() => void act("force_settle_transfer", { payout_id: p.id, sent: false })} title="1 yocto: tokens did not leave">
-                  Release, mark Failed
+                <Button size="sm" variant="danger" disabled={!canAct || busy} onClick={() => void act("force_settle_transfer", { payout_id: p.id, sent: false })} title={t("pd.releaseTitle")}>
+                  {t("pd.release")}
                 </Button>
               </div>
             </div>
           )}
-          {!canAct && <p className="m-0 text-xs text-ink-subtle">Only the vault owner can use these actions.</p>}
+          {!canAct && <p className="m-0 text-xs text-ink-subtle">{t("pd.onlyOwner")}</p>}
         </Card>
       )}
       {dlg === "approve" && <ApproveModal payout={p} label={label} agentName={agentLabel(agents, p.agent_id)} onClose={() => setDlg(null)} />}

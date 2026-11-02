@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { Callout, Hash } from "@/kit";
 import type { AccountTrust } from "@/lib/tradingView";
 
@@ -6,18 +7,18 @@ import type { AccountTrust } from "@/lib/tradingView";
  * Trading page; rules cannot be confirmed while it is up. Renders nothing when the chain agrees.
  */
 export function AccountTrustCallout({ trust }: { trust: AccountTrust | null }) {
+  const t = useT();
   if (!trust || trust.kind === "ok") return null;
   if (trust.kind === "mismatch") {
     return (
       <Callout accent="danger">
-        <strong>The worker reports a different Hyperliquid account than your vault pays.</strong> Do not approve any API wallet and do not confirm rules. Check{" "}
-        <span className="mono">VITE_WORKER_URL</span> and the worker&apos;s <span className="mono">HL_MASTER_ADDRESS</span>.
+        <strong>{t("trading.trustCallout.mismatchBold")}</strong> {rich("trading.trustCallout.mismatchTail", { url: <span className="mono">VITE_WORKER_URL</span>, env: <span className="mono">HL_MASTER_ADDRESS</span> })}
         <span className="mt-1.5 flex flex-col gap-1 text-xs">
           <span>
-            Worker says: <Hash value={trust.reported} short={false} copy={false} className="align-bottom" />
+            {rich("trading.trustCallout.workerSays", { account: <Hash value={trust.reported} short={false} copy={false} className="align-bottom" /> })}
           </span>
           <span>
-            Vault pays: <Hash value={trust.onchain} short={false} copy={false} className="align-bottom" />
+            {rich("trading.trustCallout.vaultPays", { account: <Hash value={trust.onchain} short={false} copy={false} className="align-bottom" /> })}
           </span>
         </span>
       </Callout>
@@ -25,7 +26,7 @@ export function AccountTrustCallout({ trust }: { trust: AccountTrust | null }) {
   }
   return (
     <Callout accent="warn">
-      {trust.reason} Rules cannot be confirmed until it can.
+      {t("trading.trustCallout.unverified", { reason: trust.reason })}
     </Callout>
   );
 }

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMemo, useState } from "react";
 import { Button, Callout, Card, CardHeader, Modal, SigningHint } from "@/kit";
 import { recipientNames } from "@/lib/agentView";
@@ -10,6 +11,7 @@ import { useAgentTx } from "./useAgentTx";
 
 /** Mandate sentence + editor. Save shows a diff and signs update_mandate (1 yocto). */
 export function AgentMandateCard({ agent }: { agent: AgentView }) {
+  const t = useT();
   const { canAct, busy, call } = useAgentTx();
   const recipients = useRecipients();
   const [editing, setEditing] = useState(false);
@@ -33,12 +35,12 @@ export function AgentMandateCard({ agent }: { agent: AgentView }) {
     <Card aria-labelledby="mandate-title" className="flex flex-col gap-4" decorated>
       <CardHeader
         id="mandate-title"
-        title="Mandate"
+        title={t("ag.mandate")}
         actions={
           !revoked &&
           !editing && (
-            <Button size="sm" disabled={!canAct} title={canAct ? undefined : "Only the vault owner can edit"} onClick={start}>
-              Edit mandate
+            <Button size="sm" disabled={!canAct} title={canAct ? undefined : t("ag.onlyOwnerEdit")} onClick={start}>
+              {t("ag.editMandate")}
             </Button>
           )
         }
@@ -48,13 +50,13 @@ export function AgentMandateCard({ agent }: { agent: AgentView }) {
         <div className="flex flex-col gap-4 border-t border-line pt-4">
           <MandateEditor form={form} onChange={setForm} result={result} recipients={recipients.data} disabled={busy} />
           <MandatePreview result={result} recipients={recipients.data} nowMs={nowMs} />
-          {lowersBelowSpend && <Callout accent="info">The new daily limit is below what was already spent today. No more payments today.</Callout>}
+          {lowersBelowSpend && <Callout accent="info">{t("ag.lowerThanSpent")}</Callout>}
           <div className="flex flex-wrap justify-end gap-2">
             <Button onClick={() => setEditing(false)} disabled={busy}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" disabled={!canAct || !result.mandate || diff.length === 0} onClick={() => setConfirm(true)}>
-              Review changes
+              {t("ag.reviewChanges")}
             </Button>
           </div>
         </div>
@@ -62,11 +64,11 @@ export function AgentMandateCard({ agent }: { agent: AgentView }) {
       <Modal
         open={confirm}
         onClose={() => setConfirm(false)}
-        title="Update mandate"
+        title={t("ag.updateMandate")}
         footer={
           <>
             {busy && <SigningHint />}
-            <Button onClick={() => setConfirm(false)}>Back</Button>
+            <Button onClick={() => setConfirm(false)}>{t("common.back")}</Button>
             <Button
               variant="primary"
               disabled={busy || !result.mandate}
@@ -79,7 +81,7 @@ export function AgentMandateCard({ agent }: { agent: AgentView }) {
                 })
               }
             >
-              Sign in wallet
+              {t("ag.signInWallet")}
             </Button>
           </>
         }
@@ -91,7 +93,7 @@ export function AgentMandateCard({ agent }: { agent: AgentView }) {
             </li>
           ))}
         </ul>
-        <p className="mb-0 text-xs text-ink-muted">Today&apos;s spending is kept. Takes effect immediately.</p>
+        <p className="mb-0 text-xs text-ink-muted">{t("ag.spendingKept")}</p>
       </Modal>
     </Card>
   );

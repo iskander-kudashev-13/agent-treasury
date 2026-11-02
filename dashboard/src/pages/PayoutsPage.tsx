@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueryErrors } from "@/features/layout/QueryErrors";
@@ -11,6 +12,7 @@ const SOURCES: SourceFilter[] = ["all", "scheduled", "on-demand"];
 
 /** `/payouts` — full history with status / agent / source filters (also via `?status=&agent=&source=`). */
 export function PayoutsPage() {
+  const t = useT();
   const [limit, setLimit] = useState(PAYOUT_PAGE);
   const [params, setParams] = useSearchParams();
   const payouts = usePayouts(limit);
@@ -35,22 +37,22 @@ export function PayoutsPage() {
   const shown = filterPayouts(payouts.data.list, filter);
   const more = payouts.data.list.length < payouts.data.total;
   return (
-    <Page title="Payouts">
-      <QueryErrors sources={[{ label: "payouts", ...payouts }, { label: "recipients", ...recipients }, { label: "agents", ...agents }]} />
+    <Page title={t("nav.payouts")}>
+      <QueryErrors sources={[{ label: t("src.payouts"), ...payouts }, { label: t("src.recipients"), ...recipients }, { label: t("src.agents"), ...agents }]} />
       <PayoutList
-        title={`Payouts (${isFiltered(filter) ? `${shown.length} of ${payouts.data.total}` : payouts.data.total})`}
+        title={isFiltered(filter) ? t("page.payoutsCountFiltered", { shown: shown.length, total: payouts.data.total }) : t("page.payoutsCount", { n: payouts.data.total })}
         payouts={shown}
         total={payouts.data.total}
         recipients={recipients.data}
         agents={agents.data}
         headerExtra={<PayoutFilters value={filter} onChange={setFilter} agents={agents.data} />}
-        emptyHint={isFiltered(filter) ? (more ? "No loaded payout matches these filters. Load older payouts or change the filters." : "No payout matches these filters.") : undefined}
-        actions={isFiltered(filter) ? <Button size="sm" variant="ghost" onClick={() => setFilter(NO_FILTER)}>Clear filters</Button> : undefined}
+        emptyHint={isFiltered(filter) ? (more ? t("page.noMatchLoaded") : t("page.noMatch")) : undefined}
+        actions={isFiltered(filter) ? <Button size="sm" variant="ghost" onClick={() => setFilter(NO_FILTER)}>{t("page.clearFilters")}</Button> : undefined}
         {...(more ? { onMore: () => setLimit((n) => n + PAYOUT_PAGE) } : {})}
       />
       {isFiltered(filter) && (
         <p className="m-0 text-xs text-ink-subtle">
-          Filters apply to the {payouts.data.list.length} newest of {payouts.data.total} payouts loaded so far.
+          {t("page.filtersApplyTo", { loaded: payouts.data.list.length, total: payouts.data.total })}
         </p>
       )}
     </Page>

@@ -1,4 +1,5 @@
 // Mandate editor model: form strings <-> contract `Mandate`, validation mirroring `validate_mandate` (contract/src/agent.rs), diff for update_mandate.
+import { t } from "@/i18n";
 import { CHAIN_IDS, CHAIN_OPTIONS, chainName } from "../kit/tokens";
 import { formatUsdc, parseUsdc, usdcGrouped } from "./amount";
 import { normalizeAddress } from "./address";
@@ -81,12 +82,12 @@ export interface ValidateCtx {
 }
 
 function amount(s: string, what: string): { raw: string } | { error: string } {
-  if (s.trim() === "") return { error: `${what} is required` };
+  if (s.trim() === "") return { error: t("mf.required", { what }) };
   try {
     const raw = parseUsdc(s.replace(/[\s,]/g, ""));
     return { raw };
   } catch (e) {
-    return { error: e instanceof Error && /decimal/.test(e.message) ? "At most 6 decimal places" : `${what} must be a number` };
+    return { error: e instanceof Error && e.message === t("amount.maxDecimals", { n: 6 }) ? t("amount.maxDecimals", { n: 6 }) : t("mf.mustBeNumber", { what }) };
   }
 }
 
@@ -96,10 +97,10 @@ function expiryOf(f: MandateForm, nowMs: number): { at: string | null } | { erro
   if (f.expiry === "7d") return { at: String(nowMs + 7 * DAY_MS) };
   if (f.expiry === "30d") return { at: String(nowMs + 30 * DAY_MS) };
   if (f.expiry === "keep") return { at: f.keptExpiry };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.customDate)) return { error: "Pick a date" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.customDate)) return { error: t("mf.pickDate") };
   const at = Date.parse(`${f.customDate}T23:59:59Z`);
-  if (!Number.isFinite(at)) return { error: "Pick a valid date" };
-  if (at <= nowMs) return { error: "The expiry date must be in the future" };
+  if (!Number.isFinite(at)) return { error: t("mf.pickValidDate") };
+  if (at <= nowMs) return { error: t("mf.expiryFuture") };
   return { at: String(at) };
 }
 
@@ -108,55 +109,55 @@ export function validateMandateForm(f: MandateForm, ctx: ValidateCtx): FormResul
   const errors: FormErrors = {};
   const warnings: string[] = [];
 
-  const daily = amount(f.daily, "Daily limit");
-  const perTx = amount(f.perTx, "Per payment limit");
-  const threshold = amount(f.threshold, "Approval threshold");
+  const daily = amount(f.daily, t("mf.daily"));
+  const perTx = amount(f.perTx, t("mf.perTx"));
+  const threshold = amount(f.threshold, t("mf.threshold"));
   if ("error" in daily) errors.daily = daily.error;
-  else if (BigInt(daily.raw) === 0n) errors.daily = "Daily limit must be above 0";
+  else if (BigInt(daily.raw) === 0n) errors.daily = t("mf.mustBePositive", { what: t("mf.daily") });
   if ("error" in perTx) errors.perTx = perTx.error;
-  else if (BigInt(perTx.raw) === 0n) errors.perTx = "Per payment limit must be above 0";
+  else if (BigInt(perTx.raw) === 0n) errors.perTx = t("mf.mustBePositive", { what: t("mf.perTx") });
   if ("error" in threshold) errors.threshold = threshold.error;
   if (!errors.daily && !errors.perTx && BigInt((perTx as { raw: string }).raw) > BigInt((daily as { raw: string }).raw)) {
-    errors.perTx = "Per payment limit can't be higher than the daily limit";
+    errors.perTx = t("mf.perTxOverDaily");
   }
   if (!errors.perTx && !errors.threshold && BigInt((threshold as { raw: string }).raw) > BigInt((perTx as { raw: string }).raw)) {
-    warnings.push("The approval threshold is above the per payment limit, so no payment will ever wait for your approval.");
+    warnings.push(t("mf.warnThreshold"));
   }
 
   const maxPerDay = Number(f.maxPerDay);
-  if (f.maxPerDay.trim() === "" || !Number.isInteger(maxPerDay)) errors.maxPerDay = "Enter a whole number";
-  else if (maxPerDay < 1) errors.maxPerDay = "Payments per day must be at least 1";
-  else if (maxPerDay > U32_MAX) errors.maxPerDay = "That is too many payments per day";
+  if (f.maxPerDay.trim() === "" || !Number.isInteger(maxPerDay)) errors.maxPerDay = t("mf.wholeNumber");
+  else if (maxPerDay < 1) errors.maxPerDay = t("mf.perDayMin");
+  else if (maxPerDay > U32_MAX) errors.maxPerDay = t("mf.perDayMax");
 
-  if (f.chains.length === 0) errors.chains = "Pick at least one chain";
-  else if (f.chains.length > MAX_CHAINS) errors.chains = `At most ${MAX_CHAINS} chains`;
-  else if (f.chains.some((c) => !CHAIN_IDS.includes(c))) errors.chains = "Unknown chain id (use base, eth, arb, sol or near)";
+  if (f.chains.length === 0) errors.chains = t("mf.pickChain");
+  else if (f.chains.length > MAX_CHAINS) errors.chains = t("mf.maxChains", { n: MAX_CHAINS });
+  else if (f.chains.some((c) => !CHAIN_IDS.includes(c))) errors.chains = t("mf.unknownChain");
 
   let allowlist: Mandate["allowlist"] = [];
   let recipients: number[] = [];
   if (f.mode === "Fixed") {
     recipients = [...new Set(f.recipients)];
-    if (recipients.length === 0) errors.recipients = "Pick at least one recipient. A fixed agent pays only its scheduled payments.";
-    else if (recipients.length > MAX_RECIPIENTS) errors.recipients = `At most ${MAX_RECIPIENTS} recipients`;
-    else if (recipients.some((id) => !ctx.knownRecipients.has(id))) errors.recipients = "One of the recipients doesn't exist any more";
+    if (recipients.length === 0) errors.recipients = t("mf.pickRecipient");
+    else if (recipients.length > MAX_RECIPIENTS) errors.recipients = t("mf.maxRecipients", { n: MAX_RECIPIENTS });
+    else if (recipients.some((id) => !ctx.knownRecipients.has(id))) errors.recipients = t("mf.recipientGone");
   } else if (f.mode === "Allowlist") {
-    if (f.allowlist.length === 0) errors.allowlist = "Add at least one address";
-    else if (f.allowlist.length > MAX_ALLOWLIST) errors.allowlist = `At most ${MAX_ALLOWLIST} addresses`;
+    if (f.allowlist.length === 0) errors.allowlist = t("mf.addAddress1");
+    else if (f.allowlist.length > MAX_ALLOWLIST) errors.allowlist = t("mf.maxAddresses", { n: MAX_ALLOWLIST });
     const rows: Record<number, string> = {};
     const out: Mandate["allowlist"] = [];
     const seen = new Set<string>();
     f.allowlist.forEach((row, i) => {
       const label = row.label.trim();
       try {
-        if (!CHAIN_IDS.includes(row.chain)) throw new Error("Pick a chain");
-        if (row.address.trim() === "") throw new Error("Enter an address");
+        if (!CHAIN_IDS.includes(row.chain)) throw new Error(t("mf.rowPickChain"));
+        if (row.address.trim() === "") throw new Error(t("mf.rowEnterAddress"));
         const address = normalizeAddress(row.chain, row.address);
-        if (address.length > MAX_ADDRESS_LEN) throw new Error("Address is too long");
-        if (label.length > MAX_LABEL_LEN) throw new Error(`Label is longer than ${MAX_LABEL_LEN} characters`);
+        if (address.length > MAX_ADDRESS_LEN) throw new Error(t("mf.rowAddressLong"));
+        if (label.length > MAX_LABEL_LEN) throw new Error(t("mf.rowLabelLong", { n: MAX_LABEL_LEN }));
         const key = `${row.chain}:${address}`;
-        if (seen.has(key)) throw new Error("Duplicate address");
+        if (seen.has(key)) throw new Error(t("mf.rowDuplicate"));
         seen.add(key);
-        if (!f.chains.includes(row.chain)) warnings.push(`${address.slice(0, 10)}… is on ${chainName(row.chain)}, which isn't one of the selected chains, so it can never be paid.`);
+        if (!f.chains.includes(row.chain)) warnings.push(t("mf.warnOffChain", { address: address.slice(0, 10), chain: chainName(row.chain) }));
         out.push({ chain: row.chain, address, label: label === "" ? null : label });
       } catch (e) {
         rows[i] = e instanceof Error ? e.message : String(e);
@@ -165,7 +166,7 @@ export function validateMandateForm(f: MandateForm, ctx: ValidateCtx): FormResul
     if (Object.keys(rows).length > 0) errors.rows = rows;
     allowlist = out;
   } else if (f.chains.length > 0) {
-    warnings.push("The agent can pay anyone on the selected chains, within the limits above.");
+    warnings.push(t("mf.warnOpen"));
   }
 
   const exp = expiryOf(f, ctx.nowMs);
@@ -209,38 +210,38 @@ export function mandateToForm(m: Mandate): MandateForm {
 }
 
 const usdc = (raw: string): string => `${usdcGrouped(raw, 0)} USDC`;
-const MODE_LABEL: Record<RecipientsMode, string> = { Fixed: "only its scheduled payments", Allowlist: "only approved addresses", Open: "any address" };
+const modeLabel = (m: RecipientsMode): string => t(`m.mode.${m}`);
 const setKey = (xs: Mandate["allowlist"]): Set<string> => new Set(xs.map((d) => `${d.chain}:${d.address}`));
 
 /** Human lines for the update_mandate confirmation: "Daily limit 200 -> 500 USDC". Empty when nothing changed. */
 export function diffMandate(a: Mandate, b: Mandate, recipientName: (id: number) => string = (id) => `#${id}`): string[] {
   const out: string[] = [];
-  const amt = (label: string, x: string, y: string) => x !== y && out.push(`${label} ${usdcGrouped(x, 0)} → ${usdc(y)}`);
-  amt("Daily limit", a.daily_limit, b.daily_limit);
-  amt("Per payment limit", a.per_tx_limit, b.per_tx_limit);
-  amt("Approval threshold", a.approval_threshold, b.approval_threshold);
-  if (a.max_payments_per_day !== b.max_payments_per_day) out.push(`Payments per day ${a.max_payments_per_day} → ${b.max_payments_per_day}`);
+  const amt = (label: string, x: string, y: string) => x !== y && out.push(t("diff.change", { label, from: usdcGrouped(x, 0), to: usdc(y) }));
+  amt(t("mf.daily"), a.daily_limit, b.daily_limit);
+  amt(t("mf.perTx"), a.per_tx_limit, b.per_tx_limit);
+  amt(t("mf.threshold"), a.approval_threshold, b.approval_threshold);
+  if (a.max_payments_per_day !== b.max_payments_per_day) out.push(t("diff.perDay", { from: a.max_payments_per_day, to: b.max_payments_per_day }));
   const ca = [...a.allowed_chains].sort().join(",");
   const cb = [...b.allowed_chains].sort().join(",");
   if (ca !== cb) {
     const added = b.allowed_chains.filter((c) => !a.allowed_chains.includes(c)).map(chainName);
     const removed = a.allowed_chains.filter((c) => !b.allowed_chains.includes(c)).map(chainName);
-    if (added.length) out.push(`Chains added: ${added.join(", ")}`);
-    if (removed.length) out.push(`Chains removed: ${removed.join(", ")}`);
+    if (added.length) out.push(t("diff.chainsAdded", { list: added.join(", ") }));
+    if (removed.length) out.push(t("diff.chainsRemoved", { list: removed.join(", ") }));
   }
-  if (a.recipients_mode !== b.recipients_mode) out.push(`Can pay ${MODE_LABEL[a.recipients_mode]} → ${MODE_LABEL[b.recipients_mode]}`);
+  if (a.recipients_mode !== b.recipients_mode) out.push(t("diff.canPay", { from: modeLabel(a.recipients_mode), to: modeLabel(b.recipients_mode) }));
   const ra = new Set(a.recipients);
   const rb = new Set(b.recipients);
   const rAdd = b.recipients.filter((r) => !ra.has(r)).map(recipientName);
   const rDel = a.recipients.filter((r) => !rb.has(r)).map(recipientName);
-  if (rAdd.length) out.push(`Recipients added: ${rAdd.join(", ")}`);
-  if (rDel.length) out.push(`Recipients removed: ${rDel.join(", ")}`);
+  if (rAdd.length) out.push(t("diff.recAdded", { list: rAdd.join(", ") }));
+  if (rDel.length) out.push(t("diff.recRemoved", { list: rDel.join(", ") }));
   const la = setKey(a.allowlist);
   const lb = setKey(b.allowlist);
   const lAdd = [...lb].filter((k) => !la.has(k)).length;
   const lDel = [...la].filter((k) => !lb.has(k)).length;
-  if (lAdd) out.push(`${lAdd} address${lAdd === 1 ? "" : "es"} added to the allowlist`);
-  if (lDel) out.push(`${lDel} address${lDel === 1 ? "" : "es"} removed from the allowlist`);
-  if (a.expires_at !== b.expires_at) out.push(`Expires ${a.expires_at ? isoDate(Number(a.expires_at)) : "never"} → ${b.expires_at ? isoDate(Number(b.expires_at)) : "never"}`);
+  if (lAdd) out.push(t("diff.allowAdded", { count: lAdd }));
+  if (lDel) out.push(t("diff.allowRemoved", { count: lDel }));
+  if (a.expires_at !== b.expires_at) out.push(t("diff.expires", { from: a.expires_at ? isoDate(Number(a.expires_at)) : t("common.never"), to: b.expires_at ? isoDate(Number(b.expires_at)) : t("common.never") }));
   return out;
 }

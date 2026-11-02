@@ -34,6 +34,10 @@ Deploy `dist/` to any static host (hash routing: no SPA fallback rewrite needed)
 
 All variables are public (bundled into the browser). Never put secrets here.
 
+## Languages
+
+English (default), Russian and Ukrainian. The header switcher (EN / RU / UK) is remembered in `localStorage`; the first visit follows `navigator.language`. How to add or change a string: `src/i18n/README.md`. Tests run in English.
+
 ## Behavior notes
 
 - Views: `get_contract_info`, `get_policy`, `get_balance`, `get_recipients`, `get_payouts_count` + `get_payouts({from_index, limit})` (newest first, 20 per page), `get_pending_approvals`, `get_agents`, `get_rejections({limit: 50})`.

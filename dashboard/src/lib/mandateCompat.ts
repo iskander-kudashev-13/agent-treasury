@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { usdcGrouped } from "./amount";
 import type { AgentView } from "./types";
 
@@ -29,7 +30,7 @@ export function checkMandateCompat(input: {
   const warnings: CompatIssue[] = [];
   const { agent, recipient } = input;
   if (!agent || agent.status === "Revoked") {
-    errors.push({ code: "AGENT_UNAVAILABLE", message: agent ? `${agent.id} is revoked and can't pay anything` : "Select an agent" });
+    errors.push({ code: "AGENT_UNAVAILABLE", message: agent ? t("mc.revoked", { id: agent.id }) : t("mc.selectAgent") });
     return { errors, warnings };
   }
   const m = agent.mandate;
@@ -39,23 +40,23 @@ export function checkMandateCompat(input: {
   if (m.recipients_mode === "Fixed") allowed = recipient.id !== null && m.recipients.includes(recipient.id);
   else if (m.recipients_mode === "Allowlist") allowed = m.allowlist.some((d) => d.chain === recipient.chain && d.address === recipient.address);
   else allowed = true;
-  if (!allowed) errors.push({ code: "RECIPIENT_NOT_IN_MANDATE", message: `${name} can't pay this recipient (not in its mandate)`, action: `Edit ${name}'s mandate` });
+  if (!allowed) errors.push({ code: "RECIPIENT_NOT_IN_MANDATE", message: t("mc.recipientNotIn", { id: name }), action: t("mc.editMandate", { id: name }) });
 
   if (!m.allowed_chains.includes(recipient.chain)) {
-    errors.push({ code: "CHAIN_NOT_ALLOWED", message: `${name} can't pay on ${recipient.chain} (chain not in its mandate)`, action: `Edit ${name}'s mandate` });
+    errors.push({ code: "CHAIN_NOT_ALLOWED", message: t("mc.chainNotIn", { id: name, chain: recipient.chain }), action: t("mc.editMandate", { id: name }) });
   }
 
   const amount = BigInt(input.amount || "0");
   if (amount > BigInt(m.per_tx_limit)) {
-    errors.push({ code: "ABOVE_PER_TX_LIMIT", message: `Amount exceeds ${name}'s per-payment limit (${usdcGrouped(m.per_tx_limit, 0)})` });
+    errors.push({ code: "ABOVE_PER_TX_LIMIT", message: t("mc.overPerTx", { id: name, limit: usdcGrouped(m.per_tx_limit, 0) }) });
   }
   if (input.minPayment !== undefined && amount < BigInt(input.minPayment)) {
-    errors.push({ code: "BELOW_MIN_PAYMENT", message: `Amount is below the vault's minimum payment (${usdcGrouped(input.minPayment, 0)})` });
+    errors.push({ code: "BELOW_MIN_PAYMENT", message: t("mc.belowMin", { min: usdcGrouped(input.minPayment, 0) }) });
   }
   if (amount > BigInt(m.approval_threshold)) {
     warnings.push({
       code: "ABOVE_APPROVAL_THRESHOLD",
-      message: `Above ${name}'s approval threshold (${usdcGrouped(m.approval_threshold, 0)}): each payment will wait for your approval.`,
+      message: t("mc.aboveThreshold", { id: name, limit: usdcGrouped(m.approval_threshold, 0) }),
     });
   }
   return { errors, warnings };

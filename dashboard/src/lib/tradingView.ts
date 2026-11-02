@@ -1,4 +1,5 @@
 // Pure helpers of the Trading agent page (ADR-0005): setup form -> mandate, state wording, number formatting.
+import { t } from "@/i18n";
 import type { Accent } from "@/kit/tokens";
 import { normalizeAddress } from "./address";
 import { DEFAULT_FORM, validateMandateForm } from "./mandateForm";
@@ -32,18 +33,18 @@ export interface SetupCheck {
 export function buildTraderSetup(i: SetupInput, nowMs: number): SetupCheck {
   const errors: SetupCheck["errors"] = {};
   let master: string | null = null;
-  if (i.master.trim() === "") errors.master = "Enter your Hyperliquid account address";
+  if (i.master.trim() === "") errors.master = t("trading.setup.enterMaster");
   else {
     try {
       master = normalizeAddress("hypercore", i.master);
-      if (!/^0x[0-9a-f]{40}$/.test(master)) throw new Error("Invalid EVM address: expected 0x + 40 hex characters");
+      if (!/^0x[0-9a-f]{40}$/.test(master)) throw new Error(t("addr.badEvm"));
     } catch (e) {
       master = null;
-      errors.master = e instanceof Error ? e.message : "Invalid address";
+      errors.master = e instanceof Error ? e.message : t("trading.setup.invalidAddress");
     }
   }
   const perTxN = Number(i.perTx);
-  if (Number.isFinite(perTxN) && i.perTx.trim() !== "" && perTxN < MIN_TOPUP) errors.perTx = `At least ${MIN_TOPUP} USDC per top-up (the 1Click minimum)`;
+  if (Number.isFinite(perTxN) && i.perTx.trim() !== "" && perTxN < MIN_TOPUP) errors.perTx = t("trading.setup.minTopup", { min: MIN_TOPUP });
   const res = validateMandateForm(
     {
       ...DEFAULT_FORM,
@@ -66,24 +67,24 @@ export function buildTraderSetup(i: SetupInput, nowMs: number): SetupCheck {
 
 /* ───────────── state wording ───────────── */
 
-export const STATE_INFO: Record<TradingState, { label: string; accent: Accent; hint: string }> = {
-  not_configured: { label: "Not set up", accent: "neutral", hint: "The bot is not configured yet." },
-  awaiting_api_wallet: { label: "Waiting for approval", accent: "warn", hint: "Approve the bot's API wallet on Hyperliquid to let it trade." },
-  no_rules: { label: "No rules", accent: "warn", hint: "Describe a strategy to the assistant and confirm the rules." },
-  running: { label: "Running", accent: "ok", hint: "The bot checks your rules every minute." },
-  paused_onchain: { label: "Paused on the vault", accent: "warn", hint: "The vault agent is paused. Orders are cancelled. Resume the agent to continue." },
-  stopped_today: { label: "Stopped for today", accent: "warn", hint: "The daily loss limit was reached. Trading resumes at 00:00 UTC." },
-  halted: { label: "Halted", accent: "danger", hint: "Trading is stopped until you confirm new rules." },
-  error: { label: "Error", accent: "danger", hint: "The bot hit an error and is retrying." },
+const STATE_ACCENT: Record<TradingState, Accent> = {
+  not_configured: "neutral",
+  awaiting_api_wallet: "warn",
+  no_rules: "warn",
+  running: "ok",
+  paused_onchain: "warn",
+  stopped_today: "warn",
+  halted: "danger",
+  error: "danger",
 };
+/** Label and hint come from the dictionary in the current language (read at call time). */
+export const stateInfo = (s: TradingState): { label: string; accent: Accent; hint: string } => ({ label: t(`trading.state.${s}`), accent: STATE_ACCENT[s], hint: t(`trading.hint.${s}`) });
 
-const REASONS: Record<string, string> = {
-  PERP_POSITION_DETECTED: "A perpetuals position or order was found on the account. The bot trades spot only, so it stopped and cancelled its orders. Close it in the Hyperliquid app and revoke the API wallet.",
-  KILL: "You pressed the kill switch.",
-};
+const REASON_CODES = ["PERP_POSITION_DETECTED", "KILL"] as const;
 export const reasonText = (reason: string | null, detail: string | null): string | null => {
   if (!reason && !detail) return null;
-  return [reason ? (REASONS[reason] ?? reason) : null, detail].filter(Boolean).join(" ");
+  const known = reason !== null && (REASON_CODES as readonly string[]).includes(reason);
+  return [reason ? (known ? t(`trading.reason.${reason as (typeof REASON_CODES)[number]}`) : reason) : null, detail].filter(Boolean).join(" ");
 };
 
 /* ───────────── numbers ───────────── */
@@ -146,9 +147,9 @@ export function trustedHlAccount(trader: AgentView | null): string | null {
 
 /** The worker is not trusted for where money goes: compare its `hl_account` with the vault's mandate allowlist. */
 export function checkHlAccount(reported: string, trader: AgentView | null): AccountTrust {
-  if (!trader) return { kind: "unverified", reason: "There is no hl-trader agent on this vault, so the account the worker reports cannot be checked against the chain." };
+  if (!trader) return { kind: "unverified", reason: t("trading.trust.noAgent") };
   const onchain = trustedHlAccount(trader);
-  if (onchain === null) return { kind: "unverified", reason: "The hl-trader mandate does not have exactly one Hyperliquid address in its allowlist, so the account cannot be checked against the chain." };
+  if (onchain === null) return { kind: "unverified", reason: t("trading.trust.noSingle") };
   const rep = reported.trim().toLowerCase();
   return rep === onchain ? { kind: "ok", account: onchain } : { kind: "mismatch", reported: rep, onchain };
 }

@@ -1,4 +1,5 @@
 /** USDC asset ids come from 1Click `GET /v0/tokens`; they are never typed by hand (ADR-0003 §10). */
+import { t } from "@/i18n";
 import { useQuery } from "@tanstack/react-query";
 
 export const ONECLICK_BASE_URL = String(import.meta.env.VITE_ONECLICK_BASE_URL || "https://1click.chaindefuser.com").replace(/\/+$/, "");
@@ -33,7 +34,7 @@ export function findUsdcAsset(tokens: OneClickToken[], chain: string): string | 
 
 export async function fetchTokens(signal?: AbortSignal): Promise<OneClickToken[]> {
   const res = await fetch(`${ONECLICK_BASE_URL}/v0/tokens`, { headers: { Accept: "application/json" }, ...(signal ? { signal } : {}) });
-  if (!res.ok) throw new Error(`1Click /v0/tokens: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(t("net.oneClickTokens", { status: res.status }));
   return parseTokens(await res.json());
 }
 
@@ -41,6 +42,6 @@ export async function fetchTokens(signal?: AbortSignal): Promise<OneClickToken[]
 export function useUsdcAsset(chain: string): { asset: string | null; loading: boolean; error: string | null } {
   const q = useQuery({ queryKey: ["oneclick", "tokens", ONECLICK_BASE_URL], queryFn: ({ signal }) => fetchTokens(signal), staleTime: 10 * 60_000, retry: 1, enabled: chain !== "" });
   const asset = q.data ? findUsdcAsset(q.data, chain) : null;
-  const error = q.error ? "Could not load the token list from 1Click" : q.data && chain && !asset ? `1Click has no USDC on ${chain}` : null;
+  const error = q.error ? t("oc.loadFailed") : q.data && chain && !asset ? t("oc.noUsdc", { chain }) : null;
   return { asset, loading: q.isPending && chain !== "", error };
 }

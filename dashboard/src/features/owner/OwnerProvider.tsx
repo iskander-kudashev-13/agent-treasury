@@ -1,6 +1,7 @@
+import { t } from "@/i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { chunkCalls, toTxAction, type OwnerMethod, type PlannedCall, type TxInput } from "@/lib/calls";
+import { chunkCalls, methodLabel, toTxAction, type OwnerMethod, type PlannedCall, type TxInput } from "@/lib/calls";
 import { explorerTxUrl, VAULT_ID } from "@/lib/config";
 import { useContractInfo, vaultKeys } from "@/lib/useVault";
 import { useToast } from "@/kit";
@@ -66,14 +67,14 @@ export function OwnerProvider({ children }: { children: ReactNode }) {
           if (requests.length > 1) setProgress({ done: i, total: requests.length });
           const outcome = await signAndSendTransactions(txs);
           hash ??= outcomeTxHash(outcome);
-          if (requests.length > 1 && i < requests.length - 1) toast({ text: `${label}: ${i + 1} of ${requests.length} transactions submitted`, accent: "info" });
+          if (requests.length > 1 && i < requests.length - 1) toast({ text: t("owner.partSubmitted", { label, done: i + 1, total: requests.length }), accent: "info" });
         }
-        toast({ text: `${label} submitted`, accent: "ok", ...(hash ? { href: explorerTxUrl(hash) } : {}) });
+        toast({ text: t("owner.submitted", { label }), accent: "ok", ...(hash ? { href: explorerTxUrl(hash) } : {}) });
         refreshSoon();
         return { ok: true, hash };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        toast(isRejection(msg) ? { text: "Cancelled in wallet", accent: "neutral" } : { text: `${label}: ${msg}`, accent: "danger", durationMs: 6000 });
+        toast(isRejection(msg) ? { text: t("owner.cancelled"), accent: "neutral" } : { text: t("owner.error", { label, msg }), accent: "danger", durationMs: 6000 });
         if (hash) refreshSoon(); // an earlier part of a split batch went through
         return { ok: false, hash };
       } finally {
@@ -88,7 +89,7 @@ export function OwnerProvider({ children }: { children: ReactNode }) {
     async (calls, label) => {
       if (!canAct || calls.length === 0) return { ok: false, hash: null };
       const requests = chunkCalls(calls).map((c) => [{ receiverId: VAULT_ID, actions: c.map(toTxAction) }]);
-      return run(label ?? `${calls.length} ${calls.length === 1 ? "change" : "changes"}`, requests);
+      return run(label ?? t("owner.changes", { count: calls.length }), requests);
     },
     [canAct, run],
   );
@@ -96,7 +97,7 @@ export function OwnerProvider({ children }: { children: ReactNode }) {
   const act = useCallback<OwnerCtx["act"]>(
     async (method, args = {}) => {
       if (!canAct && method !== "accept_owner") return false; // accept_owner is sent by the proposed owner
-      const r = await run(method, [[{ receiverId: VAULT_ID, actions: [toTxAction({ method, args })] }]]);
+      const r = await run(methodLabel(method), [[{ receiverId: VAULT_ID, actions: [toTxAction({ method, args })] }]]);
       return r.ok;
     },
     [canAct, run],

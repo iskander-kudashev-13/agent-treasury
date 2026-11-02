@@ -1,4 +1,6 @@
+import type { MessageKey } from "@/i18n";
 // Base building blocks: buttons, surfaces, pills, text helpers. DESIGN_SYSTEM.md §3–4.
+import { useT } from "@/i18n";
 import { useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode } from "react";
 import { Check, Copy, Loader, Pause, Play } from "./icons";
 import { avatarColor, initials, shortId, type Accent } from "./tokens";
@@ -73,6 +75,7 @@ export function IconButton({ label, className, children, type = "button", ...res
 
 /** 52 px agent kill switch. Always route the click through a confirm sheet. Sticky at the bottom on mobile (`sticky`). */
 export function PauseButton({ paused, onClick, label, sticky, disabled }: { paused: boolean; onClick: () => void; label?: string; sticky?: boolean; disabled?: boolean }) {
+  const t = useT();
   return (
     <div className={cx(sticky && "sticky bottom-0 -mx-4 border-t border-line bg-bg/90 p-4 backdrop-blur md:static md:m-0 md:border-0 md:bg-transparent md:p-0")}>
       <button
@@ -85,7 +88,7 @@ export function PauseButton({ paused, onClick, label, sticky, disabled }: { paus
         )}
       >
         {paused ? <Play size={18} /> : <Pause size={18} />}
-        {label ?? (paused ? "Resume agent" : "Pause agent")}
+        {label ?? (paused ? t("kit.resumeAgent") : t("kit.pauseAgent"))}
       </button>
     </div>
   );
@@ -206,21 +209,22 @@ export function Dot({ accent = "ok", live, hollow, square, className }: { accent
 
 export type AgentState = "active" | "paused" | "revoked" | "ended" | "waiting";
 
-const STATUS_PILL: Record<AgentState, { label: string; accent: Accent; live?: boolean; hollow?: boolean }> = {
-  active: { label: "Active", accent: "ok", live: true },
-  paused: { label: "Paused", accent: "warn" },
-  waiting: { label: "Waiting for registration", accent: "warn" },
-  revoked: { label: "Revoked", accent: "neutral", hollow: true },
-  ended: { label: "Ended", accent: "neutral", hollow: true },
+const STATUS_PILL: Record<AgentState, { label: MessageKey; accent: Accent; live?: boolean; hollow?: boolean }> = {
+  active: { label: "pill.active", accent: "ok", live: true },
+  paused: { label: "pill.paused", accent: "warn" },
+  waiting: { label: "pill.waiting", accent: "warn" },
+  revoked: { label: "pill.revoked", accent: "neutral", hollow: true },
+  ended: { label: "pill.ended", accent: "neutral", hollow: true },
 };
 
 /** Dot + word, no filled background (§4 Status pill). */
 export function StatusPill({ state, label }: { state: AgentState; label?: string }) {
+  const t = useT();
   const s = STATUS_PILL[state];
   return (
     <span className={cx("inline-flex items-center gap-2 text-[13px] font-medium whitespace-nowrap", s.hollow ? "text-ink-muted" : ACCENT_TEXT[s.accent])}>
       <Dot accent={s.accent} live={s.live} hollow={s.hollow} />
-      {label ?? s.label}
+      {label ?? t(s.label)}
     </span>
   );
 }
@@ -240,6 +244,7 @@ export function Amount({ value, unit = "USDC", size = "md", accent, className }:
 
 /** Short hash / account id with a copy button. Full value in `title` for hover. */
 export function Hash({ value, short = true, copy = true, className }: { value: string; short?: boolean; copy?: boolean; className?: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const onCopy = () => {
     void navigator.clipboard?.writeText(value).then(
@@ -256,7 +261,7 @@ export function Hash({ value, short = true, copy = true, className }: { value: s
         {short ? shortId(value) : value}
       </span>
       {copy && (
-        <IconButton label={copied ? "Copied" : "Copy"} onClick={onCopy} className="size-7">
+        <IconButton label={copied ? t("common.copied") : t("common.copy")} onClick={onCopy} className="size-7">
           {copied ? <Check size={14} className="text-ok" /> : <Copy size={14} />}
         </IconButton>
       )}

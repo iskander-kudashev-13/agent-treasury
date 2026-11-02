@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { Button, Callout } from "@/kit";
 
 export interface ErrorSource {
@@ -11,6 +12,7 @@ export interface ErrorSource {
  * empty one ("No payouts yet"). Renders nothing while everything loads fine.
  */
 export function QueryErrors({ sources }: { sources: ErrorSource[] }) {
+  const t = useT();
   const failed = sources.filter((s) => s.error !== null);
   if (failed.length === 0) return null;
   const msg = failed[0]!.error;
@@ -19,11 +21,11 @@ export function QueryErrors({ sources }: { sources: ErrorSource[] }) {
       accent="danger"
       action={
         <Button size="sm" onClick={() => void Promise.all(failed.map((f) => f.refresh?.()))}>
-          Retry
+          {t("common.retry")}
         </Button>
       }
     >
-      Couldn&apos;t load {failed.map((f) => f.label).join(", ")}. What you see below may be missing or out of date. {msg}
+      {t("err.couldntLoad", { what: failed.map((f) => f.label).join(", "), msg: msg ?? "" })}
     </Callout>
   );
 }

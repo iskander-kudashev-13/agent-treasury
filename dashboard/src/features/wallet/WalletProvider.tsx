@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { actionCreators as ActionCreators, FinalExecutionOutcome, SignedMessage, WalletSelector } from "@near-wallet-selector/core";
 import type { WalletSelectorModal } from "@near-wallet-selector/modal-ui";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -101,7 +102,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const callMethod = useCallback(
     async ({ receiverId = VAULT_ID, ...call }: CallMethodInput) => {
-      if (!state) throw new Error("Wallet is not ready");
+      if (!state) throw new Error(t("wallet.notReady"));
       const wallet = await state.selector.wallet();
       return wallet.signAndSendTransaction({ receiverId, actions: [toCallAction(state.ac, call)] });
     },
@@ -110,7 +111,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const signAndSendTransactions = useCallback(
     async (txs: TxInput[]) => {
-      if (!state) throw new Error("Wallet is not ready");
+      if (!state) throw new Error(t("wallet.notReady"));
       const wallet = await state.selector.wallet();
       return wallet.signAndSendTransactions({ transactions: txs.map((t) => ({ receiverId: t.receiverId, actions: t.actions.map((a) => toWalletAction(state.ac, a)) })) });
     },
@@ -119,9 +120,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const signMessage = useCallback(
     async ({ message, recipient, nonce }: SignMessageInput) => {
-      if (!state) throw new Error("Wallet is not ready");
+      if (!state) throw new Error(t("wallet.notReady"));
       const wallet = await state.selector.wallet();
-      if (!wallet.signMessage) throw new Error("This wallet does not support message signing (NEP-413)");
+      if (!wallet.signMessage) throw new Error(t("wallet.noSignMessage"));
       return wallet.signMessage({ message, recipient, nonce: Buffer.from(nonce ?? crypto.getRandomValues(new Uint8Array(32))) });
     },
     [state],

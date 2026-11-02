@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { useWallet } from "@/features/wallet/WalletProvider";
@@ -9,13 +10,14 @@ import { Button, Icons, Modal, SigningHint } from "@/kit";
  * Pause = vault `pause()` (no payments for ANY agent). Resume needs 1 yocto; pause needs none.
  */
 export function PauseAll() {
+  const t = useT();
   const { data: policy } = usePolicy();
   const { accountId, signIn } = useWallet();
   const { canAct, busy, act } = useOwner();
   const [confirm, setConfirm] = useState(false);
   if (!policy) return null;
   const paused = policy.paused;
-  const label = paused ? "Resume all agents" : "Pause all agents";
+  const label = paused ? t("pause.resumeAll") : t("pause.pauseAll");
   const guest = accountId !== null && !canAct;
 
   const go = async () => {
@@ -30,7 +32,7 @@ export function PauseAll() {
         size="sm"
         icon={paused ? <Icons.Play size={14} /> : <Icons.Pause size={14} />}
         disabled={guest}
-        title={guest ? "Only the vault owner can do this" : accountId ? undefined : `Connect wallet to ${paused ? "resume" : "pause"}`}
+        title={guest ? t("common.ownerOnly") : accountId ? undefined : paused ? t("pause.connectToResume") : t("pause.connectToPause")}
         onClick={() => (accountId ? setConfirm(true) : signIn())}
       >
         {label}
@@ -39,12 +41,12 @@ export function PauseAll() {
         open={confirm}
         onClose={() => !busy && setConfirm(false)}
         danger={!paused}
-        title={paused ? "Resume all agents?" : "Pause all agents?"}
+        title={paused ? t("pause.resumeTitle") : t("pause.pauseTitle")}
         footer={
           <>
             {busy && <SigningHint />}
             <Button variant="ghost" onClick={() => setConfirm(false)} disabled={busy}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant={paused ? "primary" : "danger-fill"} loading={busy} disabled={!canAct} onClick={() => void go()}>
               {label}
@@ -52,9 +54,7 @@ export function PauseAll() {
           </>
         }
       >
-        {paused
-          ? "Agents will be able to request payments again, within their mandates."
-          : "No agent can pay anyone until you resume. Payments already sent keep going; scheduled payments wait. You can still withdraw."}
+        {paused ? t("pause.resumeBody") : t("pause.pauseBody")}
       </Modal>
     </>
   );

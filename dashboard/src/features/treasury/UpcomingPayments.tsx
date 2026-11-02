@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { formatDay } from "@/lib/dates";
@@ -12,6 +13,7 @@ const VISIBLE = 5;
 
 /** Upcoming payments (UI_UPDATES §5.1): 7 / 30 day toggle, approval tags, total, funding warning with Deposit. */
 export function UpcomingPayments({ recipients, agents, balance, policy, onDeposit }: { recipients: RecipientView[]; agents: AgentView[]; balance: BalanceView | null; policy: PolicyView | null; onDeposit: () => void }) {
+  const t = useT();
   const [range, setRange] = useState<"7" | "30">("7");
   const up = useUpcoming(Number(range));
   const items = up.data;
@@ -22,20 +24,20 @@ export function UpcomingPayments({ recipients, agents, balance, policy, onDeposi
     <Card padding="none" aria-labelledby="t-upcoming">
       <div className="flex flex-wrap items-center gap-2.5 border-b border-line px-5 py-3.5">
         <h2 id="t-upcoming" className="m-0 text-[15px] font-semibold">
-          Upcoming
+          {t("upcoming.title")}
         </h2>
         <Segmented
-          label="Range"
+          label={t("upcoming.range")}
           value={range}
           onChange={setRange}
           options={[
-            { value: "7", label: "7 days" },
-            { value: "30", label: "30 days" },
+            { value: "7", label: t("upcoming.d7") },
+            { value: "30", label: t("upcoming.d30") },
           ]}
         />
         <div className="grow" />
         <span className="mono text-base font-semibold">
-          {usdcGrouped(total)} <span className="font-sans text-xs font-normal text-ink-muted">USDC · {items.length} payment{items.length === 1 ? "" : "s"}</span>
+          {usdcGrouped(total)} <span className="font-sans text-xs font-normal text-ink-muted">USDC · {t("upcoming.paymentsCount", { count: items.length })}</span>
         </span>
       </div>
       {up.loading ? (
@@ -43,8 +45,8 @@ export function UpcomingPayments({ recipients, agents, balance, policy, onDeposi
           <Skeleton className="h-24" />
         </div>
       ) : items.length === 0 ? (
-        <EmptyState title={`Nothing due in the next ${range} days`}>
-          <Link to="/payments">Add a scheduled payment</Link>
+        <EmptyState title={t("upcoming.nothingDue", { range })}>
+          <Link to="/payments">{t("upcoming.addScheduled")}</Link>
         </EmptyState>
       ) : (
         <ul className="m-0 list-none p-0">
@@ -54,11 +56,11 @@ export function UpcomingPayments({ recipients, agents, balance, policy, onDeposi
             return (
               <li key={`${u.schedule_id}-${u.due_at}`} className="row-in grid grid-cols-[84px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 border-b border-track px-5 py-2.5 text-[13px] md:grid-cols-[92px_minmax(0,1fr)_100px_110px_120px]">
                 <span className="text-ink-muted">{formatDay(u.due_at)}</span>
-                <span className="truncate font-medium">{r?.label ?? `recipient #${u.recipient_id}`}</span>
+                <span className="truncate font-medium">{r?.label ?? t("upcoming.recipientN", { id: u.recipient_id })}</span>
                 <span className="mono text-right font-semibold">{usdcGrouped(u.amount)}</span>
                 <span className="hidden md:block">{r ? <ChainBadge chain={r.destination_chain} arrow /> : "—"}</span>
                 <span className="col-span-3 text-xs md:col-span-1">
-                  {u.will_need_approval ? <span className="text-warn">⏳ approval</span> : <span className="text-ink-muted">{agent}</span>}
+                  {u.will_need_approval ? <span className="text-warn">{t("upcoming.approval")}</span> : <span className="text-ink-muted">{agent}</span>}
                   <span className="text-ink-subtle md:hidden"> · {r ? chainName(r.destination_chain) : ""}</span>
                 </span>
               </li>
@@ -68,15 +70,15 @@ export function UpcomingPayments({ recipients, agents, balance, policy, onDeposi
       )}
       {items.length > 0 && (
         <div className="flex items-center px-5 py-2.5 text-[13px]">
-          <span className="text-ink-muted">{items.length > VISIBLE ? `+ ${items.length - VISIBLE} more` : ""}</span>
+          <span className="text-ink-muted">{items.length > VISIBLE ? t("upcoming.more", { n: items.length - VISIBLE }) : ""}</span>
           <div className="grow" />
-          <Link to="/payments">View schedule →</Link>
+          <Link to="/payments">{t("upcoming.viewSchedule")}</Link>
         </div>
       )}
       {funding && funding.messages.length > 0 && (
         <div className="flex flex-col gap-2 px-4 pb-3.5">
           {funding.messages.map((m) => (
-            <Callout key={m.message} accent="warn" icon={<span aria-hidden="true">⚠</span>} action={m.kind === "balance" ? <Button size="sm" variant="primary" onClick={onDeposit}>Deposit</Button> : undefined}>
+            <Callout key={m.message} accent="warn" icon={<span aria-hidden="true">⚠</span>} action={m.kind === "balance" ? <Button size="sm" variant="primary" onClick={onDeposit}>{t("treasury.deposit")}</Button> : undefined}>
               {m.message}
             </Callout>
           ))}

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
 import { Button, Drawer, SigningHint } from "@/kit";
 import type { PlannedCall } from "@/lib/calls";
@@ -24,6 +25,7 @@ export function RecipientDrawer(props: RecipientDrawerProps) {
 }
 
 function Inner({ onClose, recipient, prefill, onPlan }: RecipientDrawerProps) {
+  const t = useT();
   const { data: recipients } = useRecipients();
   const { send, busy, canAct } = useOwnerTx();
   const [draft, setDraft] = useState<RecipientDraft>({
@@ -44,7 +46,7 @@ function Inner({ onClose, recipient, prefill, onPlan }: RecipientDrawerProps) {
       onClose();
       return;
     }
-    const r = await send(c, recipient ? "Update recipient" : "Add recipient");
+    const r = await send(c, recipient ? t("pay.updateRecipientLbl") : t("pay.addRecipientLbl"));
     if (r.ok) onClose();
   };
 
@@ -52,23 +54,23 @@ function Inner({ onClose, recipient, prefill, onPlan }: RecipientDrawerProps) {
     <Drawer
       open
       onClose={onClose}
-      title={recipient ? `Edit ${recipient.label}` : "New recipient"}
-      subtitle="The address book entry. Amounts and dates live on scheduled payments."
+      title={recipient ? t("pay.editRecipient", { label: recipient.label }) : t("pay.newRecipient")}
+      subtitle={t("pay.recipientSubtitle")}
       width={480}
       footer={
         <>
           {busy && <SigningHint />}
           <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" disabled={!valid || (!onPlan && !canAct) || busy} loading={busy} onClick={() => void save()}>
-            {onPlan ? "Use these values" : "Save & sign"}
+            {onPlan ? t("pay.useValues") : t("pay.saveSign")}
           </Button>
         </>
       }
     >
       <RecipientFields draft={draft} onChange={(p) => setDraft((d) => ({ ...d, ...p }))} draftState={state} disabled={busy} />
-      {!onPlan && !canAct && <p className="mt-4 mb-0 text-xs text-ink-subtle">Connect the vault owner&apos;s wallet to save.</p>}
+      {!onPlan && !canAct && <p className="mt-4 mb-0 text-xs text-ink-subtle">{t("pay.connectToSave")}</p>}
     </Drawer>
   );
 }

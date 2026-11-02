@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { PayoutStatus } from "./types";
 
 export type Tone = "gray" | "yellow" | "blue" | "green" | "red" | "orange";
@@ -10,18 +11,22 @@ export interface StatusInfo {
   hint: string;
 }
 
-const MAP: Record<PayoutStatus, StatusInfo> = {
-  PendingApproval: { label: "Needs approval", tone: "yellow", terminal: false, hint: "Above approval threshold; waiting for the owner" },
-  Rejected: { label: "Rejected", tone: "gray", terminal: true, hint: "Owner rejected; this period is skipped" },
-  Transferring: { label: "Transferring", tone: "blue", terminal: false, hint: "Transfer to the deposit address in flight" },
-  Sent: { label: "Sent", tone: "blue", terminal: false, hint: "Funds at the Intents deposit address" },
-  Confirmed: { label: "Confirmed", tone: "green", terminal: true, hint: "Delivered on the destination chain" },
-  Failed: { label: "Failed", tone: "red", terminal: true, hint: "Transfer or swap failed" },
-  Refunded: { label: "Refunded", tone: "orange", terminal: true, hint: "Refunded to the vault; owner credits it with credit_refund" },
+const MAP: Record<PayoutStatus, { tone: Tone; terminal: boolean }> = {
+  PendingApproval: { tone: "yellow", terminal: false },
+  Rejected: { tone: "gray", terminal: true },
+  Transferring: { tone: "blue", terminal: false },
+  Sent: { tone: "blue", terminal: false },
+  Confirmed: { tone: "green", terminal: true },
+  Failed: { tone: "red", terminal: true },
+  Refunded: { tone: "orange", terminal: true },
 };
 
+/** Label and hint are looked up at call time in the current language. */
 export function payoutStatusInfo(status: string): StatusInfo {
-  return (MAP as Record<string, StatusInfo | undefined>)[status] ?? { label: status, tone: "gray", terminal: false, hint: "Unknown status" };
+  const m = (MAP as Record<string, { tone: Tone; terminal: boolean } | undefined>)[status];
+  if (!m) return { label: status, tone: "gray", terminal: false, hint: t("statusHint.unknown") };
+  const s = status as PayoutStatus;
+  return { ...m, label: t(`status.${s}`), hint: t(`statusHint.${s}`) };
 }
 
 /** Only a Refunded payout can be credited back by the owner. */

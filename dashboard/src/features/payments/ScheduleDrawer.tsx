@@ -1,3 +1,4 @@
+import { t, useT } from "@/i18n";
 import { useState } from "react";
 import { Button, chainName, Drawer, Field, IconButton, Icons, Input, Select, shortId, SigningHint } from "@/kit";
 import { usdcGrouped } from "@/lib/amount";
@@ -69,6 +70,7 @@ function modeOf(p: ScheduleDrawerProps): PaymentMode {
 }
 
 function Inner(props: ScheduleDrawerProps) {
+  const t = useT();
   const { onClose, schedule, prefill, pendingRecipients = [], onPlan } = props;
   const mode = modeOf(props);
   const once = mode === "once";
@@ -141,7 +143,7 @@ function Inner(props: ScheduleDrawerProps) {
       onClose();
       return;
     }
-    const r = await send(c, schedule ? "Payment update" : c.length > 1 ? `${c.length} changes` : once ? "One-time payment" : "Recurring payment");
+    const r = await send(c, schedule ? t("pay.lblPaymentUpdate") : c.length > 1 ? t("owner.changes", { count: c.length }) : once ? t("pay.lblOnce") : t("pay.lblRecurring"));
     if (r.ok) onClose();
   };
 
@@ -151,27 +153,27 @@ function Inner(props: ScheduleDrawerProps) {
     <Drawer
       open
       onClose={onClose}
-      title={schedule ? `Edit ${once ? "one-time" : "recurring"} payment #${schedule.id}` : once ? "Pay once" : "New recurring payment"}
-      subtitle={once ? "The agent pays it once, now or at the time you pick." : "The agent pays it on every date of the schedule."}
+      title={schedule ? t("pay.editTitle", { kind: once ? t("pay.kindOnce") : t("pay.kindRecurring"), id: schedule.id }) : once ? t("page.payOnce") : t("pay.newRecurring")}
+      subtitle={once ? t("pay.onceSub") : t("pay.recurSub")}
       width={520}
       footer={
         <>
           {busy && <SigningHint />}
           <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" disabled={!canSave} loading={busy} onClick={() => void save()}>
-            {onPlan ? "Use these values" : once && !schedule ? "Create & sign" : "Save & sign"}
+            {onPlan ? t("pay.useValues") : once && !schedule ? t("pay.createSign") : t("pay.saveSign")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-5">
         <div className="flex items-end gap-2">
-          <Field label="Recipient" error={show("recipient")} className="flex-1">
+          <Field label={t("pay.recipient")} error={show("recipient")} className="flex-1">
             {(a) => (
               <Select {...a} value={f.recipientId} disabled={busy} onChange={(e) => patch({ recipientId: e.target.value, addToMandate: false })}>
-                <option value="">Select recipient…</option>
+                <option value="">{t("pay.selectRecipient")}</option>
                 {recipients.map((r) => (
                   <option key={r.id} value={String(r.id)}>
                     {r.label} — {chainName(r.destination_chain)}, {shortId(r.destination_address)}
@@ -179,26 +181,26 @@ function Inner(props: ScheduleDrawerProps) {
                 ))}
                 {pendingRecipients.map((r) => (
                   <option key={`p${r.id}`} value={String(r.id)}>
-                    {r.label} — {chainName(r.chain)}, {shortId(r.address)} (new, in your batch)
+                    {r.label} — {chainName(r.chain)}, {shortId(r.address)} {t("pay.inBatch")}
                   </option>
                 ))}
-                {isNew && <option value="new">New recipient…</option>}
+                {isNew && <option value="new">{t("pay.newRecipientOpt")}</option>}
               </Select>
             )}
           </Field>
-          <IconButton label="New recipient" disabled={busy} onClick={() => patch({ recipientId: "new", addToMandate: false })} className="mb-0.5 border border-line-strong">
+          <IconButton label={t("pay.newRecipient")} disabled={busy} onClick={() => patch({ recipientId: "new", addToMandate: false })} className="mb-0.5 border border-line-strong">
             <Icons.Plus size={16} />
           </IconButton>
         </div>
 
         {isNew && (
           <div className="rounded-tile border border-line bg-surface-sunken p-4">
-            <h3 className="m-0 mb-3 text-[13px] font-semibold">New recipient (created in the same transaction)</h3>
+            <h3 className="m-0 mb-3 text-[13px] font-semibold">{t("pay.newRecipientInline")}</h3>
             <RecipientFields draft={f.newRecipient} onChange={(p) => patch({ newRecipient: { ...f.newRecipient, ...p } })} draftState={newDraft} disabled={busy} />
           </div>
         )}
 
-        <Field label="Amount" error={show("amount")} hint={monthly !== null ? `≈ ${usdcGrouped(monthly.toString(), 0)} USDC / month` : undefined}>
+        <Field label={t("pay.amount")} error={show("amount")} hint={monthly !== null ? t("pay.perMonth", { amount: usdcGrouped(monthly.toString(), 0) }) : undefined}>
           {(a) => <Input {...a} mono inputMode="decimal" placeholder="1500" suffix="USDC" value={f.amount} disabled={busy} state={show("amount") ? "error" : "default"} onChange={(e) => patch({ amount: e.target.value })} />}
         </Field>
 
@@ -207,24 +209,24 @@ function Inner(props: ScheduleDrawerProps) {
         ) : (
           <>
             <FrequencyControl value={f} onChange={patch} errors={built.errors} disabled={busy} />
-            <LocalDateTime label="First payment" date={f.startDate} time={f.startTime} error={built.errors.start} disabled={busy} onChange={patch} hint="Every payment is made at this time of day" recurring />
+            <LocalDateTime label={t("pay.firstPayment")} date={f.startDate} time={f.startTime} error={built.errors.start} disabled={busy} onChange={patch} hint={t("pay.firstHint")} recurring />
           </>
         )}
 
         {f.freq !== "Once" && (
           <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
-            <legend className="mb-1.5 p-0 text-[13px] font-medium text-ink-secondary">Ends</legend>
+            <legend className="mb-1.5 p-0 text-[13px] font-medium text-ink-secondary">{t("pay.ends")}</legend>
             <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
               <input type="radio" name="ends" className="accent-[var(--color-ok)]" checked={f.endKind === "Never"} disabled={busy} onChange={() => patch({ endKind: "Never" })} />
-              Never
+              {t("pay.endNever")}
             </label>
             <div className="flex min-h-10 flex-wrap items-center gap-3">
               <label className="flex w-36 cursor-pointer items-center gap-2 text-sm">
                 <input type="radio" name="ends" className="accent-[var(--color-ok)]" checked={f.endKind === "AfterCount"} disabled={busy} onChange={() => patch({ endKind: "AfterCount" })} />
-                After N payments
+                {t("pay.endAfterN")}
               </label>
               {f.endKind === "AfterCount" && (
-                <Field label="Payments" error={built.errors.endCount} className="w-44">
+                <Field label={t("pay.endPayments")} error={built.errors.endCount} className="w-44">
                   {(a) => <Input {...a} type="number" inputMode="numeric" min={1} value={f.endCount} disabled={busy} state={built.errors.endCount ? "error" : "default"} onChange={(e) => patch({ endCount: e.target.value })} />}
                 </Field>
               )}
@@ -232,10 +234,10 @@ function Inner(props: ScheduleDrawerProps) {
             <div className="flex min-h-10 flex-wrap items-center gap-3">
               <label className="flex w-36 cursor-pointer items-center gap-2 text-sm">
                 <input type="radio" name="ends" className="accent-[var(--color-ok)]" checked={f.endKind === "On"} disabled={busy} onChange={() => patch({ endKind: "On" })} />
-                On a date
+                {t("pay.endOnDate")}
               </label>
               {f.endKind === "On" && (
-                <Field label="Last day" error={built.errors.endDate} className="w-44">
+                <Field label={t("pay.lastDay")} error={built.errors.endDate} className="w-44">
                   {(a) => <Input {...a} type="date" value={f.endDate} disabled={busy} state={built.errors.endDate ? "error" : "default"} onChange={(e) => patch({ endDate: e.target.value })} />}
                 </Field>
               )}
@@ -243,14 +245,14 @@ function Inner(props: ScheduleDrawerProps) {
           </fieldset>
         )}
 
-        <Field label="Paid by" error={show("agent")} hint={payers.length === 0 ? "Create an agent first (Agents)." : undefined}>
+        <Field label={t("pay.paidBy")} error={show("agent")} hint={payers.length === 0 ? t("pay.createAgentFirst") : undefined}>
           {(a) => (
             <Select {...a} value={agentId} disabled={busy} onChange={(e) => patch({ agentId: e.target.value, addToMandate: false })}>
-              <option value="">Select agent…</option>
+              <option value="">{t("pay.selectAgent")}</option>
               {payers.map((x) => (
                 <option key={x.id} value={x.id}>
                   {x.name}
-                  {x.status === "Paused" ? " (paused)" : ""}
+                  {x.status === "Paused" ? ` ${t("pay.paused")}` : ""}
                 </option>
               ))}
             </Select>
@@ -259,12 +261,12 @@ function Inner(props: ScheduleDrawerProps) {
 
         <div className="flex flex-col gap-3 border-t border-line pt-4">
           {once && f.when === "now" && !schedule ? (
-            <p className="m-0 text-[13px] text-ink-secondary">The agent pays it on its first run after {localTimeInput(liveNow + NOW_LEAD_MS)} (2 minutes after you sign).</p>
+            <p className="m-0 text-[13px] text-ink-secondary">{t("pay.onceNowInfo", { time: localTimeInput(liveNow + NOW_LEAD_MS) })}</p>
           ) : (
             <NextPaymentsPreview input={built.input} now={now} paidCount={schedule?.paid_count ?? 0} floor={lastHandled > 0 ? lastHandled + 1 : 0} />
           )}
           <MandateCompatibility agent={agent} compat={compat} offerAddToMandate={missing} addToMandate={addToMandate} onAddToMandate={(v) => patch({ addToMandate: v })} disabled={busy} />
-          {!onPlan && !canAct && <p className="m-0 text-xs text-ink-subtle">Connect the vault owner&apos;s wallet to save.</p>}
+          {!onPlan && !canAct && <p className="m-0 text-xs text-ink-subtle">{t("pay.connectToSave")}</p>}
         </div>
       </div>
     </Drawer>
@@ -276,9 +278,9 @@ function utcHint(date: string, time: string, recurring: boolean): string | undef
   const ms = parseLocal(date, time);
   if (ms === null) return undefined;
   const iso = new Date(ms).toISOString();
-  const base = `Your time (${utcOffsetLabel(ms)}) = ${iso.slice(11, 16)} UTC, ${shortDate(ms)}`;
+  const base = t("pay.utcHint", { offset: utcOffsetLabel(ms), utc: iso.slice(11, 16), date: shortDate(ms) });
   const shift = recurring ? utcDayShift(ms) : null;
-  return shift ? `${base}. Days of the schedule are counted in UTC, so this is ${shift} in UTC.` : base;
+  return shift ? t("pay.utcShift", { base, day: shift }) : base;
 }
 
 function LocalDateTime({
@@ -300,14 +302,15 @@ function LocalDateTime({
   hint?: string;
   recurring?: boolean;
 }) {
+  const t = useT();
   const utc = utcHint(date, time, recurring);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="grid grid-cols-2 gap-3">
-        <Field label={`${label}: date`} error={error}>
+        <Field label={t("pay.dateOf", { label })} error={error}>
           {(a) => <Input {...a} type="date" value={date} disabled={disabled} state={error ? "error" : "default"} onChange={(e) => onChange({ startDate: e.target.value })} />}
         </Field>
-        <Field label="Time" hint={hint}>
+        <Field label={t("pay.time")} hint={hint}>
           {(a) => <Input {...a} type="time" value={time} disabled={disabled} onChange={(e) => onChange({ startTime: e.target.value })} />}
         </Field>
       </div>
@@ -330,20 +333,21 @@ function WhenControl({
   disabled: boolean;
   editing: boolean;
 }) {
+  const t = useT();
   const later = editing || form.when === "later";
   return (
     <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
-      <legend className="mb-1.5 p-0 text-[13px] font-medium text-ink-secondary">When</legend>
+      <legend className="mb-1.5 p-0 text-[13px] font-medium text-ink-secondary">{t("pay.when")}</legend>
       {!editing && (
         <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
           <input type="radio" name="when" className="accent-[var(--color-ok)]" checked={!later} disabled={disabled} onChange={() => onChange({ when: "now" })} />
-          Now <span className="text-xs text-ink-subtle">— on the agent&apos;s next run, within a few minutes</span>
+          {t("pay.now")} <span className="text-xs text-ink-subtle">{t("pay.nowNote")}</span>
         </label>
       )}
       {!editing && (
         <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
           <input type="radio" name="when" className="accent-[var(--color-ok)]" checked={later} disabled={disabled} onChange={() => onChange({ when: "later" })} />
-          Later
+          {t("pay.later")}
         </label>
       )}
       {later && (
@@ -361,11 +365,11 @@ function WhenControl({
                   onChange({ when: "later", startDate: localDateInput(at), startTime: localTimeInput(at) });
                 }}
               >
-                {p.label}
+                {t(p.key)}
               </Button>
             ))}
           </div>
-          <LocalDateTime label="Pay on" date={form.startDate} time={form.startTime} error={error} disabled={disabled} onChange={onChange} />
+          <LocalDateTime label={t("pay.payOn")} date={form.startDate} time={form.startTime} error={error} disabled={disabled} onChange={onChange} />
         </div>
       )}
       {!later && error && <p className="m-0 text-xs text-danger-text">{error}</p>}

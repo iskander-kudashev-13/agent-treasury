@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import type { PaymentMode } from "@/lib/scheduleForm";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -19,6 +20,7 @@ const isTab = (v: string | null): v is Tab => v === "scheduled" || v === "recipi
 
 /** `/payments?tab=scheduled|recipients` (UI_UPDATES §4). Tab state lives in the URL. */
 export function PaymentsPage() {
+  const t = useT();
   const [params, setParams] = useSearchParams();
   const raw = params.get("tab");
   const tab: Tab = isTab(raw) ? raw : "scheduled";
@@ -29,38 +31,38 @@ export function PaymentsPage() {
   const [sched, setSched] = useState<{ schedule?: Schedule; mode?: PaymentMode } | null>(null);
   const [rec, setRec] = useState<{ recipient?: RecipientView } | null>(null);
   const now = useNow();
-  const ask = AI_ENABLED ? () => assistant.openWith("Add a scheduled payment: ") : undefined;
+  const ask = AI_ENABLED ? () => assistant.openWith(t("page.addScheduledPrefill")) : undefined;
 
   return (
     <Page
-      title="Payments"
+      title={t("nav.payments")}
       actions={
         tab === "scheduled" ? (
           <div className="flex flex-wrap gap-2">
             {ask && (
               <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={ask}>
-                Ask assistant
+                {t("page.askAssistant")}
               </Button>
             )}
             <Button variant="primary" disabled={!canAct} onClick={() => setSched({ mode: "once" })}>
-              Pay once
+              {t("page.payOnce")}
             </Button>
             <Button disabled={!canAct} onClick={() => setSched({ mode: "recurring" })}>
-              + Recurring payment
+              {t("page.addRecurring")}
             </Button>
           </div>
         ) : undefined
       }
     >
-      <QueryErrors sources={[{ label: "recipients", ...recipients }, { label: "scheduled payments", ...schedules }]} />
-      <p className="m-0 text-ink-muted">Scheduled payments are paid by the agent you assign, on the dates you set. Agents can also pay on demand within their mandate — see Agents.</p>
+      <QueryErrors sources={[{ label: t("src.recipients"), ...recipients }, { label: t("src.scheduled"), ...schedules }]} />
+      <p className="m-0 text-ink-muted">{t("page.paymentsIntro")}</p>
       <Tabs
-        label="Payments"
+        label={t("nav.payments")}
         value={tab}
-        onChange={(t) => setParams({ tab: t }, { replace: true })}
+        onChange={(v) => setParams({ tab: v }, { replace: true })}
         items={[
-          { value: "scheduled", label: "Scheduled", count: schedules.data.length },
-          { value: "recipients", label: "Recipients", count: recipients.data.length },
+          { value: "scheduled", label: t("page.tabScheduled"), count: schedules.data.length },
+          { value: "recipients", label: t("page.tabRecipients"), count: recipients.data.length },
         ]}
       />
       {tab === "scheduled" ? (

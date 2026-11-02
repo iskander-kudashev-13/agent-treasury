@@ -1,4 +1,5 @@
 /** Deposit / withdraw helpers for the Treasury modals. No signing here: these only build call payloads and validate input. */
+import { t } from "@/i18n";
 import { parseUsdc } from "./amount";
 import type { TxInput } from "./calls";
 
@@ -16,16 +17,16 @@ export interface AmountResult {
 }
 
 /** Parse a USDC amount typed by the user and check 0 < amount <= max (raw units). */
-export function checkAmount(input: string, max: string | null, what = "balance"): AmountResult {
+export function checkAmount(input: string, max: string | null, what = t("fund.whatBalance")): AmountResult {
   if (input.trim() === "") return { raw: null, error: null };
   let raw: string;
   try {
     raw = parseUsdc(input);
   } catch (e) {
-    return { raw: null, error: e instanceof Error ? e.message : "Invalid amount" };
+    return { raw: null, error: e instanceof Error ? e.message : t("amount.invalidShort") };
   }
-  if (BigInt(raw) === 0n) return { raw: null, error: "Amount must be greater than zero" };
-  if (max !== null && BigInt(raw) > BigInt(max)) return { raw: null, error: `Amount exceeds the ${what}` };
+  if (BigInt(raw) === 0n) return { raw: null, error: t("amount.zero") };
+  if (max !== null && BigInt(raw) > BigInt(max)) return { raw: null, error: t("amount.exceeds", { what }) };
   return { raw, error: null };
 }
 
@@ -58,7 +59,7 @@ export function formatNear(yocto: string): string {
 /** "1.5" NEAR -> yocto string; throws on invalid input. */
 export function parseNear(input: string): string {
   const s = input.trim();
-  if (!/^\d+(\.\d{1,24})?$/.test(s)) throw new Error("Enter an amount in NEAR, e.g. 1.5");
+  if (!/^\d+(\.\d{1,24})?$/.test(s)) throw new Error(t("amount.enterNear"));
   const [w = "0", f = ""] = s.split(".");
   return (BigInt(w) * 10n ** 24n + BigInt(f.padEnd(24, "0"))).toString();
 }

@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { normalizeAddress } from "./address";
 import type { RecipientInput } from "./types";
 
@@ -16,7 +17,7 @@ export const RECIPIENT_CHAINS: readonly ChainOption[] = [
   { id: "tron", label: "Tron", kind: "tron" },
 ];
 
-export const TRON_MESSAGE = "Tron is not supported: only USDT exists on Tron in 1Click, there is no USDC.";
+export const tronMessage = (): string => t("rf.tron");
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const EVM_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -35,24 +36,24 @@ export interface RecipientCheck {
 export function validateRecipientDraft(d: RecipientDraft, existing: Array<{ id?: number; label: string; destination_chain: string; destination_address: string }> = [], editingId: number | null = null): RecipientCheck {
   const errors: RecipientCheck["errors"] = {};
   const label = d.label.trim();
-  if (!label) errors.label = "Name is required";
-  else if (label.length > 64) errors.label = "Name is at most 64 characters";
+  if (!label) errors.label = t("rf.nameRequired");
+  else if (label.length > 64) errors.label = t("rf.nameLong");
   const chain = RECIPIENT_CHAINS.find((c) => c.id === d.chain);
   let address: string | null = null;
-  if (!chain) errors.chain = "Select a chain";
-  else if (chain.kind === "tron") errors.chain = TRON_MESSAGE;
+  if (!chain) errors.chain = t("rf.selectChain");
+  else if (chain.kind === "tron") errors.chain = tronMessage();
   const a = d.address.trim();
-  if (!a) errors.address = "Address is required";
+  if (!a) errors.address = t("rf.addrRequired");
   else if (chain && chain.kind !== "tron") {
     if (chain.kind === "evm") {
-      if (!EVM_RE.test(a)) errors.address = `Not a valid ${chain.label} address: expected 0x followed by 40 hex characters`;
+      if (!EVM_RE.test(a)) errors.address = t("rf.badEvm", { chain: chain.label });
       else address = normalizeAddress(chain.id, a);
-    } else if (!BASE58_RE.test(a)) errors.address = "Not a valid Solana address: expected base58, 32-44 characters";
+    } else if (!BASE58_RE.test(a)) errors.address = t("rf.badSol");
     else address = a;
   }
   if (address && chain) {
     const dup = existing.find((r) => r.id !== editingId && r.destination_chain === chain.id && r.destination_address === address);
-    if (dup) errors.address = `Already in your address book as ${dup.label}`;
+    if (dup) errors.address = t("rf.dup", { label: dup.label });
   }
   return { errors, address: Object.keys(errors).length ? null : address };
 }

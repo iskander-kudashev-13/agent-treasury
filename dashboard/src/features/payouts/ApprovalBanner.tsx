@@ -1,3 +1,4 @@
+import { t, useT } from "@/i18n";
 import { useState } from "react";
 import { shortDate } from "@/lib/frequency";
 import { usdcGrouped } from "@/lib/amount";
@@ -10,11 +11,12 @@ import { RejectModal } from "./RejectModal";
 import { payoutLabel } from "@/lib/payoutView";
 
 export const recipientLabel = (recipients: RecipientView[], id: number | null): string =>
-  id === null ? "ad-hoc payment" : (recipients.find((r) => r.id === id)?.label ?? `recipient #${id}`);
+  id === null ? t("po.adHoc") : (recipients.find((r) => r.id === id)?.label ?? t("call.recipientN", { id }));
 export const agentLabel = (agents: AgentView[], id: string): string => agents.find((a) => a.id === id)?.name ?? id;
 
 /** "Waiting for your approval" (UI_UPDATES §5.2): requesting agent, memo (plain text), overdue line, Approve / Reject. */
 export function ApprovalBanner({ pending, recipients, agents }: { pending: Payout[]; recipients: RecipientView[]; agents: AgentView[] }) {
+  const t = useT();
   const { canAct } = useOwner();
   const [review, setReview] = useState<{ id: string; mode: "approve" | "reject" } | null>(null);
   const rows = pending.filter((p) => p.status === "PendingApproval");
@@ -25,7 +27,7 @@ export function ApprovalBanner({ pending, recipients, agents }: { pending: Payou
       <div className="flex items-center gap-2 text-warn">
         <Icons.AlertTriangle size={16} />
         <h2 id="approve-title" className="m-0 text-sm font-semibold">
-          Waiting for your approval
+          {t("po.waitingTitle")}
         </h2>
       </div>
       {rows.map((p) => {
@@ -42,18 +44,18 @@ export function ApprovalBanner({ pending, recipients, agents }: { pending: Payou
               </div>
               {overdue && (
                 <div className="mt-0.5 text-xs text-warn">
-                  Overdue since {p.occurrence_at ? shortDate(Number(p.occurrence_at)) : "its due date"} (agent was offline). Approve to pay now.
+                  {t("po.overdueSince", { date: p.occurrence_at ? shortDate(Number(p.occurrence_at)) : t("po.itsDueDate") })}
                 </div>
               )}
-              {!overdue && p.approval_reason === "ABOVE_THRESHOLD" && <div className="mt-0.5 text-xs text-ink-subtle">Above the agent&apos;s approval threshold</div>}
+              {!overdue && p.approval_reason === "ABOVE_THRESHOLD" && <div className="mt-0.5 text-xs text-ink-subtle">{t("po.aboveThreshold")}</div>}
             </div>
             <span className="mono text-base font-semibold">{usdcGrouped(p.amount)}</span>
             <div className="flex gap-2">
-              <Button onClick={() => setReview({ id: p.id, mode: "reject" })} title={canAct ? undefined : "Only the vault owner can reject"}>
-                Reject
+              <Button onClick={() => setReview({ id: p.id, mode: "reject" })} title={canAct ? undefined : t("po.onlyOwnerReject")}>
+                {t("po.reject")}
               </Button>
               <Button variant="approve" onClick={() => setReview({ id: p.id, mode: "approve" })}>
-                Approve
+                {t("po.approve")}
               </Button>
             </div>
           </div>

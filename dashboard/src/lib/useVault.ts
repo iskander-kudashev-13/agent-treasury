@@ -1,5 +1,6 @@
 // Server state for the dashboard: TanStack Query hooks over contract views and the worker API.
 // Every hook polls every POLL_MS (10 s). Mutations (features/owner) invalidate `vaultKeys.all`.
+import { t } from "@/i18n";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { POLL_MS, VAULT_ID, WORKER_URL } from "./config";
@@ -140,7 +141,7 @@ export function useVault() {
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${WORKER_URL}${path}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error(t("net.http", { status: res.status }));
   return (await res.json()) as T;
 }
 const workerPoll = { refetchInterval: POLL_MS, enabled: WORKER_URL !== "", retry: false } as const;
@@ -157,7 +158,7 @@ export function useWorker() {
     ...workerPoll,
   });
   const qc = useQueryClient();
-  const error = WORKER_URL === "" ? "VITE_WORKER_URL is not set" : statusQ.error ? `Worker unreachable: ${errMsg(statusQ.error)}` : null;
+  const error = WORKER_URL === "" ? t("net.workerUrlMissing") : statusQ.error ? t("net.workerUnreachable", { msg: errMsg(statusQ.error) ?? "" }) : null;
   return {
     status: statusQ.error ? null : (statusQ.data ?? null),
     runs: runsQ.data ?? [],

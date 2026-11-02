@@ -1,4 +1,6 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
+import type { MessageKey } from "@/i18n";
 import { ONECLICK_SIMULATED, VAULT_ID } from "@/lib/config";
 import { usdcGrouped } from "@/lib/amount";
 import { canApprove, evaluateGate } from "@/lib/oneclickStatus";
@@ -12,13 +14,14 @@ import { useOwner } from "@/features/owner/OwnerProvider";
 import { QuoteCheckPanel } from "./QuoteCheckPanel";
 import { useQuoteStatus } from "./useQuoteStatus";
 
-const REASON: Record<string, string> = {
-  ABOVE_THRESHOLD: "Above the agent's approval threshold",
-  OVERDUE_NEEDS_APPROVAL: "Overdue: the agent was offline past the grace period",
+const REASON: Record<string, MessageKey> = {
+  ABOVE_THRESHOLD: "po.aboveThreshold",
+  OVERDUE_NEEDS_APPROVAL: "po.overdueReason",
 };
 
 /** Review before approving. Approve stays disabled until the 1Click quote check passes (or the status API is unreachable and the owner confirms). */
 export function ApproveModal({ payout, label, agentName, onClose }: { payout: Payout; label: string; agentName: string; onClose: () => void }) {
+  const t = useT();
   const { canAct, busy, act } = useOwner();
   const q = useQuoteStatus(payout.deposit_address, true);
   // One checkbox serves two different acknowledgements (unreachable API / simulated): the tick is bound to the phase it
@@ -44,55 +47,55 @@ export function ApproveModal({ payout, label, agentName, onClose }: { payout: Pa
       open
       onClose={() => !busy && onClose()}
       width={600}
-      title={`Approve ${usdcGrouped(payout.amount)} USDC to ${label}?`}
+      title={t("po.approveTitle", { amount: usdcGrouped(payout.amount), label })}
       footer={
         <>
           {busy && <SigningHint />}
           <Button onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="approve"
             disabled={!canAct || busy || !allowed}
             onClick={() => void approve()}
-            title={!canAct ? "Only the vault owner can approve" : !allowed ? "Blocked until the quote check passes" : "1 yocto, 100 TGas; the contract re-checks all limits"}
+            title={!canAct ? t("po.onlyOwnerApprove") : !allowed ? t("po.blockedUntil") : t("po.approveGas")}
           >
-            Approve
+            {t("po.approve")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3 text-[13px]">
         <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-          <dt className="text-ink-muted">Requested by</dt>
+          <dt className="text-ink-muted">{t("po.requestedBy")}</dt>
           <dd className="m-0">{agentName}</dd>
-          <dt className="text-ink-muted">Amount</dt>
+          <dt className="text-ink-muted">{t("po.amount")}</dt>
           <dd className="mono m-0">{usdcGrouped(payout.amount)} USDC</dd>
-          <dt className="text-ink-muted">Destination</dt>
+          <dt className="text-ink-muted">{t("po.destination")}</dt>
           <dd className="m-0 flex flex-wrap items-center gap-2 break-all">
             <ChainBadge chain={payout.chain} arrow />
             <span className="mono text-xs">{payout.address}</span>
           </dd>
           {payout.approval_reason && (
             <>
-              <dt className="text-ink-muted">Why approval</dt>
-              <dd className="m-0">{REASON[payout.approval_reason] ?? payout.approval_reason}</dd>
+              <dt className="text-ink-muted">{t("po.whyApproval")}</dt>
+              <dd className="m-0">{REASON[payout.approval_reason] ? t(REASON[payout.approval_reason]!) : payout.approval_reason}</dd>
             </>
           )}
           {payout.memo && (
             <>
-              <dt className="text-ink-muted">Memo</dt>
+              <dt className="text-ink-muted">{t("po.memo")}</dt>
               <dd className="m-0 break-words whitespace-pre-wrap">{payout.memo}</dd>
             </>
           )}
           {payout.deposit_address && (
             <>
-              <dt className="text-ink-muted">Deposit address</dt>
+              <dt className="text-ink-muted">{t("po.depositAddress")}</dt>
               <dd className="m-0 break-all">
                 <span className="mono text-xs">{payout.deposit_address}</span>{" "}
                 {gate.phase !== "simulated" && (
                   <a href={intentsTrackUrl(payout.deposit_address)} target="_blank" rel="noreferrer">
-                    Intents explorer ↗
+                    {t("po.intentsExplorer")}
                   </a>
                 )}
               </dd>
@@ -100,17 +103,17 @@ export function ApproveModal({ payout, label, agentName, onClose }: { payout: Pa
           )}
           {payout.deposit_expires_at_ms && (
             <>
-              <dt className="text-ink-muted">Valid until</dt>
+              <dt className="text-ink-muted">{t("po.validUntil")}</dt>
               <dd className={`m-0 ${expired ? "text-danger-text" : ""}`}>
                 {formatTime(payout.deposit_expires_at_ms)}
-                {expired ? " (expired: reject it, the date stays payable)" : ""}
+                {expired ? t("po.expiredReject") : ""}
               </dd>
             </>
           )}
         </dl>
         <QuoteCheckPanel gate={gate} override={override} onOverride={setOverride} onRecheck={() => void q.refetch()} />
         <p className="m-0 text-xs text-ink-subtle">
-          Approving sends {usdcGrouped(payout.amount)} USDC from the vault to the deposit address, which pays out on {chainName(payout.chain)}. You will confirm in your wallet.
+          {t("po.approveNote", { amount: usdcGrouped(payout.amount), chain: chainName(payout.chain) })}
         </p>
       </div>
     </Modal>

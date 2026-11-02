@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { Button, Callout, Card, CardHeader, Hash, Icons, Pill } from "@/kit";
 import { relativeTime } from "@/lib/relativeTime";
 import type { HlAgent, TradingStatus } from "@/lib/tradingClient";
@@ -16,6 +17,7 @@ import { useState } from "react";
  * `hlAgents`: the API wallets Hyperliquid itself lists for that account (null = not read).
  */
 export function ApiWalletCard({ status, accountOk, hlAgents }: { status: TradingStatus; accountOk: boolean; hlAgents: HlAgent[] | null }) {
+  const t = useT();
   const now = useNow(30_000);
   const w = status.api_wallet;
   const [copied, setCopied] = useState(false);
@@ -28,29 +30,29 @@ export function ApiWalletCard({ status, accountOk, hlAgents }: { status: Trading
     <Card aria-labelledby="api-wallet" className="flex flex-col gap-3">
       <CardHeader
         id="api-wallet"
-        title="Bot wallet"
+        title={t("trading.wallet.title")}
         badge={
           w.approved ? (
             <Pill accent="ok" icon={<Icons.Check size={12} strokeWidth={3} />}>
-              approved
+              {t("trading.wallet.approved")}
             </Pill>
           ) : (
-            <Pill accent="warn">waiting for approval</Pill>
+            <Pill accent="warn">{t("trading.wallet.waiting")}</Pill>
           )
         }
       />
       {w.address ? (
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
-          <span className="text-ink-muted">Address</span>
+          <span className="text-ink-muted">{t("trading.wallet.address")}</span>
           <Hash value={w.address} short={false} className="max-w-full" />
         </div>
       ) : (
-        <p className="m-0 text-sm text-ink-muted">The bot has not created its wallet yet. Start the worker with trading enabled.</p>
+        <p className="m-0 text-sm text-ink-muted">{t("trading.wallet.notCreated")}</p>
       )}
-      {missing && <Callout accent="danger">Hyperliquid does not list this address as an API wallet of your account, although the worker says it is approved. Do not trust the worker&apos;s status.</Callout>}
+      {missing && <Callout accent="danger">{t("trading.wallet.missing")}</Callout>}
       {others.length > 0 && (
         <Callout accent="warn">
-          Other API wallets are approved on your Hyperliquid account. Revoke any you do not recognise (they have the same powers as the bot&apos;s wallet; a rotated wallet stays approved until you revoke it):
+          {t("trading.wallet.others")}
           <span className="mt-1 flex flex-col gap-1">
             {others.map((a) => (
               <span key={a.address} className="mono text-xs break-all">
@@ -63,23 +65,26 @@ export function ApiWalletCard({ status, accountOk, hlAgents }: { status: Trading
       )}
       {w.approved ? (
         <p className="m-0 text-xs text-ink-muted">
-          Approved{w.valid_until_ms ? `, valid until ${new Date(w.valid_until_ms).toISOString().slice(0, 10)} (${relativeTime(w.valid_until_ms, now)})` : ""}. It cannot withdraw to another address, but it can trade perpetuals, move funds between spot and perp and more on your account. Keep only the session amount there and revoke it on Hyperliquid when you are done.
+          {t("trading.wallet.approvedLine", { until: w.valid_until_ms ? t("trading.wallet.validUntil", { date: new Date(w.valid_until_ms).toISOString().slice(0, 10), rel: relativeTime(w.valid_until_ms, now) }) : "" })}
         </p>
       ) : !accountOk ? (
-        w.address && <Callout accent="danger">Not shown: this dashboard could not confirm that the worker uses the Hyperliquid account your vault pays. Do not approve this address (see above).</Callout>
+        w.address && <Callout accent="danger">{t("trading.wallet.notShown")}</Callout>
       ) : (
         w.address && (
           <>
             <ol className="m-0 flex flex-col gap-1.5 pl-5 text-sm text-ink-secondary">
               <li>
-                Open{" "}
-                <a href={url} target="_blank" rel="noreferrer">
-                  {url.replace("https://", "")} <Icons.ExternalLink size={12} className="inline" />
-                </a>{" "}
-                and connect your Hyperliquid account <Hash value={status.hl_account} short copy={false} className="align-bottom" />.
+                {rich("trading.wallet.step1", {
+                  link: (
+                    <a href={url} target="_blank" rel="noreferrer">
+                      {url.replace("https://", "")} <Icons.ExternalLink size={12} className="inline" />
+                    </a>
+                  ),
+                  account: <Hash value={status.hl_account} short copy={false} className="align-bottom" />,
+                })}
               </li>
               <li>
-                Paste the address above as a new API wallet and name it:
+                {t("trading.wallet.step2")}
                 <span className="mt-1 flex flex-wrap items-center gap-2">
                   <span className="mono rounded bg-surface-sunken px-1.5 py-0.5 text-xs break-all">{name}</span>
                   <Button
@@ -92,17 +97,15 @@ export function ApiWalletCard({ status, accountOk, hlAgents }: { status: Trading
                       })
                     }
                   >
-                    {copied ? "Copied" : "Copy name"}
+                    {copied ? t("common.copied") : t("trading.wallet.copyName")}
                   </Button>
                 </span>
               </li>
-              <li>Check that the address matches the <span className="mono">api-wallet=</span> line in the worker console. Set the expiry to {API_WALLET_HOURS} hours at most (less than the mandate expiry), press Authorize and sign with your account.</li>
-              <li>Come back here. This page checks every 10 seconds and turns green once it sees the approval.</li>
+              <li>{rich("trading.wallet.step3", { line: <span className="mono">api-wallet=</span>, hours: API_WALLET_HOURS })}</li>
+              <li>{t("trading.wallet.step4")}</li>
             </ol>
             <p className="m-0 text-xs text-ink-subtle">
-              Hyperliquid cannot limit an API wallet to spot trading. The bot only places spot orders and stops if it sees a perpetuals position on the main account, but whoever holds this wallet&apos;s key
-              can trade perpetuals (also on builder dexes the bot does not watch), move funds between spot and perp and more. It cannot withdraw to another address. So use a dedicated account that holds only
-              the session amount, keep the expiry short, and revoke the wallet when the session ends.
+              {t("trading.wallet.caveat")}
             </p>
           </>
         )

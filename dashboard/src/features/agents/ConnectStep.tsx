@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { useEffect, useState } from "react";
 import { Button, Callout, Card, CardHeader, Checkbox, Icons, SecretField, Tabs, useSecretAck } from "@/kit";
 import { downloadEnv, envSnippet, mcpConfig, type ConnectInput } from "@/lib/agentSetup";
@@ -19,6 +20,7 @@ function useCopy() {
 
 /** Wizard step 5 (Key agents): the private key is shown once (DESIGN_AGENTS §3.2). */
 export function ConnectStep({ agentName, connect, onDone }: { agentName: string; connect: ConnectInput; onDone: () => void }) {
+  const t = useT();
   const { canFinish, acked, setAcked } = useSecretAck(3000);
   const [target, setTarget] = useState<Target>("env");
   const { copied, copy } = useCopy();
@@ -39,19 +41,19 @@ export function ConnectStep({ agentName, connect, onDone }: { agentName: string;
 
   return (
     <Card aria-labelledby="connect-title" className="flex flex-col gap-4">
-      <CardHeader id="connect-title" title={`Agent "${agentName}" is ready`} badge={<Icons.Check size={16} className="text-ok" />} />
+      <CardHeader id="connect-title" title={t("cs.ready", { name: agentName })} badge={<Icons.Check size={16} className="text-ok" />} />
       <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
-        Save this key now. You won&apos;t see it again. It exists only in this browser tab and is stored nowhere else.
+        {t("cs.saveKey")}
       </Callout>
-      <SecretField value={connect.privateKey} />
+      <SecretField value={connect.privateKey} label={t("cs.secretLabel")} />
       <p className="m-0 text-xs text-ink-muted">
-        The key can only call <span className="mono">request_payment</span> and <span className="mono">report_payout_status</span> on the vault, with a gas allowance of 0.25 NEAR. What it may spend is capped by the mandate.
+        {rich("cs.keyScope", { a: <span className="mono">request_payment</span>, b: <span className="mono">report_payout_status</span> })}
       </p>
 
       <div className="flex flex-col gap-2">
-        <span className="text-[13px] font-medium text-ink-secondary">Connect it</span>
+        <span className="text-[13px] font-medium text-ink-secondary">{t("cs.connectIt")}</span>
         <Tabs
-          label="Connect target"
+          label={t("cs.connectTarget")}
           value={target}
           onChange={setTarget}
           items={[
@@ -60,24 +62,24 @@ export function ConnectStep({ agentName, connect, onDone }: { agentName: string;
             { value: "desktop", label: "Claude Desktop" },
           ]}
         />
-        <pre tabIndex={0} aria-label="Config with the private key (focus to reveal)" className="secret mono m-0 max-h-64 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
+        <pre tabIndex={0} aria-label={t("cs.configAria")} className="secret mono m-0 max-h-64 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
           {snippet}
         </pre>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" icon={<Icons.Copy size={13} />} onClick={() => copy("snippet", snippet)}>
-            {copied === "snippet" ? "Copied" : "Copy config"}
+            {copied === "snippet" ? t("common.copied") : t("cs.copyConfig")}
           </Button>
           <Button size="sm" icon={<Icons.Copy size={13} />} onClick={() => copy("key", connect.privateKey)}>
-            {copied === "key" ? "Copied" : "Copy key"}
+            {copied === "key" ? t("common.copied") : t("cs.copyKey")}
           </Button>
           <Button size="sm" icon={<Icons.ArrowDown size={13} />} onClick={() => downloadEnv(connect)}>
-            Download .env
+            {t("cs.downloadEnv")}
           </Button>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
-        <Checkbox checked={acked} onChange={setAcked} label="I saved the key" />
+        <Checkbox checked={acked} onChange={setAcked} label={t("cs.savedKey")} />
         <span className="grow" />
         <Button
           variant="primary"
@@ -87,7 +89,7 @@ export function ConnectStep({ agentName, connect, onDone }: { agentName: string;
             onDone();
           }}
         >
-          I saved it → Done
+          {t("cs.savedDone")}
         </Button>
       </div>
     </Card>

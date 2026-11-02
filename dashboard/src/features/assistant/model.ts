@@ -1,4 +1,5 @@
 /** State model of the chat (pure, unit-tested): items, history sent to the worker, data payload parsing. */
+import { t } from "@/i18n";
 import type { DataKind } from "@/lib/assistantClient";
 import { isAssistantMethod, type PlannedCall } from "@/lib/calls";
 import { previewFirst } from "@/lib/scheduleForm";
@@ -141,7 +142,7 @@ export function parseUpcoming(p: unknown): UpcomingData | null {
   return {
     items: p.items.slice(0, 50).flatMap((i) =>
       isObj(i)
-        ? [{ label: s(i.untrusted_recipient_label, 64) || `Recipient #${s(i.recipient_id)}`, agent: s(i.agent_id, 40), amount: s(i.amount_usdc, 30), due: s(i.due_at, 30), approval: i.will_need_approval === true }]
+        ? [{ label: s(i.untrusted_recipient_label, 64) || t("as.recipientN", { id: s(i.recipient_id) }), agent: s(i.agent_id, 40), amount: s(i.amount_usdc, 30), due: s(i.due_at, 30), approval: i.will_need_approval === true }]
         : [],
     ),
     total: s(p.total_usdc, 30),

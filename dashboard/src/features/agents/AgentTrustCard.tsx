@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button, Callout, Card, CardHeader, Hash, Modal, Pill, ShieldProof, SigningHint } from "@/kit";
@@ -13,6 +14,7 @@ import { Fact, Facts, TrustLine } from "./parts";
 import { useAgentTx } from "./useAgentTx";
 
 function KeyAgentProof({ agent }: { agent: AgentView }) {
+  const t = useT();
   const acc = agent.account_id;
   const pk = agent.public_key;
   const q = useQuery({ queryKey: ["agent-access-key", NETWORK, acc, pk], queryFn: () => viewAccessKey(acc!, pk!), enabled: Boolean(acc && pk), refetchInterval: 30_000, retry: false });
@@ -20,7 +22,7 @@ function KeyAgentProof({ agent }: { agent: AgentView }) {
   return (
     <>
       <Facts>
-        <Fact label="Account">
+        <Fact label={t("ag.account")}>
           {acc ? (
             <a className="mono text-xs break-all" href={explorerAddressUrl(acc)} target="_blank" rel="noreferrer">
               {acc}
@@ -29,23 +31,24 @@ function KeyAgentProof({ agent }: { agent: AgentView }) {
             "—"
           )}
         </Fact>
-        <Fact label="Public key">{pk ? <Hash value={pk} /> : "not recorded"}</Fact>
-        <Fact label="Allowed methods">
-          <span className="mono text-xs">{KEY_AGENT_METHODS.join(", ")}</span> on <span className="mono text-xs">{VAULT_ID}</span>
+        <Fact label={t("ag.publicKey")}>{pk ? <Hash value={pk} /> : t("ag.notRecorded")}</Fact>
+        <Fact label={t("ag.allowedMethods")}>
+          {rich("ag.methodsOn", { methods: <span className="mono text-xs">{KEY_AGENT_METHODS.join(", ")}</span>, vault: <span className="mono text-xs">{VAULT_ID}</span> })}
         </Fact>
         {key?.state === "function-call" && (
-          <Fact label="Gas allowance left">{key.allowanceYocto ? `${formatNear(key.allowanceYocto)} NEAR` : "unlimited"}</Fact>
+          <Fact label={t("ag.allowanceLeft")}>{key.allowanceYocto ? `${formatNear(key.allowanceYocto)} NEAR` : t("ag.unlimited")}</Fact>
         )}
       </Facts>
-      {key?.state === "missing" && agent.status !== "Revoked" && <Callout accent="warn">Access key not found on account. The agent can no longer sign requests; create a new agent or add the key again.</Callout>}
-      {key?.state === "full-access" && <Callout accent="warn">This key has full access to the account, not just the vault methods. Prefer a function-call key.</Callout>}
-      {key?.state === "function-call" && key.receiverId !== VAULT_ID && <Callout accent="warn">This key is restricted to {key.receiverId}, not this vault.</Callout>}
-      {q.isError && <p className="m-0 text-xs text-ink-muted">Couldn&apos;t check the access key on chain.</p>}
+      {key?.state === "missing" && agent.status !== "Revoked" && <Callout accent="warn">{t("ag.keyMissing")}</Callout>}
+      {key?.state === "full-access" && <Callout accent="warn">{t("ag.keyFull")}</Callout>}
+      {key?.state === "function-call" && key.receiverId !== VAULT_ID && <Callout accent="warn">{t("ag.keyWrongReceiver", { receiver: key.receiverId })}</Callout>}
+      {q.isError && <p className="m-0 text-xs text-ink-muted">{t("ag.keyCheckFailed")}</p>}
     </>
   );
 }
 
 function TeeProof({ agent }: { agent: AgentView }) {
+  const t = useT();
   const { canAct, busy, call } = useAgentTx();
   const [confirmUnbind, setConfirmUnbind] = useState(false);
   const tee = agent.tee;
@@ -55,19 +58,19 @@ function TeeProof({ agent }: { agent: AgentView }) {
     <>
       {!tee || !bound ? (
         <Callout accent="warn">
-          Waiting for the worker to register (no attestation yet). Deploy the worker with <span className="mono">AGENT_ID={agent.id}</span>, and approve its measurements and hardware (PPID) on the Policy page.
+          {rich("ag.teeWaiting", { agentId: <span className="mono">AGENT_ID={agent.id}</span> })}
         </Callout>
       ) : (
         <ShieldProof
-          title="Enclave measurements"
+          title={t("ag.enclaveMeasurements")}
           hash={measurementsLabel(tee.measurements)}
           approved={tee.valid}
-          link={tee.valid ? "✓ attestation valid and still approved on Policy" : "Attestation is not valid, payments are refused"}
+          link={tee.valid ? t("ag.attValid") : t("ag.attInvalid")}
         />
       )}
       <Facts>
-        <Fact label="Bound account">{bound ? <Hash value={agent.account_id!} /> : "none yet"}</Fact>
-        <Fact label="Account pinned">{agent.account_pinned ? <Pill accent="ok">pinned</Pill> : <Pill accent={bound ? "warn" : "neutral"}>not pinned</Pill>}</Fact>
+        <Fact label={t("ag.boundAccount")}>{bound ? <Hash value={agent.account_id!} /> : t("ag.noneYet")}</Fact>
+        <Fact label={t("ag.accountPinned")}>{agent.account_pinned ? <Pill accent="ok">{t("ag.pinned")}</Pill> : <Pill accent={bound ? "warn" : "neutral"}>{t("ag.notPinned")}</Pill>}</Fact>
         {tee && (
           <>
             <Fact label="PPID">
@@ -75,10 +78,10 @@ function TeeProof({ agent }: { agent: AgentView }) {
                 {shortId(tee.ppid, 10, 6)}
               </span>
             </Fact>
-            <Fact label="Valid until">{formatTime(tee.valid_until_ms)}</Fact>
-            <Fact label="Measurements">
+            <Fact label={t("ag.validUntil")}>{formatTime(tee.valid_until_ms)}</Fact>
+            <Fact label={t("ag.measurements")}>
               <details>
-                <summary className="cursor-pointer text-xs text-ink-secondary">Show all</summary>
+                <summary className="cursor-pointer text-xs text-ink-secondary">{t("ag.showAll")}</summary>
                 <pre className="mono m-0 mt-1 max-h-40 overflow-auto text-[11px] break-all whitespace-pre-wrap">{JSON.stringify(tee.measurements, null, 1)}</pre>
               </details>
             </Fact>
@@ -98,27 +101,27 @@ function TeeProof({ agent }: { agent: AgentView }) {
         <Callout
           accent="info"
           action={
-            <Button size="sm" disabled={!canAct || busy} onClick={() => void call("pin_agent", { agent_id: agent.id })} title="1 yoctoNEAR">
-              Pin account
+            <Button size="sm" disabled={!canAct || busy} onClick={() => void call("pin_agent", { agent_id: agent.id })} title={t("ag.pinTitle")}>
+              {t("ag.pinAccount")}
             </Button>
           }
         >
-          Verify that <span className="mono break-all">{agent.account_id}</span> is your enclave&apos;s account, then pin it. While unpinned, another valid enclave can take over this slot once the attestation expires.
+          {rich("ag.pinHint", { account: <span className="mono break-all">{agent.account_id}</span> })}
         </Callout>
       )}
       {bound && !revoked && (
         <div>
           <Button size="sm" disabled={!canAct || busy} onClick={() => setConfirmUnbind(true)}>
-            Unbind account
+            {t("ag.unbindAccount")}
           </Button>
           <Modal
             open={confirmUnbind}
             onClose={() => setConfirmUnbind(false)}
-            title={`Unbind ${agent.name}?`}
+            title={t("ag.unbindTitle", { name: agent.name })}
             footer={
               <>
                 {busy && <SigningHint />}
-                <Button onClick={() => setConfirmUnbind(false)}>Cancel</Button>
+                <Button onClick={() => setConfirmUnbind(false)}>{t("common.cancel")}</Button>
                 <Button
                   variant="danger"
                   disabled={busy}
@@ -128,12 +131,12 @@ function TeeProof({ agent }: { agent: AgentView }) {
                     })
                   }
                 >
-                  Unbind
+                  {t("ag.unbind")}
                 </Button>
               </>
             }
           >
-            The slot becomes free and the enclave must register again. Payments from <span className="mono break-all">{agent.account_id}</span> waiting for your approval are rejected. Scheduled dates stay payable. Needs 1 yoctoNEAR.
+            {rich("ag.unbindBody", { account: <span className="mono break-all">{agent.account_id}</span> })}
           </Modal>
         </div>
       )}
@@ -143,10 +146,11 @@ function TeeProof({ agent }: { agent: AgentView }) {
 
 /** Trust and proof (DESIGN_AGENTS §3.3): TEE measurements, PPID, validity and Pin/Unbind; Key account, public key and allowance. */
 export function AgentTrustCard({ agent }: { agent: AgentView }) {
+  const t = useT();
   const trust = trustOf(agent);
   return (
     <Card aria-labelledby="trust-title" className="flex flex-col gap-3">
-      <CardHeader id="trust-title" title={agent.kind === "Tee" ? "Verified agent (TEE)" : "Connected agent (key)"} badge={<TrustLine trust={trust} />} />
+      <CardHeader id="trust-title" title={agent.kind === "Tee" ? t("ag.verifiedTee") : t("ag.connectedKey")} badge={<TrustLine trust={trust} />} />
       {agent.kind === "Tee" ? <TeeProof agent={agent} /> : <KeyAgentProof agent={agent} />}
     </Card>
   );

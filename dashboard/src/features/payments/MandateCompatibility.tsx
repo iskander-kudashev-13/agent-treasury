@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { Link } from "react-router-dom";
 import { Callout, Checkbox, Icons } from "@/kit";
 import type { CompatResult } from "@/lib/mandateCompat";
@@ -22,7 +23,8 @@ export function MandateCompatibility({
   onAddToMandate: (v: boolean) => void;
   disabled?: boolean;
 }) {
-  const agentName = agent?.name ?? "the agent";
+  const t = useT();
+  const agentName = agent?.name ?? t("mc.theAgent");
   return (
     <div className="flex flex-col gap-2">
       {compat.errors.map((e) => (
@@ -38,8 +40,8 @@ export function MandateCompatibility({
       ))}
       {offerAddToMandate && (
         <div className="rounded-tile border border-line bg-surface-sunken px-3 py-2.5">
-          <Checkbox label={<span className="text-[13px]">Also add this recipient to {agentName}&apos;s mandate</span>} checked={addToMandate} disabled={disabled} onChange={onAddToMandate} />
-          <p className="m-0 mt-1 ml-7 text-xs text-ink-subtle">Signed in the same transaction, before the schedule is created. The agent will be allowed to pay this recipient on demand too.</p>
+          <Checkbox label={<span className="text-[13px]">{t("mc.alsoAdd", { agent: agentName })}</span>} checked={addToMandate} disabled={disabled} onChange={onAddToMandate} />
+          <p className="m-0 mt-1 ml-7 text-xs text-ink-subtle">{t("mc.alsoAddHint")}</p>
         </div>
       )}
       {compat.warnings.map((w) => (

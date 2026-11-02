@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { useCallback, useRef, useState } from "react";
 import { AssistantHttpError, clearSession, loadSession, signInWithWallet, streamChat, type AiSession, type ChatEvent } from "@/lib/assistantClient";
 import { VAULT_ID } from "@/lib/config";
@@ -92,7 +93,7 @@ export function useAssistant() {
           return;
         }
         case "malformed_proposal":
-          update((cur) => [...closeStreaming(cur), { kind: "notice", id: nid(), text: "The assistant sent a change in a format I could not verify, so it was ignored.", tone: "error" }]);
+          update((cur) => [...closeStreaming(cur), { kind: "notice", id: nid(), text: t("us.malformed"), tone: "error" }]);
           return;
         case "question":
           update((cur) => [...closeStreaming(cur), { kind: "question", id: nid(), text: ev.text, options: ev.options, answered: false }]);

@@ -1,4 +1,5 @@
 // Form controls and navigation: inputs, toggle, chips, segmented, tabs, stepper, timeline. DESIGN_SYSTEM.md §4, §7.
+import { useT } from "@/i18n";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { Check, Loader } from "./icons";
 import { cx } from "./primitives";
@@ -80,14 +81,16 @@ export function Textarea({ state = "default", className, ...rest }: TextareaHTML
 }
 
 /** Blurred until hover/focus, amber border. For one-time secrets ("Save this key now. You won't see it again."). */
-export function SecretField({ value, label = "Agent private key" }: { value: string; label?: string }) {
+export function SecretField({ value, label: labelProp }: { value: string; label?: string }) {
+  const t = useT();
+  const label = labelProp ?? t("cs.secretLabel");
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[13px] font-medium text-ink-secondary">{label}</span>
-      <div tabIndex={0} aria-label={`${label} (focus to reveal)`} className="secret mono rounded-input border border-warn bg-surface-sunken px-3 py-2.5 text-[13px] break-all">
+      <div tabIndex={0} aria-label={t("kit.focusToReveal", { label })} className="secret mono rounded-input border border-warn bg-surface-sunken px-3 py-2.5 text-[13px] break-all">
         {value}
       </div>
-      <p className="m-0 text-xs text-warn">Save this key now. You won&apos;t see it again.</p>
+      <p className="m-0 text-xs text-warn">{t("kit.saveKeyShort")}</p>
     </div>
   );
 }
@@ -237,8 +240,9 @@ export function Tabs<T extends string>({ value, onChange, items, label }: { valu
 
 /** Thin progress segments + numbered labels; done steps get a green check. `current` is 0-based. */
 export function Stepper({ steps, current }: { steps: string[]; current: number }) {
+  const t = useT();
   return (
-    <ol className="m-0 grid list-none gap-2 p-0" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }} aria-label="Progress">
+    <ol className="m-0 grid list-none gap-2 p-0" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }} aria-label={t("kit.progress")}>
       {steps.map((s, i) => {
         const done = i < current;
         const on = i === current;

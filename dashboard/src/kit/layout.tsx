@@ -1,4 +1,5 @@
 // App shell: sticky header with logo, vault id, network pill, nav, assistant button, account. Matches Main.dc.html.
+import { useT } from "@/i18n";
 import type { ReactNode } from "react";
 import { Sparkles } from "./icons";
 import { cx, Dot, Hash, Pill } from "./primitives";
@@ -35,6 +36,7 @@ export function AppHeader({
   /** e.g. <Banner>Agent paused — …</Banner> */
   banner?: ReactNode;
 }) {
+  const t = useT();
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/85 backdrop-blur-md">
       <div className="mx-auto flex max-w-content flex-wrap items-center gap-3 px-4 py-3 md:gap-4 md:px-6">
@@ -46,7 +48,7 @@ export function AppHeader({
           <Hash value={vaultId} short={false} className="[&>span:first-child]:text-xs" />
         </span>
         {network === "testnet" ? <Pill accent="warn">testnet</Pill> : <Pill accent="ok">mainnet</Pill>}
-        <nav aria-label="Main" className="order-last flex w-full gap-1 overflow-x-auto md:order-none md:ml-2 md:w-auto">
+        <nav aria-label={t("nav.main")} className="order-last flex w-full gap-1 overflow-x-auto md:order-none md:ml-2 md:w-auto">
           {nav.map((n) => (
             <a
               key={n.href}
@@ -63,7 +65,7 @@ export function AppHeader({
         {onAssistant && (
           <button type="button" onClick={onAssistant} className="at-btn inline-flex h-9 cursor-pointer items-center gap-2 rounded-input border border-ai-line bg-ai px-3 text-[13px] text-ai-text">
             <Sparkles size={14} />
-            <span className="sr-only sm:not-sr-only">Assistant</span>
+            <span className="sr-only sm:not-sr-only">{t("assistant.title")}</span>
           </button>
         )}
         <button type="button" onClick={onAccountClick} className="at-btn inline-flex h-9 cursor-pointer items-center gap-2 rounded-input border border-line bg-surface px-3 text-ink">
@@ -73,7 +75,7 @@ export function AppHeader({
               <span className="mono text-xs">{account}</span>
             </>
           ) : (
-            <span className="text-[13px] font-medium">Connect wallet</span>
+            <span className="text-[13px] font-medium">{t("common.connectWallet")}</span>
           )}
         </button>
       </div>

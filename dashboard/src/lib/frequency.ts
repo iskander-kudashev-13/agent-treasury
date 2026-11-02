@@ -3,6 +3,7 @@
  * Must match contract/src/frequency.rs and docs/frequency-vectors.json exactly.
  * Timestamps are ms since epoch as `number` (safe: far below 2^53).
  */
+import { getLocale, intlLocale, t } from "@/i18n";
 import type { Frequency, ScheduleEnd } from "./types";
 
 export const DAY_MS = 86_400_000;
@@ -96,7 +97,6 @@ export function nextOccurrences(s: ScheduleLike, n = 3, from?: number): number[]
   return out;
 }
 
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function ordinal(n: number): string {
@@ -107,14 +107,15 @@ export function ordinal(n: number): string {
 
 /** "3 Dec" (UTC). */
 export function shortDate(ms: number): string {
+  if (getLocale() !== "en") return new Intl.DateTimeFormat(intlLocale(), { day: "numeric", month: "short", timeZone: "UTC" }).format(ms);
   const [, m, d] = civilFromDays(Math.floor(ms / DAY_MS));
   return `${d} ${MONTHS[m - 1]}`;
 }
 
 export function describeFrequency(freq: Frequency, startAt: string | number): string {
-  if (freq === "Once") return `Once on ${shortDate(Number(startAt))}`;
-  if ("Weekly" in freq) return `Every ${WEEKDAYS[freq.Weekly.weekday]}`;
-  if ("Monthly" in freq) return `Monthly on the ${ordinal(freq.Monthly.day)}`;
+  if (freq === "Once") return t("freq.once", { date: shortDate(Number(startAt)) });
+  if ("Weekly" in freq) return t(`freq.weekly.${freq.Weekly.weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6}` as const);
+  if ("Monthly" in freq) return t("freq.monthly", { day: freq.Monthly.day, ordinal: ordinal(freq.Monthly.day) });
   const n = freq.EveryNDays.n;
-  return n === 1 ? "Every day" : `Every ${n} days`;
+  return n === 1 ? t("freq.everyDay") : t("freq.everyNDays", { count: n });
 }

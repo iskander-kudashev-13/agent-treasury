@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
 import { Button, Icons, Modal, SigningHint } from "@/kit";
 import type { AgentView } from "@/lib/types";
@@ -5,31 +6,32 @@ import { useAgentTx } from "./useAgentTx";
 
 /** Pause (confirm sheet, no deposit) or Resume (1 yocto) for one agent. Hidden for revoked agents. */
 export function PauseResume({ agent, vaultPaused, size = "sm" }: { agent: AgentView; vaultPaused?: boolean; size?: "sm" | "md" }) {
+  const t = useT();
   const { canAct, busy, call } = useAgentTx();
   const [confirm, setConfirm] = useState(false);
   if (agent.status === "Revoked") return null;
   const disabled = !canAct || busy || vaultPaused;
-  const title = !canAct ? "Only the vault owner can do this" : vaultPaused ? "The vault is paused" : undefined;
+  const title = !canAct ? t("common.ownerOnly") : vaultPaused ? t("ag.vaultIsPaused") : undefined;
   if (agent.status === "Paused") {
     return (
       <Button size={size} icon={<Icons.Play size={13} />} disabled={disabled} title={title} onClick={() => void call("resume_agent", { agent_id: agent.id })}>
-        Resume
+        {t("ag.resume")}
       </Button>
     );
   }
   return (
     <>
       <Button size={size} icon={<Icons.Pause size={13} />} disabled={disabled} title={title} onClick={() => setConfirm(true)}>
-        Pause
+        {t("ag.pause")}
       </Button>
       <Modal
         open={confirm}
         onClose={() => setConfirm(false)}
-        title={`Pause ${agent.name}?`}
+        title={t("ag.pauseTitle", { name: agent.name })}
         footer={
           <>
             {busy && <SigningHint />}
-            <Button onClick={() => setConfirm(false)}>Cancel</Button>
+            <Button onClick={() => setConfirm(false)}>{t("common.cancel")}</Button>
             <Button
               variant="approve"
               disabled={busy}
@@ -39,12 +41,12 @@ export function PauseResume({ agent, vaultPaused, size = "sm" }: { agent: AgentV
                 })
               }
             >
-              Pause {agent.name}
+              {t("ag.pauseBtn", { name: agent.name })}
             </Button>
           </>
         }
       >
-        {agent.name} can&apos;t request payments until you resume it. Other agents keep working.
+        {t("ag.pauseBody", { name: agent.name })}
       </Modal>
     </>
   );

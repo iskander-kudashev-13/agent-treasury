@@ -1,4 +1,5 @@
 /** View-model helpers for the Scheduled tab: overdue detection, progress text, filters and sort. Pure. */
+import { t } from "@/i18n";
 import { DAY_MS } from "./frequency";
 import type { Schedule, ScheduleStatus } from "./types";
 
@@ -15,8 +16,8 @@ export function overdueDays(s: Pick<Schedule, "status" | "next_due_at">, now: nu
 }
 
 export function progressText(s: Pick<Schedule, "paid_count" | "end">): string {
-  if (typeof s.end === "object" && "AfterCount" in s.end) return `${s.paid_count} of ${s.end.AfterCount.count} paid`;
-  return s.paid_count === 1 ? "Paid once" : `Paid ${s.paid_count} times`;
+  if (typeof s.end === "object" && "AfterCount" in s.end) return t("sv.progress", { paid: s.paid_count, total: s.end.AfterCount.count });
+  return s.paid_count === 1 ? t("sv.paidOnce") : t("sv.paidTimes", { count: s.paid_count });
 }
 
 export interface ScheduleFilters {

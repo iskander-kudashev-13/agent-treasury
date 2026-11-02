@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { formatUsdc } from "@/lib/amount";
@@ -12,6 +13,7 @@ import { outcomeTxHash, useWallet } from "@/features/wallet/WalletProvider";
 
 /** Deposit USDC into the vault: `ft_transfer_call` on the USDC contract, 1 yocto, empty msg. Any connected account may fund the vault. */
 export function DepositModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT();
   const { accountId, signIn, signAndSendTransactions } = useWallet();
   const toast = useToast();
   const qc = useQueryClient();
@@ -21,7 +23,7 @@ export function DepositModal({ open, onClose }: { open: boolean; onClose: () => 
   const reg = useStorageRegistered(VAULT_ID);
   const storageMin = useStorageMin() ?? DEFAULT_STORAGE_MIN_YOCTO;
 
-  const parsed = checkAmount(amount, wallet.data, "USDC in your wallet");
+  const parsed = checkAmount(amount, wallet.data, t("fund.whatWallet"));
   const needsRegistration = reg.registered === false;
   const ready = USDC_ID !== "" && accountId !== null && parsed.raw !== null && reg.registered !== undefined && !busy;
 
@@ -32,7 +34,7 @@ export function DepositModal({ open, onClose }: { open: boolean; onClose: () => 
       const tx = buildDepositTx({ usdcId: USDC_ID, vaultId: VAULT_ID, amount: parsed.raw, registerVaultYocto: needsRegistration ? storageMin : null });
       const out = (await signAndSendTransactions([tx])) as Parameters<typeof outcomeTxHash>[0];
       const hash = outcomeTxHash(out);
-      toast({ text: `Deposit of ${usdcGrouped(parsed.raw)} USDC submitted`, accent: "ok", ...(hash ? { href: explorerTxUrl(hash) } : {}) });
+      toast({ text: t("deposit.toast", { amount: usdcGrouped(parsed.raw) }), accent: "ok", ...(hash ? { href: explorerTxUrl(hash) } : {}) });
       const refresh = () => {
         void qc.invalidateQueries({ queryKey: vaultKeys.all });
         void qc.invalidateQueries({ queryKey: usdcKeys.all });
@@ -43,7 +45,7 @@ export function DepositModal({ open, onClose }: { open: boolean; onClose: () => 
       onClose();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      toast(/reject|cancel|denied|declin/i.test(msg) ? { text: "Cancelled in wallet", accent: "neutral" } : { text: `Deposit: ${msg}`, accent: "danger", durationMs: 6000 });
+      toast(/reject|cancel|denied|declin/i.test(msg) ? { text: t("deposit.cancelledToast"), accent: "neutral" } : { text: t("deposit.errorToast", { msg }), accent: "danger", durationMs: 6000 });
     } finally {
       setBusy(false);
     }
@@ -53,48 +55,48 @@ export function DepositModal({ open, onClose }: { open: boolean; onClose: () => 
     <Modal
       open={open}
       onClose={() => !busy && onClose()}
-      title="Deposit USDC"
+      title={t("deposit.title")}
       footer={
         <>
           {busy && <SigningHint />}
           <Button onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           {accountId ? (
             <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
-              Deposit
+              {t("treasury.deposit")}
             </Button>
           ) : (
             <Button variant="primary" onClick={signIn}>
-              Connect wallet
+              {t("common.connectWallet")}
             </Button>
           )}
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        {USDC_ID === "" && <Callout accent="warn">VITE_USDC_CONTRACT is not set, so deposits are unavailable.</Callout>}
+        {USDC_ID === "" && <Callout accent="warn">{t("deposit.usdcNotSet")}</Callout>}
         <Field
-          label="Amount (USDC)"
+          label={t("deposit.amount")}
           error={parsed.error}
-          hint={accountId ? `Your wallet holds ${wallet.data === null ? "…" : usdcGrouped(wallet.data)} USDC.` : "Connect a wallet to see your USDC balance."}
+          hint={accountId ? t("deposit.walletHolds", { amount: wallet.data === null ? "…" : usdcGrouped(wallet.data) }) : t("deposit.connectToSee")}
         >
           {(a) => (
             <div className="flex gap-2">
               <Input {...a} mono inputMode="decimal" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
               <Button size="sm" disabled={wallet.data === null} onClick={() => wallet.data && setAmount(formatUsdc(wallet.data, 6))}>
-                Max
+                {t("deposit.max")}
               </Button>
             </div>
           )}
         </Field>
         {needsRegistration && (
           <Callout accent="warn">
-            <strong>The vault is not registered on the USDC contract yet.</strong> A NEP-141 token only accepts transfers to registered accounts. This deposit will first register the vault (storage deposit of about {formatNear(storageMin)} NEAR, paid by you, one time) in the same transaction.
+            <strong>{t("deposit.notRegisteredTitle")}</strong> {t("deposit.notRegisteredBody", { near: formatNear(storageMin) })}
           </Callout>
         )}
         <p className="m-0 text-[13px]">
-          Funds stay in your vault contract. Only policy-approved payouts can leave. You sign <span className="mono">ft_transfer_call</span> on the USDC contract with 1 yoctoNEAR.
+          {t("deposit.note", { method: "ft_transfer_call" })}
         </p>
       </div>
     </Modal>
@@ -103,12 +105,13 @@ export function DepositModal({ open, onClose }: { open: boolean; onClose: () => 
 
 /** Withdraw USDC from the vault to the owner (or another registered NEAR account). Always allowed, even when paused. */
 export function WithdrawModal({ open, onClose, balance }: { open: boolean; onClose: () => void; balance: string | null }) {
+  const t = useT();
   const { canAct, busy, act, ownerId } = useOwner();
   const [amount, setAmount] = useState("");
   const [to, setTo] = useState("");
   const receiver = to.trim() || ownerId;
   const reg = useStorageRegistered(open ? receiver : null);
-  const parsed = checkAmount(amount, balance, "vault balance");
+  const parsed = checkAmount(amount, balance, t("fund.whatVault"));
 
   const submit = async () => {
     if (!parsed.raw) return;
@@ -122,35 +125,35 @@ export function WithdrawModal({ open, onClose, balance }: { open: boolean; onClo
     <Modal
       open={open}
       onClose={() => !busy && onClose()}
-      title="Withdraw USDC"
+      title={t("withdraw.title")}
       footer={
         <>
           {busy && <SigningHint />}
           <Button onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button variant="primary" disabled={!canAct || busy || parsed.raw === null} onClick={() => void submit()} title={canAct ? "1 yocto, 100 TGas (the contract needs at least 60)" : "Only the vault owner can withdraw"}>
-            Withdraw
+          <Button variant="primary" disabled={!canAct || busy || parsed.raw === null} onClick={() => void submit()} title={canAct ? t("withdraw.gasTitle") : t("treasury.onlyOwnerWithdraw")}>
+            {t("treasury.withdraw")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Amount (USDC)" error={parsed.error} hint={balance !== null ? `Vault balance ${usdcGrouped(balance)} USDC.` : undefined}>
+        <Field label={t("deposit.amount")} error={parsed.error} hint={balance !== null ? t("withdraw.vaultBalance", { amount: usdcGrouped(balance) }) : undefined}>
           {(a) => (
             <div className="flex gap-2">
               <Input {...a} mono inputMode="decimal" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
               <Button size="sm" disabled={balance === null} onClick={() => balance && setAmount(formatUsdc(balance, 6))}>
-                Max
+                {t("deposit.max")}
               </Button>
             </div>
           )}
         </Field>
-        <Field label="Receiver" hint={`Default: the owner (${ownerId ?? "?"}).`}>
-          {(a) => <Input {...a} mono value={to} onChange={(e) => setTo(e.target.value)} placeholder="optional NEAR account id" />}
+        <Field label={t("withdraw.receiver")} hint={t("withdraw.receiverHint", { owner: ownerId ?? "?" })}>
+          {(a) => <Input {...a} mono value={to} onChange={(e) => setTo(e.target.value)} placeholder={t("withdraw.receiverPlaceholder")} />}
         </Field>
-        {receiver && reg.registered === false && <Callout accent="warn">{receiver} is not registered on the USDC contract, so the transfer would fail. Register it first.</Callout>}
-        <p className="m-0 text-[13px]">Always allowed, even while the vault is paused. Money in flight and upcoming scheduled payments are not reserved: withdrawing may leave them underfunded.</p>
+        {receiver && reg.registered === false && <Callout accent="warn">{t("withdraw.notRegistered", { receiver })}</Callout>}
+        <p className="m-0 text-[13px]">{t("withdraw.note")}</p>
       </div>
     </Modal>
   );

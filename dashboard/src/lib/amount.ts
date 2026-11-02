@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 /** USDC amounts: always strings / bigint of smallest units (6 decimals). Never floats. */
 export const USDC_DECIMALS = 6;
 
@@ -21,9 +22,9 @@ export const formatUsdc = (raw: string | bigint, minFraction = 2): string =>
 /** Human decimal string -> raw units string. Throws on invalid input or more than `decimals` fraction digits. */
 export function parseUnits(input: string, decimals = USDC_DECIMALS): string {
   const s = input.trim();
-  if (!/^\d+(\.\d+)?$/.test(s)) throw new Error(`Invalid amount: "${input}"`);
+  if (!/^\d+(\.\d+)?$/.test(s)) throw new Error(t("amount.invalid", { value: input }));
   const [whole = "0", frac = ""] = s.split(".");
-  if (frac.length > decimals) throw new Error(`At most ${decimals} decimal places`);
+  if (frac.length > decimals) throw new Error(t("amount.maxDecimals", { n: decimals }));
   return (BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac.padEnd(decimals, "0"))).toString();
 }
 

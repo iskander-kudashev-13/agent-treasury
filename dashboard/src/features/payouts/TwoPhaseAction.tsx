@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useEffect, useState } from "react";
 import { secondsLeft, type TwoPhaseState } from "@/lib/twoPhase";
 import { Button, Callout } from "@/kit";
@@ -35,13 +36,14 @@ export function TwoPhaseAction({
   notCreditedText: string;
   disabled?: boolean;
 }) {
+  const t = useT();
   const { canAct, busy, act } = useOwner();
   const [st, setSt] = useState<TwoPhaseState>({ phase: "idle" });
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (st.phase !== "waiting") return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, [st.phase]);
 
   const left = st.phase === "waiting" ? secondsLeft(st.startedAt, now) : 0;
@@ -79,7 +81,7 @@ export function TwoPhaseAction({
   return (
     <div className="flex flex-col gap-2">
       {st.phase === "idle" && (
-        <Button size="sm" disabled={off} onClick={() => void start()} title="Step 1 of 2: records a balance probe (1 yocto)">
+        <Button size="sm" disabled={off} onClick={() => void start()} title={t("tp.step1Hint")}>
           {startLabel}
         </Button>
       )}
@@ -87,22 +89,22 @@ export function TwoPhaseAction({
         <Callout
           accent="info"
           action={
-            <Button size="sm" variant="primary" disabled={off || left > 0} onClick={() => void confirm()} title="Step 2 of 2 (1 yocto)">
-              {left > 0 ? `${confirmLabel} (${left}s)` : confirmLabel}
+            <Button size="sm" variant="primary" disabled={off || left > 0} onClick={() => void confirm()} title={t("tp.step2Hint")}>
+              {left > 0 ? t("tp.confirmWait", { label: confirmLabel, left }) : confirmLabel}
             </Button>
           }
         >
-          <strong>Step 1 of 2 done.</strong> {title}: confirm in {left > 0 ? `${left} s` : "the wallet now"}. The contract compares two balance reads taken at least 60 s apart.
+          <strong>{t("tp.step1Done")}</strong> {left > 0 ? t("tp.waitMsg", { title, left }) : t("tp.nowMsg", { title })}
         </Callout>
       )}
-      {st.phase === "verifying" && <Callout accent="neutral">Checking the result on chain…</Callout>}
+      {st.phase === "verifying" && <Callout accent="neutral">{t("tp.verifying")}</Callout>}
       {st.phase === "done" && <Callout accent="ok">{doneText}</Callout>}
       {st.phase === "not_credited" && (
         <Callout
           accent="warn"
           action={
             <Button size="sm" onClick={() => setSt({ phase: "idle" })}>
-              Start over
+              {t("tp.startOver")}
             </Button>
           }
         >

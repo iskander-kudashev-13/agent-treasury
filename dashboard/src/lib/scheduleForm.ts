@@ -1,4 +1,6 @@
+import type { MessageKey } from "@/i18n";
 /** Pure logic of the schedule drawer (UI_UPDATES §4.2): form state -> validated `ScheduleInput` -> the calls to sign. */
+import { t } from "@/i18n";
 import { DAY_MS, firstAtOrAfter } from "./frequency";
 import { parseUsdc } from "./amount";
 import type { PlannedCall } from "./calls";
@@ -81,11 +83,12 @@ export const localTimeInput = (ms: number): string => {
 };
 
 /** Quick picks for "Later". Each returns the local date/time inputs. */
-export const WHEN_PRESETS: Array<{ label: string; at: (now: number) => number }> = [
-  { label: "In 15 min", at: (now) => ceilMinute(now + 15 * 60_000) },
-  { label: "In 1 hour", at: (now) => ceilMinute(now + 60 * 60_000) },
+export const WHEN_PRESETS: Array<{ label: string; key: MessageKey; at: (now: number) => number }> = [
+  { label: "In 15 min", key: "sf.in15", at: (now) => ceilMinute(now + 15 * 60_000) },
+  { label: "In 1 hour", key: "sf.in1h", at: (now) => ceilMinute(now + 60 * 60_000) },
   {
     label: "Tomorrow 09:00",
+    key: "sf.tomorrow9",
     at: (now) => {
       const d = new Date(now);
       return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 9, 0).getTime();
@@ -195,49 +198,49 @@ export function buildScheduleInput(f: ScheduleFormState, ctx: { now: number; rec
   const errors: Record<string, string> = {};
   const empty: string[] = [];
   if (ctx.recipientId === null) {
-    errors.recipient = "Select a recipient";
+    errors.recipient = t("sf.selectRecipient");
     empty.push("recipient");
   }
   let amount = "";
   if (!f.amount.trim()) {
-    errors.amount = "Enter an amount";
+    errors.amount = t("sf.enterAmount");
     empty.push("amount");
   } else {
     try {
       amount = parseUsdc(f.amount);
-      if (BigInt(amount) <= 0n) errors.amount = "Amount must be greater than 0";
+      if (BigInt(amount) <= 0n) errors.amount = t("sf.amountPositive");
     } catch (e) {
-      errors.amount = e instanceof Error ? e.message : "Invalid amount";
+      errors.amount = e instanceof Error ? e.message : t("amount.invalidShort");
     }
   }
   const frequency = buildFrequency(f);
   if (!frequency) {
     errors[f.freq === "Monthly" ? "day" : f.freq === "Weekly" ? "weekday" : "everyN"] =
-      f.freq === "Monthly" ? "Day must be 1 to 28 (use 28 for end of month)" : f.freq === "Weekly" ? "Pick a weekday" : "Days must be 1 to 365";
+      f.freq === "Monthly" ? t("sf.dayRange") : f.freq === "Weekly" ? t("sf.pickWeekday") : t("sf.daysRange");
   }
   // "Now" is resolved against ctx.now, so the drawer passes the click time on save.
   const asap = f.freq === "Once" && f.when === "now" && !ctx.editing;
   const start = asap ? ctx.now + NOW_LEAD_MS : parseLocal(f.startDate, f.startTime);
-  if (start === null) errors.start = "Enter a valid date and time";
-  else if (!ctx.editing && f.freq === "Once" && start <= ctx.now) errors.start = "A one-time payment must be in the future";
+  if (start === null) errors.start = t("sf.validDateTime");
+  else if (!ctx.editing && f.freq === "Once" && start <= ctx.now) errors.start = t("sf.oncePast");
 
   let end: ScheduleEnd = "Never";
   if (f.freq !== "Once") {
     if (f.endKind === "AfterCount") {
       if (isInt(f.endCount, 1, MAX_COUNT)) end = { AfterCount: { count: Number(f.endCount) } };
-      else errors.endCount = `Number of payments must be 1 to ${MAX_COUNT}`;
+      else errors.endCount = t("sf.countRange", { max: MAX_COUNT });
     } else if (f.endKind === "On") {
       const day = parseLocal(f.endDate, "23:59");
-      if (day === null) errors.endDate = "Enter a valid end date";
+      if (day === null) errors.endDate = t("sf.validEnd");
       else {
         const at = day + 59_999; // the whole local end day still counts
-        if (start !== null && at < start) errors.endDate = "The end date is before the start";
+        if (start !== null && at < start) errors.endDate = t("sf.endBeforeStart");
         else end = { On: { at: String(at) } };
       }
     }
   }
   if (!f.agentId) {
-    errors.agent = "Select the agent that pays";
+    errors.agent = t("sf.selectAgent");
     empty.push("agent");
   }
   if (Object.keys(errors).length > 0 || ctx.recipientId === null || frequency === null || start === null) return { errors, empty, input: null };

@@ -1,4 +1,5 @@
 // Modal (confirm sheet), drawer, toasts. DESIGN_SYSTEM.md §4–5, §7 (role="dialog" aria-modal, Esc closes, focus moves in).
+import { useT } from "@/i18n";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ExternalLink, X } from "./icons";
@@ -44,6 +45,7 @@ export type ModalProps = {
 
 /** Centered sheet, max 420–520 px, backdrop rgba(5,6,8,.72), enter translateY(20px) scale(.98). */
 export function Modal({ open, onClose, title, children, footer, danger, width = 460 }: ModalProps) {
+  const t = useT();
   const ref = useDialog(open, onClose);
   const titleId = useId();
   if (!open) return null;
@@ -62,7 +64,7 @@ export function Modal({ open, onClose, title, children, footer, danger, width = 
           <h2 id={titleId} className="m-0 flex-1 text-lg font-semibold">
             {title}
           </h2>
-          <IconButton label="Close" data-close onClick={onClose} className="-mt-1 -mr-2">
+          <IconButton label={t("common.close")} data-close onClick={onClose} className="-mt-1 -mr-2">
             <X size={16} />
           </IconButton>
         </div>
@@ -86,6 +88,7 @@ export type DrawerProps = {
 
 /** Right-side drawer, max 480–520 px. Footer convention: Cancel + primary; amber "Confirm in wallet…" while signing. */
 export function Drawer({ open, onClose, title, subtitle, children, footer, width = 500 }: DrawerProps) {
+  const t = useT();
   const ref = useDialog(open, onClose);
   const titleId = useId();
   if (!open) return null;
@@ -107,7 +110,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
             </h2>
             {subtitle && <p className="m-0 mt-0.5 text-[13px] text-ink-muted">{subtitle}</p>}
           </div>
-          <IconButton label="Close" data-close onClick={onClose}>
+          <IconButton label={t("common.close")} data-close onClick={onClose}>
             <X size={16} />
           </IconButton>
         </div>
@@ -120,7 +123,10 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
 }
 
 /** Amber "Confirm in wallet…" text for drawer/modal footers while a wallet signature is pending. */
-export const SigningHint = ({ children = "Confirm in wallet…" }: { children?: ReactNode }) => <span className="mr-auto text-[13px] text-warn">{children}</span>;
+export function SigningHint({ children }: { children?: ReactNode }) {
+  const t = useT();
+  return <span className="mr-auto text-[13px] text-warn">{children ?? t("common.confirmInWallet")}</span>;
+}
 
 /* ───────────── Toasts ───────────── */
 
@@ -134,6 +140,7 @@ const DOT: Record<Accent, string> = { ok: "bg-ok", warn: "bg-warn", danger: "bg-
 
 /** Wrap the app once; call `useToast()(…)` anywhere. Bottom-right, auto-hides ~3 s. */
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const tr = useT();
   const [items, setItems] = useState<ToastItem[]>([]);
   const seq = useRef(0);
   const push = useCallback((t: ToastInput) => {
@@ -156,7 +163,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   <>
                     {" "}
                     <a href={t.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 whitespace-nowrap">
-                      {t.hrefLabel ?? "View tx"} <ExternalLink size={12} />
+                      {t.hrefLabel ?? tr("common.viewTx")} <ExternalLink size={12} />
                     </a>
                   </>
                 )}

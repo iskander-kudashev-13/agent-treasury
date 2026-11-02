@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
 import { usdcGrouped } from "@/lib/amount";
 import { isDepositExpired } from "@/lib/status";
@@ -21,6 +22,7 @@ function Choice({ checked, onSelect, title, children }: { checked: boolean; onSe
 
 /** Reject a pending approval. Scheduled payouts: keep the date (agent asks again with a fresh quote) or skip it (needs 1 yocto). */
 export function RejectModal({ payout, label, onClose }: { payout: Payout; label: string; onClose: () => void }) {
+  const t = useT();
   const { canAct, busy, act } = useOwner();
   const [now] = useState(() => Date.now());
   const scheduled = payout.schedule_id !== null;
@@ -35,31 +37,31 @@ export function RejectModal({ payout, label, onClose }: { payout: Payout; label:
     <Modal
       open
       onClose={() => !busy && onClose()}
-      title={`Reject ${usdcGrouped(payout.amount)} USDC to ${label}?`}
+      title={t("rj.title", { amount: usdcGrouped(payout.amount), label })}
       footer={
         <>
           {busy && <SigningHint />}
           <Button onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="danger" disabled={!canAct || busy} onClick={() => void go()}>
-            Reject
+            {t("po.reject")}
           </Button>
         </>
       }
     >
       {scheduled ? (
         <div className="flex flex-col gap-2">
-          <Choice checked={!skip} onSelect={() => setSkip(false)} title="Keep the date">
-            Nothing is paid now. The agent can request this date again with a fresh quote. No deposit needed.
+          <Choice checked={!skip} onSelect={() => setSkip(false)} title={t("rj.keepTitle")}>
+            {t("rj.keepBody")}
           </Choice>
-          <Choice checked={skip} onSelect={() => setSkip(true)} title="Skip this date">
-            This payment will not happen; the schedule moves on to its next date. Needs 1 yoctoNEAR (your wallet will show it).
+          <Choice checked={skip} onSelect={() => setSkip(true)} title={t("rj.skipTitle")}>
+            {t("rj.skipBody")}
           </Choice>
-          {unapprovable && <p className="m-0 text-xs text-ink-subtle">This payout can no longer be approved (deposit deadline passed or older than 72 h), so keeping the date is preselected.</p>}
+          {unapprovable && <p className="m-0 text-xs text-ink-subtle">{t("rj.unapprovable")}</p>}
         </div>
       ) : (
-        <p className="m-0">Nothing is sent. This one-off payment is dropped; the agent can submit a new request.</p>
+        <p className="m-0">{t("rj.oneOff")}</p>
       )}
     </Modal>
   );

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMemo, useState, type FormEvent, type RefObject } from "react";
 import { AssistantFooter, BatchBar, Button, EmptyState, Icons, SuggestionChip } from "@/kit";
 import { WORKER_URL } from "@/lib/config";
@@ -16,12 +17,13 @@ import { MessageList } from "./MessageList";
 import { ReviewSignModal } from "./ReviewSignModal";
 import type { Assistant } from "./useAssistant";
 
-const SUGGESTIONS = ["Pay Maria 1500 monthly on Base", "What do we pay this week?", "Lower procurement's daily limit to 100", "Why did Chen's payment fail?"];
+const SUGGESTION_KEYS = ["as.sug1", "as.sug2", "as.sug3", "as.sug4"] as const;
 
 type Editing = { item: ProposalItem } | null;
 
 /** Everything below the panel header: sign-in step, suggestions, conversation, batch bar, input. */
 export function AssistantContent({ assistant, inputRef }: { assistant: Assistant; inputRef: RefObject<HTMLInputElement | null> }) {
+  const t = useT();
   const { accountId, signIn: connectWallet } = useWallet();
   const { canAct, ownerId } = useOwner();
   const { send: signCalls, busy: signing } = useOwnerTx();
@@ -45,7 +47,7 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
   );
 
   const look: RowLookups = {
-    recipient: (id) => recipients.find((r) => r.id === id)?.label ?? pending.find((p) => p.id === id)?.label ?? `Recipient #${id}`,
+    recipient: (id) => recipients.find((r) => r.id === id)?.label ?? pending.find((p) => p.id === id)?.label ?? t("as.recipientN", { id }),
     agent: (id) => agents.find((a) => a.id === id)?.name ?? id,
   };
 
@@ -54,19 +56,19 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
 
   const doSign = async () => {
     const calls = flattenBatch(batch.ordered);
-    const r = await signCalls(calls, `${calls.length} ${calls.length === 1 ? "change" : "changes"}`);
+    const r = await signCalls(calls, t("owner.changes", { count: calls.length }));
     if (r.ok) {
       assistant.markSigned(batch.ordered.map((b) => b.id), r.hash);
-      assistant.notice(`Signed ${calls.length} ${calls.length === 1 ? "action" : "actions"} in your wallet.`);
+      assistant.notice(t("as.signedActions", { count: calls.length }));
       setReview(false);
     }
   };
 
   const pauseNow = async (item: ProposalItem) => {
-    const r = await signCalls([proposalToCall(item.proposal)], item.proposal.title || "Pause");
+    const r = await signCalls([proposalToCall(item.proposal)], item.proposal.title || t("as.pauseLabel"));
     if (r.ok) {
       assistant.markSigned([item.id], r.hash);
-      assistant.notice(`Done: ${item.proposal.title || "paused"}. You can resume it from the dashboard.`);
+      assistant.notice(t("as.donePaused", { title: item.proposal.title || t("as.donePausedFallback") }));
     }
   };
 
@@ -86,26 +88,26 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
 
   let top: React.ReactNode;
   if (WORKER_URL === "") {
-    top = <EmptyState title="Worker not configured">Set VITE_WORKER_URL so the dashboard can reach the assistant.</EmptyState>;
+    top = <EmptyState title={t("as.workerNotConfigured")}>{t("as.setWorkerUrl")}</EmptyState>;
   } else if (accountId === null) {
     top = (
-      <EmptyState title="Connect the owner wallet" action={<Button variant="primary" onClick={connectWallet}>Connect wallet</Button>}>
-        The assistant prepares changes for the vault owner and needs your wallet to sign in.
+      <EmptyState title={t("as.connectOwner")} action={<Button variant="primary" onClick={connectWallet}>{t("common.connectWallet")}</Button>}>
+        {t("as.connectOwnerBody")}
       </EmptyState>
     );
   } else if (!canAct) {
     top = (
-      <EmptyState title="Owner only">
-        {ownerId ? `The assistant is available to the vault owner (${ownerId}). You are connected as ${accountId}.` : "Loading the vault owner…"}
+      <EmptyState title={t("as.ownerOnly")}>
+        {ownerId ? t("as.ownerOnlyBody", { owner: ownerId, account: accountId }) : t("as.loadingOwner")}
       </EmptyState>
     );
   } else if (!assistant.signedIn) {
     top = (
       <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
         <Icons.Lock size={22} />
-        <div className="text-[15px] font-semibold">Sign in to the assistant</div>
+        <div className="text-[15px] font-semibold">{t("as.signInTitle")}</div>
         <p className="m-0 max-w-sm text-[13px] text-ink-muted">
-          Sign a short message with your wallet to prove you own the vault. It is not a transaction: it costs nothing and cannot move funds. The session lasts one hour.
+          {t("as.signInBody")}
         </p>
         {assistant.authError && (
           <p role="alert" className="m-0 max-w-sm text-[13px] text-danger-text">
@@ -113,18 +115,18 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
           </p>
         )}
         <Button variant="primary" loading={assistant.phase === "signing-in"} onClick={() => void assistant.signIn()}>
-          {assistant.phase === "signing-in" ? "Confirm in wallet…" : "Sign in with wallet"}
+          {assistant.phase === "signing-in" ? t("common.confirmInWallet") : t("as.signInBtn")}
         </Button>
       </div>
     );
   } else if (items.length === 0) {
     top = (
       <div className="flex flex-col gap-3 px-4 py-4">
-        <p className="m-0 text-[13px] text-ink-muted">Ask about the vault or describe a change. I prepare cards; you sign.</p>
+        <p className="m-0 text-[13px] text-ink-muted">{t("as.intro")}</p>
         <div className="flex flex-wrap gap-2">
-          {SUGGESTIONS.map((s) => (
-            <SuggestionChip key={s} onClick={() => void assistant.send(s)}>
-              {s}
+          {SUGGESTION_KEYS.map((k) => (
+            <SuggestionChip key={k} onClick={() => void assistant.send(t(k))}>
+              {t(k)}
             </SuggestionChip>
           ))}
         </div>
@@ -140,7 +142,7 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
         canSign={canAct}
         busy={signing}
         handlers={{ onQueue: assistant.queue, onUnqueue: assistant.unqueue, onDiscard: assistant.discard, onEdit: editCard, onPauseNow: (i) => void pauseNow(i), onRulesConfirmed: assistant.markRulesConfirmed, onRulesDiscard: assistant.discardRules }}
-        onAnswer={(t) => void assistant.send(t)}
+        onAnswer={(text) => void assistant.send(text)}
       />
     );
   }
@@ -162,19 +164,19 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
         <form onSubmit={submit} className="flex items-center gap-2">
           <input
             ref={inputRef}
-            placeholder="Ask or describe a change…"
-            aria-label="Message the assistant"
+            placeholder={t("as.placeholder")}
+            aria-label={t("as.inputAria")}
             disabled={!ready || assistant.phase !== "idle"}
             maxLength={2000}
             autoComplete="off"
             className="h-10 w-full min-w-0 rounded-input border border-line-strong bg-surface px-3 text-sm text-ink outline-none placeholder:text-ink-subtle focus:border-ok disabled:opacity-40"
           />
           {assistant.phase === "streaming" ? (
-            <Button type="button" size="md" onClick={assistant.stop} aria-label="Stop">
-              Stop
+            <Button type="button" size="md" onClick={assistant.stop} aria-label={t("as.stop")}>
+              {t("as.stop")}
             </Button>
           ) : (
-            <Button type="submit" variant="primary" size="md" disabled={!ready || assistant.phase !== "idle"} aria-label="Send">
+            <Button type="submit" variant="primary" size="md" disabled={!ready || assistant.phase !== "idle"} aria-label={t("as.send")}>
               <Icons.Send size={16} />
             </Button>
           )}

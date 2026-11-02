@@ -1,4 +1,5 @@
 // Data display: limits, chains, proof badges, tables, count-up. DESIGN_SYSTEM.md §1.4–1.5, §4, §5.
+import { useT } from "@/i18n";
 import { useEffect, useRef, useState, type HTMLAttributes, type ReactNode, type TdHTMLAttributes, type ThHTMLAttributes } from "react";
 import { Calendar, KeyRound, Lock, ShieldCheck, Zap } from "./icons";
 import { cx, Hash } from "./primitives";
@@ -13,7 +14,7 @@ import { ACCENT_HEX, chainColor, chainName, clamp01, limitTone } from "./tokens"
 export function SpendBar({
   spent,
   limit,
-  label = "Spent today",
+  label: labelProp,
   spentText,
   limitText,
   scope = "vault",
@@ -28,6 +29,8 @@ export function SpendBar({
   /** Small "80%" tick under the bar (Treasury policy card). */
   marker80?: boolean;
 }) {
+  const t = useT();
+  const label = labelProp ?? t("treasury.spentToday");
   const pct = limit > 0 ? spent / limit : 0;
   const color = ACCENT_HEX[limitTone(pct, scope)];
   return (
@@ -45,7 +48,7 @@ export function SpendBar({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(clamp01(pct) * 100)}
-        aria-label={typeof label === "string" ? label : "Spent"}
+        aria-label={typeof label === "string" ? label : t("kit.spent")}
       >
         <div className="fill-transition h-full rounded-full" style={{ width: `${clamp01(pct) * 100}%`, background: color }} />
       </div>
@@ -59,7 +62,9 @@ export function SpendBar({
 }
 
 /** Vault daily-limit ring gauge (148 px, 10 px stroke, dashed inner guide). Animates from 0 on mount. */
-export function RingGauge({ pct, caption = "of daily limit", size = 148 }: { pct: number; caption?: string; size?: number }) {
+export function RingGauge({ pct, caption: captionProp, size = 148 }: { pct: number; caption?: string; size?: number }) {
+  const t = useT();
+  const caption = captionProp ?? t("kit.ofDailyLimit");
   const r = size / 2 - 12;
   const c = 2 * Math.PI * r;
   const [shown, setShown] = useState(0);
@@ -160,9 +165,10 @@ export function ChainStack({ chains }: { chains: string[] }) {
 
 /** Trust badge: TEE (green when hash approved, amber while waiting) or key (muted), then the mono hash/public key. */
 export function TrustBadge({ kind, value, approved = true }: { kind: "tee" | "key"; value: string; approved?: boolean }) {
+  const t = useT();
   const isTee = kind === "tee";
   const tone = !isTee ? "text-ink-muted" : approved ? "text-ok" : "text-warn";
-  const label = !isTee ? "Key account" : approved ? "TEE · hash approved" : "TEE · waiting for registration";
+  const label = !isTee ? t("kit.keyAccount") : approved ? t("kit.teeHashApproved") : t("trust.teeWaiting");
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
       <span className={cx("inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap", tone)}>
@@ -175,7 +181,9 @@ export function TrustBadge({ kind, value, approved = true }: { kind: "tee" | "ke
 }
 
 /** Large shield proof tile used on agent cards. */
-export function ShieldProof({ title = "Code hash", hash, approved = true, link }: { title?: string; hash: string; approved?: boolean; link?: ReactNode }) {
+export function ShieldProof({ title: titleProp, hash, approved = true, link }: { title?: string; hash: string; approved?: boolean; link?: ReactNode }) {
+  const t = useT();
+  const title = titleProp ?? t("kit.codeHash");
   const stroke = approved ? "var(--color-ok)" : "var(--color-warn)";
   return (
     <div className="flex items-center gap-3.5 rounded-tile border border-tile-line bg-surface-sunken p-3">
@@ -190,7 +198,7 @@ export function ShieldProof({ title = "Code hash", hash, approved = true, link }
       <div className="min-w-0 flex-1">
         <div className="text-xs text-ink-muted">{title}</div>
         <Hash value={hash} />
-        <div className={cx("text-xs", approved ? "text-ok" : "text-warn")}>{link ?? (approved ? "✓ matches approved hash in contract" : "Waiting for registration")}</div>
+        <div className={cx("text-xs", approved ? "text-ok" : "text-warn")}>{link ?? (approved ? t("kit.hashMatches") : t("kit.waitingReg"))}</div>
       </div>
     </div>
   );
@@ -203,22 +211,24 @@ export const ReasonChip = ({ code }: { code: string }) => (
 
 /** Tiny outline pill on payout rows. */
 export function SourceTag({ source }: { source: "scheduled" | "on-demand" }) {
+  const t = useT();
   return (
     <span className="inline-flex h-5 items-center gap-1 rounded-full border border-line-strong px-1.5 text-[11px] text-ink-muted whitespace-nowrap">
       {source === "scheduled" ? <Calendar size={11} /> : <Zap size={11} />}
-      {source === "scheduled" ? "scheduled" : "on demand"}
+      {source === "scheduled" ? t("kit.sourceScheduled") : t("kit.sourceOnDemand")}
     </span>
   );
 }
 
 export function PrivacyBadge() {
+  const t = useT();
   return (
     <span
       className="shimmer-privacy inline-flex h-6 items-center gap-1.5 rounded-full border border-ai-line px-2.5 text-[11px] text-ai-text"
-      title="Your messages are processed inside a trusted execution environment on NEAR AI Cloud. The operator cannot read them."
+      title={t("kit.privacyTitle")}
     >
       <Lock size={12} />
-      Private · NEAR AI Cloud (TEE)
+      {t("kit.privacyBadge")}
     </span>
   );
 }
@@ -244,17 +254,18 @@ function RouteLink({ running, delay }: { running: boolean; delay?: string }) {
 
 /** Vault → Intents → chains with a traveling dot (stops when `running` is false). */
 export function PayoutRoute({ chains, running }: { chains: string[]; running: boolean }) {
+  const t = useT();
   return (
-    <div className="flex items-center" role="img" aria-label={`Payout route: Vault, NEAR Intents, then ${chains.map(chainName).join(", ")}`}>
-      <RouteNode label="Vault">V</RouteNode>
+    <div className="flex items-center" role="img" aria-label={t("kit.routeAria", { chains: chains.map(chainName).join(", ") })}>
+      <RouteNode label={t("kit.routeVault")}>V</RouteNode>
       <RouteLink running={running} />
-      <RouteNode label="Intents">⇄</RouteNode>
+      <RouteNode label={t("kit.routeIntents")}>⇄</RouteNode>
       <RouteLink running={running} delay="1.4s" />
       <div className="flex w-16 flex-col items-center gap-1">
         <span className="flex h-8 items-center">
           <ChainStack chains={chains} />
         </span>
-        <span className="text-[11px] text-ink-muted">Chains</span>
+        <span className="text-[11px] text-ink-muted">{t("kit.routeChains")}</span>
       </div>
     </div>
   );

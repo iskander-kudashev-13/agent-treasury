@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { Hash } from "@/kit";
 import { describeBlocks, type RuleSetV1 } from "@/lib/tradingRules";
 
@@ -6,6 +7,7 @@ import { describeBlocks, type RuleSetV1 } from "@/lib/tradingRules";
  * Everything is rendered as text; React escapes it.
  */
 export function RulesView({ rules, hash }: { rules: RuleSetV1; hash?: string }) {
+  const t = useT();
   const b = describeBlocks(rules);
   return (
     <div className="flex flex-col gap-3 text-[13px]">
@@ -33,7 +35,7 @@ export function RulesView({ rules, hash }: { rules: RuleSetV1; hash?: string }) 
       </ol>
       {hash && (
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
-          <span>Hash</span>
+          <span>{t("trading.rules.hash")}</span>
           <Hash value={hash} />
         </div>
       )}

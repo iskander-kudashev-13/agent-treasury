@@ -6,6 +6,7 @@
  * address (`GET /v0/status?depositAddress=...`, response `GetExecutionStatusResponse.quoteResponse`) and compares it with
  * what the vault recorded. Mirrors worker/src/quote-check.ts. Pure functions only; the fetch is injected for tests.
  */
+import { t } from "@/i18n";
 import type { Payout } from "./types";
 
 /** The subset of 1Click's `GetExecutionStatusResponse` this check reads. All optional: the API is external input. */
@@ -48,13 +49,13 @@ export async function fetchOneClickStatus(
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
     if (res.status === 404) return { kind: "not_found" };
-    if (!res.ok) return { kind: "unavailable", reason: `1Click answered HTTP ${res.status}` };
+    if (!res.ok) return { kind: "unavailable", reason: t("qc.httpErr", { status: res.status }) };
     const data: unknown = await res.json();
-    if (typeof data !== "object" || data === null) return { kind: "unavailable", reason: "1Click returned an unexpected response" };
+    if (typeof data !== "object" || data === null) return { kind: "unavailable", reason: t("qc.unexpectedResp") };
     return { kind: "ok", data: data as OneClickStatus, fetchedAt: now() };
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
-    return { kind: "unavailable", reason: e instanceof Error ? `Could not reach 1Click (${e.message})` : "Could not reach 1Click" };
+    return { kind: "unavailable", reason: e instanceof Error ? t("qc.unreachableWith", { msg: e.message }) : t("qc.unreachable") };
   }
 }
 
@@ -98,22 +99,22 @@ export function checkQuote(payout: PayoutFields, vaultId: string, status: OneCli
   const add = (key: CheckKey, label: string, expected: string, actual: unknown, ok: boolean) => rows.push({ key, label, expected, actual: dash(actual), ok });
 
   const recipient = req?.recipient;
-  add("recipient", "Recipient", payout.address, recipient, typeof recipient === "string" && sameAddress(recipient, payout.address));
+  add("recipient", t("qc.recipient"), payout.address, recipient, typeof recipient === "string" && sameAddress(recipient, payout.address));
 
   const refundTo = req?.refundTo;
-  add("refundTo", "Refund to", vaultId, refundTo, typeof refundTo === "string" && vaultId !== "" && refundTo === vaultId);
+  add("refundTo", t("qc.refundTo"), vaultId, refundTo, typeof refundTo === "string" && vaultId !== "" && refundTo === vaultId);
 
-  add("amountIn", "Amount in", payout.amount, quote?.amountIn, sameAmount(quote?.amountIn, payout.amount));
-  add("requestAmount", "Requested amount", payout.amount, req?.amount, sameAmount(req?.amount, payout.amount));
+  add("amountIn", t("qc.amountIn"), payout.amount, quote?.amountIn, sameAmount(quote?.amountIn, payout.amount));
+  add("requestAmount", t("qc.requestAmount"), payout.amount, req?.amount, sameAmount(req?.amount, payout.amount));
 
   const dep = quote?.depositAddress;
-  add("depositAddress", "Deposit address", payout.deposit_address ?? "—", dep, payout.deposit_address !== null && typeof dep === "string" && dep === payout.deposit_address);
+  add("depositAddress", t("qc.depositAddress"), payout.deposit_address ?? "—", dep, payout.deposit_address !== null && typeof dep === "string" && dep === payout.deposit_address);
 
   const deadlineMs = typeof quote?.deadline === "string" ? Date.parse(quote.deadline) : Number.NaN;
-  add("deadline", "Quote deadline", "in the future", quote?.deadline, Number.isFinite(deadlineMs) && deadlineMs > nowMs);
+  add("deadline", t("qc.deadline"), t("qc.inFuture"), quote?.deadline, Number.isFinite(deadlineMs) && deadlineMs > nowMs);
 
   // Nothing may have been deposited yet: any other state means this address was already used.
-  add("status", "Intents status", "PENDING_DEPOSIT", status.status, status.status === "PENDING_DEPOSIT");
+  add("status", t("qc.status"), "PENDING_DEPOSIT", status.status, status.status === "PENDING_DEPOSIT");
 
   // A message or a non-standard route would make a failed withdrawal non-refundable or change the destination handling.
   const clean =
@@ -123,7 +124,7 @@ export function checkQuote(payout: PayoutFields, vaultId: string, status: OneCli
     req.refundType === "ORIGIN_CHAIN" &&
     req.msg === undefined &&
     req.customRecipientMsg === undefined;
-  add("mode", "Quote mode", "EXACT_INPUT, destination chain, origin-chain refund, no message", clean ? "as expected" : "unexpected", clean);
+  add("mode", t("qc.mode"), t("qc.modeRule"), clean ? t("qc.asExpected") : t("qc.unexpected"), clean);
 
   const mismatches = rows.filter((r) => !r.ok);
   return { rows, ok: mismatches.length === 0, mismatches };

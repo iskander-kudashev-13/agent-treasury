@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useNavigate } from "react-router-dom";
 import { Button, Callout, Card, EmptyState, Icons, Skeleton } from "@/kit";
 import { sortAgents } from "@/lib/agentView";
@@ -10,6 +11,7 @@ import { useNow } from "@/lib/useNow";
 
 /** `/agents` body: one card per agent, revoked ones dimmed at the bottom. */
 export function AgentsList() {
+  const t = useT();
   const navigate = useNavigate();
   const { canAct } = useOwner();
   const agents = useAgents();
@@ -27,19 +29,19 @@ export function AgentsList() {
       </div>
     );
   }
-  if (agents.error && list.length === 0) return <Callout accent="danger">Couldn&apos;t load agents: {agents.error}</Callout>;
+  if (agents.error && list.length === 0) return <Callout accent="danger">{t("ag.couldntLoadAgentsMsg", { msg: agents.error })}</Callout>;
   if (list.length === 0) {
     return (
       <Card padding="none">
         <EmptyState
-          title="No agents yet"
+          title={t("treasury.noAgents")}
           action={
             <Button variant="primary" icon={<Icons.Plus size={14} />} disabled={!canAct} onClick={() => navigate("/agents/new")}>
-              Add agent
+              {t("page.addAgent")}
             </Button>
           }
         >
-          No agents yet. Connect your first agent — it will only be able to spend within the limits you set.
+          {t("ag.noAgentsHint2")}
         </EmptyState>
       </Card>
     );

@@ -3,6 +3,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AssistantProvider } from "@/features/layout/AssistantContext";
 import { AppLayout } from "@/features/layout/AppLayout";
 import { OwnerProvider } from "@/features/owner/OwnerProvider";
+import { I18nProvider } from "@/i18n";
 import { WalletProvider } from "@/features/wallet/WalletProvider";
 import { ToastProvider } from "@/kit";
 import { AgentDetailPage } from "@/pages/AgentDetailPage";
@@ -28,6 +29,7 @@ export function App() {
         <WalletProvider>
           <OwnerProvider>
             <AssistantProvider>
+              <I18nProvider>
               <HashRouter>
                 <Routes>
                   <Route element={<AppLayout />}>
@@ -45,6 +47,7 @@ export function App() {
                   </Route>
                 </Routes>
               </HashRouter>
+              </I18nProvider>
             </AssistantProvider>
           </OwnerProvider>
         </WalletProvider>

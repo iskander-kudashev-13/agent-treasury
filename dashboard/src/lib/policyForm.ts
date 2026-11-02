@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { formatUsdc, parseUsdc } from "./amount";
 
 export const HOUR_MS = 3_600_000;
@@ -36,21 +37,21 @@ export function validatePolicy(d: PolicyDraft): { policy: { daily_limit: string;
   let min = 0n;
   try {
     daily = BigInt(parseUsdc(d.daily));
-    if (daily === 0n) errors.daily = "Must be greater than zero";
+    if (daily === 0n) errors.daily = t("pol.mustPositive");
   } catch (e) {
     errors.daily = (e as Error).message;
   }
   try {
     min = BigInt(parseUsdc(d.min));
-    if (min === 0n) errors.min = "Must be greater than zero";
+    if (min === 0n) errors.min = t("pol.mustPositive");
   } catch (e) {
     errors.min = (e as Error).message;
   }
-  if (!errors.daily && !errors.min && min > daily) errors.min = "Cannot exceed the daily limit";
+  if (!errors.daily && !errors.min && min > daily) errors.min = t("pol.minOverDaily");
   const g = Number(d.graceValue);
   const ms = Math.round(g * (d.graceUnit === "days" ? DAY_MS : HOUR_MS));
-  if (!d.graceValue.trim() || !Number.isFinite(g)) errors.grace = "Enter a number";
-  else if (ms < MIN_GRACE_MS || ms > MAX_GRACE_MS) errors.grace = "Between 1 hour and 30 days";
+  if (!d.graceValue.trim() || !Number.isFinite(g)) errors.grace = t("pol.enterNumber");
+  else if (ms < MIN_GRACE_MS || ms > MAX_GRACE_MS) errors.grace = t("pol.graceRange");
   if (errors.daily || errors.min || errors.grace) return { policy: null, errors };
   return { policy: { daily_limit: daily.toString(), min_payment: min.toString(), overdue_grace_ms: String(ms) }, errors };
 }

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { agoText } from "@/lib/dates";
@@ -12,6 +13,7 @@ import { agentLabel } from "./ApprovalBanner";
 
 /** One payout row: desktop = columns, mobile = two stacked lines. Labels, memos and names are untrusted text. */
 function Row({ p, recipients, agents, now }: { p: Payout; recipients: RecipientView[]; agents: AgentView[]; now: number }) {
+  const t = useT();
   const s = payoutStatusInfo(p.status);
   // Simulated (testnet) payouts never reach Intents: no Track link.
   const tracked = p.deposit_address && !isSimulatedPayout(p, ONECLICK_SIMULATED) && (p.status === "Sent" || p.status === "Confirmed" || p.status === "Refunded");
@@ -39,11 +41,11 @@ function Row({ p, recipients, agents, now }: { p: Payout; recipients: RecipientV
       <div className="flex justify-end gap-3.5 text-[13px]">
         {tracked && (
           <a href={intentsTrackUrl(p.deposit_address ?? "")} target="_blank" rel="noreferrer">
-            Track ↗
+            {t("po.track")}
           </a>
         )}
         <Link to={`/payouts/${p.id}`} className="text-ink">
-          Details
+          {t("po.details")}
         </Link>
       </div>
     </li>
@@ -72,13 +74,14 @@ export function PayoutList({
   emptyHint?: string;
   headerExtra?: React.ReactNode;
 }) {
+  const t = useT();
   const [now] = useState(() => Date.now());
   return (
     <Card padding="none" aria-labelledby="payouts-title">
       <CardHeader className="px-5 py-4" id="payouts-title" title={title} actions={actions} />
       {headerExtra}
       {payouts.length === 0 ? (
-        <EmptyState title="No payouts yet">{emptyHint ?? "The agents haven't paid anyone yet."}</EmptyState>
+        <EmptyState title={t("po.noPayouts")}>{emptyHint ?? t("page.agentsNoPayouts")}</EmptyState>
       ) : (
         <ul className="m-0 list-none border-t border-track p-0">
           {payouts.map((p) => (
@@ -88,7 +91,7 @@ export function PayoutList({
       )}
       {onMore && total !== undefined && (
         <div className="border-t border-track px-5 py-3">
-          <Button onClick={onMore}>Load older</Button>
+          <Button onClick={onMore}>{t("po.loadOlder")}</Button>
         </div>
       )}
     </Card>

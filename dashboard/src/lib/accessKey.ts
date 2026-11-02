@@ -1,4 +1,5 @@
 // Look up one access key of the agent's account (Key agents): does it still exist, what can it do, how much gas allowance is left.
+import { t } from "@/i18n";
 import { RPC_URL } from "./config";
 
 export type AccessKeyInfo =
@@ -16,7 +17,7 @@ export function parseAccessKey(body: RpcBody): AccessKeyInfo {
   const err = body.error;
   if (err) {
     if (err.cause?.name === "UNKNOWN_ACCESS_KEY" || /does not exist|UNKNOWN_ACCESS_KEY/i.test(String(err.data ?? err.message ?? ""))) return { state: "missing" };
-    throw new Error(String(err.data ?? err.message ?? "RPC error"));
+    throw new Error(String(err.data ?? err.message ?? t("net.rpcError")));
   }
   if (body.result?.error) {
     if (/does not exist/i.test(body.result.error)) return { state: "missing" };
@@ -26,7 +27,7 @@ export function parseAccessKey(body: RpcBody): AccessKeyInfo {
   if (p === "FullAccess") return { state: "full-access" };
   const fc = (p as { FunctionCall?: { allowance?: string | null; receiver_id?: string; method_names?: string[] } } | undefined)?.FunctionCall;
   if (fc) return { state: "function-call", allowanceYocto: fc.allowance ?? null, receiverId: fc.receiver_id ?? "", methods: fc.method_names ?? [] };
-  throw new Error("Unexpected access key response");
+  throw new Error(t("net.accessKeyUnexpected"));
 }
 
 export async function viewAccessKey(accountId: string, publicKey: string): Promise<AccessKeyInfo> {
@@ -35,7 +36,7 @@ export async function viewAccessKey(accountId: string, publicKey: string): Promi
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: "dashboard", method: "query", params: { request_type: "view_access_key", finality: "optimistic", account_id: accountId, public_key: publicKey } }),
   });
-  if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+  if (!res.ok) throw new Error(t("net.rpcHttp", { status: res.status }));
   return parseAccessKey((await res.json()) as RpcBody);
 }
 

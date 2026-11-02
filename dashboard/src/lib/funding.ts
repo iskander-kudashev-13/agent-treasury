@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { shortDate, DAY_MS } from "./frequency";
 import { usdcGrouped } from "@/lib/amount";
 import type { UpcomingItem } from "./types";
@@ -23,7 +24,7 @@ export function checkFunding(items: UpcomingItem[], balance: string, vaultDailyL
   const messages: FundingMessage[] = [];
   const shortBy = total > bal ? total - bal : 0n;
   if (shortBy > 0n) {
-    messages.push({ kind: "balance", message: `Vault balance ${usdcGrouped(balance, 0)} USDC — short by ${usdcGrouped(shortBy.toString(), 0)} for these.` });
+    messages.push({ kind: "balance", message: t("funding.balanceShort", { balance: usdcGrouped(balance, 0), short: usdcGrouped(shortBy.toString(), 0) }) });
   }
   const perDay = new Map<number, bigint>();
   for (const i of items) {
@@ -35,7 +36,7 @@ export function checkFunding(items: UpcomingItem[], balance: string, vaultDailyL
       messages.push({
         kind: "daily_limit",
         dayStartMs: day,
-        message: `${shortDate(day)} exceeds the vault's daily limit; ${usdcGrouped((sum - limit).toString(), 0)} will move to the next day.`,
+        message: t("funding.dailyLimit", { date: shortDate(day), amount: usdcGrouped((sum - limit).toString(), 0) }),
       });
     }
   }

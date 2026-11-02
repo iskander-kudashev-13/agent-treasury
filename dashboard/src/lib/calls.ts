@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 /**
  * THE owner call table: every owner method of the vault contract, the deposit it needs and its gas.
  * Source of truth is `contract/src/*.rs`; `calls.contract-sync.test.ts` parses the Rust and fails when this file drifts
@@ -129,42 +130,45 @@ export function chunkCalls<T>(calls: T[], size = MAX_ACTIONS_PER_TX): T[][] {
   return out;
 }
 
+/** Localised label of an owner method for toasts ("Pause agent"). */
+export const methodLabel = (m: OwnerMethod): string => t(`method.${m}`);
+
 /** Plain-language one-liner for the review modal. Text from args is data: callers render it as plain text. */
 export function describeCall(c: PlannedCall, names: { agent?: (id: string) => string; recipient?: (id: number) => string } = {}): string {
   const a = c.args;
   const agent = (v: unknown) => names.agent?.(String(v)) ?? String(v);
-  const rec = (v: unknown) => names.recipient?.(Number(v)) ?? `recipient #${String(v)}`;
+  const rec = (v: unknown) => names.recipient?.(Number(v)) ?? t("call.recipientN", { id: String(v) });
   switch (c.method) {
     case "add_recipient": {
       const r = a.recipient as { label?: string; destination_chain?: string } | undefined;
-      return `Add recipient ${r?.label ?? "?"} (${r?.destination_chain ?? "?"})`;
+      return t("call.addRecipient", { label: r?.label ?? "?", chain: r?.destination_chain ?? "?" });
     }
     case "update_recipient":
-      return `Update ${rec(a.recipient_id)}`;
+      return t("call.updateRecipient", { recipient: rec(a.recipient_id) });
     case "remove_recipient":
-      return `Remove ${rec(a.recipient_id)} from the address book`;
+      return t("call.removeRecipient", { recipient: rec(a.recipient_id) });
     case "add_schedule":
-      return `Create a scheduled payment to ${rec((a.schedule as { recipient_id?: number } | undefined)?.recipient_id)}`;
+      return t("call.addSchedule", { recipient: rec((a.schedule as { recipient_id?: number } | undefined)?.recipient_id) });
     case "update_schedule":
-      return `Update scheduled payment #${String(a.schedule_id)}`;
+      return t("call.updateSchedule", { id: String(a.schedule_id) });
     case "pause_schedule":
-      return `Pause scheduled payment #${String(a.schedule_id)}`;
+      return t("call.pauseSchedule", { id: String(a.schedule_id) });
     case "resume_schedule":
-      return `Resume scheduled payment #${String(a.schedule_id)}`;
+      return t("call.resumeSchedule", { id: String(a.schedule_id) });
     case "end_schedule":
-      return `End scheduled payment #${String(a.schedule_id)} (cannot be undone)`;
+      return t("call.endSchedule", { id: String(a.schedule_id) });
     case "remove_schedule":
-      return `Delete ended scheduled payment #${String(a.schedule_id)}`;
+      return t("call.removeSchedule", { id: String(a.schedule_id) });
     case "update_mandate":
-      return `Change the mandate of ${agent(a.agent_id)}`;
+      return t("call.updateMandate", { agent: agent(a.agent_id) });
     case "pause_agent":
-      return `Pause ${agent(a.agent_id)}`;
+      return t("call.pauseAgent", { agent: agent(a.agent_id) });
     case "resume_agent":
-      return `Resume ${agent(a.agent_id)}`;
+      return t("call.resumeAgent", { agent: agent(a.agent_id) });
     case "pause":
-      return "Pause the whole vault (all agents stop paying)";
+      return t("call.pauseVault");
     case "resume":
-      return "Resume the vault";
+      return t("call.resumeVault");
     default:
       return `${c.method.replace(/_/g, " ")}`;
   }

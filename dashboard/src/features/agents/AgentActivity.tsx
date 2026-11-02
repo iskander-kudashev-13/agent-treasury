@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Card, CardHeader, ChainBadge, EmptyState, Icons, Pill, ReasonChip, Skeleton, SourceTag, Tabs } from "@/kit";
@@ -30,6 +31,7 @@ export function filterActivity(items: Item[], f: Filter): Item[] {
 }
 
 function Row({ item }: { item: Item }) {
+  const t = useT();
   if (item.kind === "rejection") {
     const r = item.rejection;
     return (
@@ -79,7 +81,7 @@ function Row({ item }: { item: Item }) {
         {p.memo && <p className="m-0 mt-1 text-xs text-ink-secondary italic">{p.memo}</p>}
         {p.status === "PendingApproval" && (
           <p className="m-0 mt-1 text-xs">
-            <Link to={`/payouts/${p.id}`}>Review and approve or reject →</Link>
+            <Link to={`/payouts/${p.id}`}>{t("ag.reviewLink")}</Link>
           </p>
         )}
       </div>
@@ -89,6 +91,7 @@ function Row({ item }: { item: Item }) {
 
 /** Unified timeline of this agent's requests, newest first (DESIGN_AGENTS §3.3). */
 export function AgentActivity({ agentId }: { agentId: string }) {
+  const t = useT();
   const payouts = useAgentPayouts(agentId);
   const rejections = useAgentRejections(agentId);
   const [filter, setFilter] = useState<Filter>("all");
@@ -97,17 +100,17 @@ export function AgentActivity({ agentId }: { agentId: string }) {
   const pendingCount = all.filter((i) => i.kind === "payout" && i.payout.status === "PendingApproval").length;
   return (
     <Card aria-labelledby="activity-title" padding="none">
-      <CardHeader className="px-5 pt-4" id="activity-title" title="Activity" />
+      <CardHeader className="px-5 pt-4" id="activity-title" title={t("ag.activity")} />
       <div className="px-5">
         <Tabs
-          label="Activity filter"
+          label={t("ag.activityFilter")}
           value={filter}
           onChange={setFilter}
           items={[
-            { value: "all", label: "All" },
-            { value: "paid", label: "Paid" },
-            { value: "pending", label: "Pending", count: pendingCount },
-            { value: "rejected", label: "Rejected" },
+            { value: "all", label: t("ag.fAll") },
+            { value: "paid", label: t("ag.fPaid") },
+            { value: "pending", label: t("ag.fPending"), count: pendingCount },
+            { value: "rejected", label: t("ag.fRejected") },
           ]}
         />
       </div>
@@ -116,7 +119,7 @@ export function AgentActivity({ agentId }: { agentId: string }) {
           <Skeleton className="h-24" />
         </div>
       ) : shown.length === 0 ? (
-        <EmptyState title={all.length === 0 ? "No activity yet" : "Nothing in this filter"}>{all.length === 0 ? "Requests from this agent, paid or refused, will appear here." : undefined}</EmptyState>
+        <EmptyState title={all.length === 0 ? t("ag.noActivity") : t("ag.nothingFilter")}>{all.length === 0 ? t("ag.noActivityHint") : undefined}</EmptyState>
       ) : (
         <ul className="m-0 list-none px-5 pb-2">
           {shown.map((i) => (
@@ -127,7 +130,7 @@ export function AgentActivity({ agentId }: { agentId: string }) {
       {payouts.hasMore && (
         <div className="border-t border-track px-5 py-3">
           <Button size="sm" onClick={payouts.loadMore}>
-            Load older payments ({payouts.total - payouts.list.length} more)
+            {t("ag.loadOlder", { n: payouts.total - payouts.list.length })}
           </Button>
         </div>
       )}

@@ -1,4 +1,5 @@
 /** Parsing and display helpers for TEE trust anchors (approved measurements, PPIDs, local-mode whitelist). */
+import { t } from "@/i18n";
 import { shortId } from "@/kit/tokens";
 
 export interface Measurements {
@@ -7,6 +8,8 @@ export interface Measurements {
   app_compose_hash_payload: string;
 }
 
+/** JSON shape shown in hints and errors (technical text, not translated). */
+export const SHAPE = '{"rtmrs":{...},"key_provider_event_digest":...,"app_compose_hash_payload":...}';
 const HEX = /^[0-9a-fA-F]+$/;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -16,15 +19,15 @@ export function parseMeasurements(text: string): { value: Measurements; error: n
   try {
     v = JSON.parse(text);
   } catch {
-    return { value: null, error: "Not valid JSON" };
+    return { value: null, error: t("ta.notJson") };
   }
-  if (!isObj(v) || !isObj(v.rtmrs)) return { value: null, error: 'Expected {"rtmrs":{...},"key_provider_event_digest":...,"app_compose_hash_payload":...}' };
+  if (!isObj(v) || !isObj(v.rtmrs)) return { value: null, error: t("ta.expectedShape", { shape: SHAPE }) };
   for (const k of ["mrtd", "rtmr0", "rtmr1", "rtmr2"]) {
     const x = v.rtmrs[k];
-    if (typeof x !== "string" || !HEX.test(x)) return { value: null, error: `rtmrs.${k} must be a hex string` };
+    if (typeof x !== "string" || !HEX.test(x)) return { value: null, error: t("ta.mustHex", { field: `rtmrs.${k}` }) };
   }
   for (const k of ["key_provider_event_digest", "app_compose_hash_payload"]) {
-    if (typeof v[k] !== "string" || !HEX.test(v[k])) return { value: null, error: `${k} must be a hex string` };
+    if (typeof v[k] !== "string" || !HEX.test(v[k])) return { value: null, error: t("ta.mustHex", { field: k }) };
   }
   return { value: v as unknown as Measurements, error: null };
 }
@@ -34,7 +37,7 @@ export function parsePpids(text: string): { value: string[]; error: string | nul
   const parts = text.split(/[\s,]+/).filter(Boolean);
   if (parts.length === 0) return { value: [], error: null };
   const bad = parts.find((p) => !/^[0-9a-fA-F]{32}$/.test(p));
-  if (bad) return { value: [], error: `"${shortId(bad, 10, 4)}" is not a PPID (32 hex characters)` };
+  if (bad) return { value: [], error: t("ta.notPpid", { value: shortId(bad, 10, 4) }) };
   return { value: [...new Set(parts.map((p) => p.toLowerCase()))], error: null };
 }
 

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { Button, Modal, SigningHint } from "@/kit";
 import { chunkCalls, describeCall, type PlannedCall } from "@/lib/calls";
 import { flattenBatch, type OrderedBatch } from "@/lib/proposals";
@@ -23,6 +24,7 @@ export function ReviewSignModal({
   canSign: boolean;
   onSign: (calls: PlannedCall[]) => void;
 }) {
+  const t = useT();
   const calls = flattenBatch(batch.ordered);
   const txs = chunkCalls(calls).length;
   const blocked = batch.problems.length > 0 || calls.length === 0 || !canSign;
@@ -30,23 +32,23 @@ export function ReviewSignModal({
     <Modal
       open={open}
       onClose={() => !busy && onClose()}
-      title={`Review ${calls.length} ${calls.length === 1 ? "action" : "actions"}`}
+      title={t("as.reviewTitle", { count: calls.length })}
       width={520}
       footer={
         <>
           {busy && <SigningHint />}
           <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" disabled={blocked} loading={busy} onClick={() => onSign(calls)}>
-            Sign {txs > 1 ? `${txs} transactions` : "in wallet"}
+            {txs > 1 ? t("as.signTxs", { n: txs }) : t("as.signInWallet")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3 text-[13px]">
         <p className="m-0 text-ink-muted">
-          {txs > 1 ? `${calls.length} actions, signed in ${txs} consecutive transactions.` : `Signed as one transaction with ${calls.length} ${calls.length === 1 ? "action" : "actions"}, in this order. Either all of it happens or none.`}
+          {txs > 1 ? t("as.reviewMulti", { calls: calls.length, txs }) : t("as.reviewSingle", { count: calls.length })}
         </p>
         <ol className="m-0 flex list-none flex-col gap-2 p-0">
           {batch.ordered.map((it) => (
@@ -65,8 +67,8 @@ export function ReviewSignModal({
             {p}
           </p>
         ))}
-        {!canSign && <p className="m-0 text-ink-subtle">Connect the vault owner&apos;s wallet to sign.</p>}
-        <p className="m-0 text-ink-subtle">Each action attaches 1 yoctoNEAR where the contract requires it. No funds move from your wallet.</p>
+        {!canSign && <p className="m-0 text-ink-subtle">{t("as.connectToSign")}</p>}
+        <p className="m-0 text-ink-subtle">{t("as.eachAction")}</p>
       </div>
     </Modal>
   );

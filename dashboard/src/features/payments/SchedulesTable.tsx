@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import type { PaymentMode } from "@/lib/scheduleForm";
 import { useState } from "react";
 import { Avatar, Button, Card, ChainBadge, EmptyState, Modal, Select, StatusPill, Table, Td, Th, Tr, SigningHint, Icons } from "@/kit";
@@ -33,6 +34,7 @@ export interface SchedulesTableProps {
 
 /** One row per schedule (UI_UPDATES §4.1). Labels and agent names are untrusted: plain text only. */
 export function SchedulesTable({ schedules, recipients, agents, now, overdueGraceMs, filters, onFilters, onEdit, onNew, onAsk }: SchedulesTableProps) {
+  const t = useT();
   const { send, busy, canAct } = useOwnerTx();
   const [confirm, setConfirm] = useState<Confirm>(null);
   const recipientOf = new Map(recipients.map((r) => [r.id, r]));
@@ -50,24 +52,24 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
     return (
       <Card padding="none">
         <EmptyState
-          title="No payments yet"
+          title={t("sched.noPayments")}
           action={
             <div className="flex flex-wrap justify-center gap-2">
               <Button variant="primary" disabled={!canAct} onClick={() => onNew("once")}>
-                Pay once
+                {t("page.payOnce")}
               </Button>
               <Button disabled={!canAct} onClick={() => onNew("recurring")}>
-                + Recurring payment
+                {t("page.addRecurring")}
               </Button>
               {onAsk && (
                 <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={onAsk}>
-                  Ask assistant
+                  {t("page.askAssistant")}
                 </Button>
               )}
             </div>
           }
         >
-          Pay someone once, or set up salaries and other regular payments — the assigned agent pays them on time.
+          {t("sched.noPaymentsHint")}
         </EmptyState>
       </Card>
     );
@@ -77,17 +79,17 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
     <Card padding="none">
       <div className="flex flex-wrap items-end gap-3 border-b border-line px-5 py-3">
         <label className="flex flex-col gap-1 text-xs text-ink-muted">
-          Type
-          <Select className="h-9 w-36" value={filters.type} onChange={(e) => onFilters({ ...filters, type: e.target.value as ScheduleFilters["type"] })} aria-label="Filter by type">
-            <option value="">All types</option>
-            <option value="once">One-time</option>
-            <option value="recurring">Recurring</option>
+          {t("sched.type")}
+          <Select className="h-9 w-36" value={filters.type} onChange={(e) => onFilters({ ...filters, type: e.target.value as ScheduleFilters["type"] })} aria-label={t("sched.filterType")}>
+            <option value="">{t("sched.allTypes")}</option>
+            <option value="once">{t("sched.oneTime")}</option>
+            <option value="recurring">{t("sched.recurring")}</option>
           </Select>
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink-muted">
-          Agent
-          <Select className="h-9 w-44" value={filters.agent} onChange={(e) => onFilters({ ...filters, agent: e.target.value })} aria-label="Filter by agent">
-            <option value="">All agents</option>
+          {t("sched.agent")}
+          <Select className="h-9 w-44" value={filters.agent} onChange={(e) => onFilters({ ...filters, agent: e.target.value })} aria-label={t("sched.filterAgent")}>
+            <option value="">{t("sched.allAgents")}</option>
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -96,18 +98,18 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
           </Select>
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink-muted">
-          Status
-          <Select className="h-9 w-36" value={filters.status} onChange={(e) => onFilters({ ...filters, status: e.target.value as ScheduleStatus | "" })} aria-label="Filter by status">
-            <option value="">All statuses</option>
-            <option value="Active">Active</option>
-            <option value="Paused">Paused</option>
-            <option value="Ended">Ended</option>
+          {t("sched.status")}
+          <Select className="h-9 w-36" value={filters.status} onChange={(e) => onFilters({ ...filters, status: e.target.value as ScheduleStatus | "" })} aria-label={t("sched.filterStatus")}>
+            <option value="">{t("sched.allStatuses")}</option>
+            <option value="Active">{t("pill.active")}</option>
+            <option value="Paused">{t("pill.paused")}</option>
+            <option value="Ended">{t("pill.ended")}</option>
           </Select>
         </label>
         <label className="flex flex-col gap-1 text-xs text-ink-muted">
-          Chain
-          <Select className="h-9 w-36" value={filters.chain} onChange={(e) => onFilters({ ...filters, chain: e.target.value })} aria-label="Filter by chain">
-            <option value="">All chains</option>
+          {t("sched.chain")}
+          <Select className="h-9 w-36" value={filters.chain} onChange={(e) => onFilters({ ...filters, chain: e.target.value })} aria-label={t("sched.filterChain")}>
+            <option value="">{t("sched.allChains")}</option>
             {chains.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -117,23 +119,23 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
         </label>
         {filters.recipient !== null && (
           <span className="inline-flex h-9 items-center gap-2 rounded-full border border-line-strong px-3 text-[13px]">
-            Recipient: {recipientOf.get(filters.recipient)?.label ?? `#${filters.recipient}`}
-            <button type="button" aria-label="Clear recipient filter" className="cursor-pointer border-0 bg-transparent p-0 text-ink-muted hover:text-ink" onClick={() => onFilters({ ...filters, recipient: null })}>
+            {t("sched.recipientFilter", { name: recipientOf.get(filters.recipient)?.label ?? `#${filters.recipient}` })}
+            <button type="button" aria-label={t("sched.clearRecipient")} className="cursor-pointer border-0 bg-transparent p-0 text-ink-muted hover:text-ink" onClick={() => onFilters({ ...filters, recipient: null })}>
               <Icons.X size={14} />
             </button>
           </span>
         )}
         <span className="grow" />
-        <span className="pb-2 text-xs text-ink-subtle">Sorted by next payment</span>
+        <span className="pb-2 text-xs text-ink-subtle">{t("sched.sorted")}</span>
       </div>
 
       {rows.length === 0 ? (
         <EmptyState
-          title="No scheduled payments match these filters"
+          title={t("sched.noMatch")}
           action={
             filtered ? (
               <Button size="sm" onClick={() => onFilters(NO_FILTERS)}>
-                Clear filters
+                {t("page.clearFilters")}
               </Button>
             ) : undefined
           }
@@ -142,13 +144,13 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
         <Table>
           <thead>
             <tr>
-              <Th>Recipient</Th>
-              <Th align="right">Amount</Th>
-              <Th>Frequency</Th>
-              <Th>Next payment</Th>
-              <Th>Paid by</Th>
-              <Th>Progress</Th>
-              <Th>Status</Th>
+              <Th>{t("sched.colRecipient")}</Th>
+              <Th align="right">{t("sched.colAmount")}</Th>
+              <Th>{t("sched.colFrequency")}</Th>
+              <Th>{t("sched.colNext")}</Th>
+              <Th>{t("sched.colPaidBy")}</Th>
+              <Th>{t("sched.colProgress")}</Th>
+              <Th>{t("sched.colStatus")}</Th>
               <Th />
             </tr>
           </thead>
@@ -162,7 +164,7 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
                 <Tr key={s.id}>
                   <Td>
                     <div className="flex flex-col items-start gap-1">
-                      <span>{r?.label ?? `Recipient #${s.recipient_id} (removed)`}</span>
+                      <span>{r?.label ?? t("sched.removedRecipient", { id: s.recipient_id })}</span>
                       {r && <ChainBadge chain={r.destination_chain} />}
                     </div>
                   </Td>
@@ -172,13 +174,13 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
                   <Td>{describeFrequency(s.frequency, s.start_at)}</Td>
                   <Td>
                     {next === null ? (
-                      <span className="text-ink-subtle">{s.status === "Ended" ? "—" : "none left"}</span>
+                      <span className="text-ink-subtle">{s.status === "Ended" ? "—" : t("sched.noneLeft")}</span>
                     ) : (
                       <div className="flex flex-col">
                         <span className="mono">{fmtDate(next, now)}</span>
                         {late !== null ? (
                           <span className="text-xs text-warn">
-                            Overdue {late} {late === 1 ? "day" : "days"} — needs approval
+                            {t("sched.overdue", { count: late })}
                           </span>
                         ) : (
                           <span className="text-xs text-ink-muted">{relativeTime(next, now)}</span>
@@ -199,27 +201,27 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
                   <Td align="right" className="whitespace-nowrap">
                     {s.status !== "Ended" && (
                       <Button size="sm" variant="ghost" disabled={dis} onClick={() => onEdit(s)}>
-                        Edit
+                        {t("sched.edit")}
                       </Button>
                     )}
                     {s.status === "Active" && (
-                      <Button size="sm" variant="ghost" disabled={dis} onClick={() => run([{ method: "pause_schedule", args: { schedule_id: s.id } }], "Pause")}>
-                        Pause
+                      <Button size="sm" variant="ghost" disabled={dis} onClick={() => run([{ method: "pause_schedule", args: { schedule_id: s.id } }], t("sched.pauseLbl"))}>
+                        {t("sched.pause")}
                       </Button>
                     )}
                     {s.status === "Paused" && (
-                      <Button size="sm" variant="ghost" disabled={dis} onClick={() => run([{ method: "resume_schedule", args: { schedule_id: s.id } }], "Resume")}>
-                        Resume
+                      <Button size="sm" variant="ghost" disabled={dis} onClick={() => run([{ method: "resume_schedule", args: { schedule_id: s.id } }], t("sched.resumeLbl"))}>
+                        {t("sched.resume")}
                       </Button>
                     )}
                     {s.status !== "Ended" && (
                       <Button size="sm" variant="ghost" disabled={dis} onClick={() => setConfirm({ kind: "end", schedule: s })}>
-                        End
+                        {t("sched.end")}
                       </Button>
                     )}
                     {s.status === "Ended" && (
-                      <Button size="sm" variant="ghost" disabled={dis || s.open_payout !== null} title={s.open_payout !== null ? "A payment of this schedule is still open" : undefined} onClick={() => setConfirm({ kind: "remove", schedule: s })}>
-                        Remove
+                      <Button size="sm" variant="ghost" disabled={dis || s.open_payout !== null} title={s.open_payout !== null ? t("sched.openPayout") : undefined} onClick={() => setConfirm({ kind: "remove", schedule: s })}>
+                        {t("sched.remove")}
                       </Button>
                     )}
                   </Td>
@@ -234,12 +236,12 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
         open={confirm !== null}
         onClose={() => !busy && setConfirm(null)}
         danger
-        title={confirm?.kind === "end" ? "End this scheduled payment?" : "Remove this ended schedule?"}
+        title={confirm?.kind === "end" ? t("sched.endTitle") : t("sched.removeTitle")}
         footer={
           <>
             {busy && <SigningHint />}
             <Button variant="ghost" disabled={busy} onClick={() => setConfirm(null)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               variant="danger-fill"
@@ -248,20 +250,20 @@ export function SchedulesTable({ schedules, recipients, agents, now, overdueGrac
               onClick={() => {
                 if (!confirm) return;
                 const id = confirm.schedule.id;
-                void send([confirm.kind === "end" ? { method: "end_schedule", args: { schedule_id: id } } : { method: "remove_schedule", args: { schedule_id: id } }], confirm.kind === "end" ? "End schedule" : "Remove schedule").then((r) => r.ok && setConfirm(null));
+                void send([confirm.kind === "end" ? { method: "end_schedule", args: { schedule_id: id } } : { method: "remove_schedule", args: { schedule_id: id } }], confirm.kind === "end" ? t("sched.endLbl") : t("sched.removeLbl")).then((r) => r.ok && setConfirm(null));
               }}
             >
-              {confirm?.kind === "end" ? "End schedule" : "Remove"}
+              {confirm?.kind === "end" ? t("sched.endBtn") : t("sched.remove")}
             </Button>
           </>
         }
       >
         {confirm?.kind === "end" ? (
           <p className="m-0">
-            {recipientOf.get(confirm.schedule.recipient_id)?.label ?? `Recipient #${confirm.schedule.recipient_id}`}: {usdcGrouped(confirm.schedule.amount, 0)} USDC, {describeFrequency(confirm.schedule.frequency, confirm.schedule.start_at)}. No more payments will be made and this cannot be undone. Use Pause to stop temporarily. Requires 1 yoctoNEAR.
+            {t("sched.endBody", { who: recipientOf.get(confirm.schedule.recipient_id)?.label ?? t("sched.recipientN", { id: confirm.schedule.recipient_id }), amount: usdcGrouped(confirm.schedule.amount, 0), freq: describeFrequency(confirm.schedule.frequency, confirm.schedule.start_at) })}
           </p>
         ) : (
-          <p className="m-0">The schedule is deleted from the vault. Its payment history stays in Payouts.</p>
+          <p className="m-0">{t("sched.removeBody")}</p>
         )}
       </Modal>
     </Card>

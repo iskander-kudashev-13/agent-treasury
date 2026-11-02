@@ -3,6 +3,7 @@
  * Auth: `owner` = bearer token of the NEP-413 assistant session (`/ai/session`); `confirm` = a NEP-413 signature over the
  * message below. Everything coming back is untrusted: parsed defensively and rendered as text only.
  */
+import { t } from "@/i18n";
 import { clearSession, loadSession, signInWithWallet, type AiSession, type SignMessageFn } from "./assistantClient";
 import { NETWORK, VAULT_ID, WORKER_URL } from "./config";
 import { confirmationMessage, hashRuleSet, parseRuleSet, type RuleSetV1 } from "./tradingRules";
@@ -118,7 +119,7 @@ export async function fetchHlApprovedAgents(network: "mainnet" | "testnet", user
     body: JSON.stringify({ type: "extraAgents", user }),
     ...(signal ? { signal } : {}),
   });
-  if (!res.ok) throw new Error(`Hyperliquid info HTTP ${res.status}`);
+  if (!res.ok) throw new Error(t("trading.err.hlInfoHttp", { status: res.status }));
   return parseHlAgents(await res.json());
 }
 
@@ -269,7 +270,7 @@ export class TradingHttpError extends Error {
 
 async function failure(res: Response): Promise<TradingHttpError> {
   let code = "http_error";
-  let msg = `HTTP ${res.status}`;
+  let msg = t("trading.err.http", { status: res.status });
   try {
     const j: unknown = await res.json();
     if (isObj(j)) {
@@ -300,7 +301,7 @@ async function request(path: string, init: { method?: "GET" | "POST"; token?: st
 export async function fetchTradingStatus(signal?: AbortSignal): Promise<TradingStatusResult> {
   try {
     const s = parseTradingStatus(await request("/status", signal ? { signal } : {}));
-    if (!s) throw new Error("Unexpected /trading/status response");
+    if (!s) throw new Error(t("trading.err.unexpectedStatus"));
     return s;
   } catch (e) {
     if (e instanceof TradingHttpError && e.status === 404) return { enabled: false };
@@ -319,13 +320,13 @@ export async function fetchActiveRules(token: string, signal?: AbortSignal): Pro
 
 export async function killTrading(token: string, reason?: string): Promise<KillResult> {
   const r = parseKill(await request("/kill", { method: "POST", token, body: reason ? { reason } : {} }));
-  if (!r) throw new Error("Unexpected /trading/kill response");
+  if (!r) throw new Error(t("trading.err.unexpectedKill"));
   return r;
 }
 
 export async function rotateApiWallet(token: string): Promise<string> {
   const j = await request("/api-wallet/rotate", { method: "POST", token, body: {} });
-  if (!isObj(j) || typeof j.address !== "string") throw new Error("Unexpected rotate response");
+  if (!isObj(j) || typeof j.address !== "string") throw new Error(t("trading.err.unexpectedRotate"));
   return j.address;
 }
 
@@ -375,37 +376,37 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
   const vault = deps.vault ?? VAULT_ID;
   const localHash = await hashRuleSet(rules);
   const status = await fetchTradingStatus();
-  if (!status.enabled) throw new Error("Trading is switched off on this worker");
-  if (vault && status.vault && status.vault !== vault) throw new Error("The worker trades for a different vault than this dashboard");
+  if (!status.enabled) throw new Error(t("trading.err.off"));
+  if (vault && status.vault && status.vault !== vault) throw new Error(t("trading.err.otherVault"));
   // The agent id goes into the signed message: refuse anything but the trader agent this dashboard manages.
-  if (status.agent_id !== TRADER_AGENT_ID) throw new Error(`The worker trades as agent "${status.agent_id}", not "${TRADER_AGENT_ID}". Nothing was signed.`);
+  if (status.agent_id !== TRADER_AGENT_ID) throw new Error(t("trading.err.otherAgent", { got: status.agent_id, want: TRADER_AGENT_ID }));
 
-  if (deps.trustedHlAccount === null) throw new Error("The vault does not name a single Hyperliquid account for hl-trader, so the account the worker reports cannot be verified. Nothing was signed.");
+  if (deps.trustedHlAccount === null) throw new Error(t("trading.err.noSingleAccount"));
   const HEX_ADDR = /^0x[0-9a-f]{40}$/;
   const reported = status.hl_account.toLowerCase();
   const trusted = deps.trustedHlAccount.toLowerCase();
-  if (!HEX_ADDR.test(reported) || !HEX_ADDR.test(trusted)) throw new Error("Not a valid Hyperliquid address (expected 0x and 40 hex characters). Nothing was signed.");
-  if (NETWORK === "mainnet" && status.hl_network !== "mainnet") throw new Error(`The worker trades on Hyperliquid ${status.hl_network}, but this dashboard is on mainnet. Nothing was signed.`);
+  if (!HEX_ADDR.test(reported) || !HEX_ADDR.test(trusted)) throw new Error(t("trading.err.badAddress"));
+  if (NETWORK === "mainnet" && status.hl_network !== "mainnet") throw new Error(t("trading.err.network", { network: status.hl_network }));
   if (reported !== trusted) {
-    throw new Error(`The worker reports Hyperliquid account ${status.hl_account}, but the vault pays ${deps.trustedHlAccount}. Nothing was signed.`);
+    throw new Error(t("trading.err.accountDiffers", { reported: status.hl_account, trusted: deps.trustedHlAccount }));
   }
 
   const session = await ensureSession(deps.accountId, deps.signMessage);
   const ch = await request("/rules/challenge", { method: "POST", token: session.token, body: { rules } });
-  if (!isObj(ch) || typeof ch.nonce !== "string" || typeof ch.message !== "string" || typeof ch.recipient !== "string") throw new Error("Unexpected challenge response");
-  if (ch.hash !== undefined && ch.hash !== localHash) throw new Error("The worker computed a different hash for these rules. Nothing was signed.");
-  if (vault && ch.recipient !== vault) throw new Error("The challenge is addressed to a different vault. Nothing was signed.");
+  if (!isObj(ch) || typeof ch.nonce !== "string" || typeof ch.message !== "string" || typeof ch.recipient !== "string") throw new Error(t("trading.err.unexpectedChallenge"));
+  if (ch.hash !== undefined && ch.hash !== localHash) throw new Error(t("trading.err.hashDiffers"));
+  if (vault && ch.recipient !== vault) throw new Error(t("trading.err.challengeVault"));
   const expected = confirmationMessage({ vault: status.vault || vault, agentId: status.agent_id, hlNetwork: status.hl_network, hlAccount: status.hl_account, rulesSha256: localHash });
-  if (ch.message !== expected) throw new Error("The message to sign does not match the rules shown. Nothing was signed.");
+  if (ch.message !== expected) throw new Error(t("trading.err.messageDiffers"));
 
   const signed = await deps.signMessage({ message: ch.message, recipient: ch.recipient, nonce: b64ToBytes(ch.nonce) });
-  if (!signed) throw new Error("The wallet did not return a signature (it may have redirected). Try again.");
-  if (signed.accountId !== deps.accountId) throw new Error("The wallet signed with a different account than the connected one");
+  if (!signed) throw new Error(t("trading.err.noSignature"));
+  if (signed.accountId !== deps.accountId) throw new Error(t("trading.err.otherAccount"));
 
   const j = await request("/rules/confirm", {
     method: "POST",
     body: { rules, account_id: signed.accountId, public_key: signed.publicKey, signature: signed.signature, nonce: ch.nonce },
   });
-  if (!isObj(j)) throw new Error("Unexpected confirm response");
+  if (!isObj(j)) throw new Error(t("trading.err.unexpectedConfirm"));
   return { active: parseConfirmed(j.active), state: str(j.state) };
 }

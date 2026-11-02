@@ -2,6 +2,7 @@
  * Browser client of the worker assistant API (worker/src/ai/route.ts): NEP-413 sign-in, `GET /ai/info`, and the SSE stream of
  * `POST /ai/chat`. No signing of transactions here; the model only ever returns typed proposals.
  */
+import { t } from "@/i18n";
 import { VAULT_ID, WORKER_URL } from "./config";
 import { parseProposal, type Proposal } from "./proposals";
 import { parseTradingRulesProposal, type TradingRulesProposal } from "./tradingClient";
@@ -116,7 +117,7 @@ export function parseChatEvent(m: SseMessage): ChatEvent | null {
     case "done":
       return { type };
     case "error":
-      return { type, message: typeof j.message === "string" ? j.message : "The assistant failed" };
+      return { type, message: typeof j.message === "string" ? j.message : t("ac.failed") };
     default:
       return null;
   }
@@ -135,7 +136,7 @@ export class AssistantHttpError extends Error {
 }
 
 async function failure(res: Response): Promise<AssistantHttpError> {
-  let msg = `HTTP ${res.status}`;
+  let msg = t("ac.sessionHttp", { status: res.status });
   try {
     const j: unknown = await res.json();
     if (isObj(j) && typeof j.message === "string") msg = j.message;
@@ -192,7 +193,7 @@ export async function fetchAiInfo(signal?: AbortSignal): Promise<AiInfo> {
   const res = await fetch(`${WORKER_URL}/ai/info`, { headers: { Accept: "application/json" }, ...(signal ? { signal } : {}) });
   if (!res.ok) throw await failure(res);
   const info = parseAiInfo(await res.json());
-  if (!info) throw new Error("Unexpected /ai/info response");
+  if (!info) throw new Error(t("ac.unexpectedInfo"));
   return info;
 }
 
@@ -271,11 +272,11 @@ export async function signInWithWallet(signMessage: SignMessageFn, accountId: st
   const chRes = await fetch(`${WORKER_URL}/ai/session/challenge`, { method: "POST", headers: { Accept: "application/json" } });
   if (!chRes.ok) throw await failure(chRes);
   const ch: unknown = await chRes.json();
-  if (!isObj(ch) || typeof ch.nonce !== "string" || typeof ch.message !== "string" || typeof ch.recipient !== "string") throw new Error("Unexpected challenge response");
-  if (VAULT_ID && ch.recipient !== VAULT_ID) throw new Error("The worker serves a different vault than this dashboard");
+  if (!isObj(ch) || typeof ch.nonce !== "string" || typeof ch.message !== "string" || typeof ch.recipient !== "string") throw new Error(t("ac.unexpectedChallenge"));
+  if (VAULT_ID && ch.recipient !== VAULT_ID) throw new Error(t("ac.differentVault"));
   const signed = await signMessage({ message: ch.message, recipient: ch.recipient, nonce: b64ToBytes(ch.nonce) });
-  if (!signed) throw new Error("The wallet did not return a signature (it may have redirected). Try again.");
-  if (signed.accountId !== accountId) throw new Error("The wallet signed with a different account than the connected one");
+  if (!signed) throw new Error(t("ac.noSignature"));
+  if (signed.accountId !== accountId) throw new Error(t("ac.differentAccount"));
   const res = await fetch(`${WORKER_URL}/ai/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -283,7 +284,7 @@ export async function signInWithWallet(signMessage: SignMessageFn, accountId: st
   });
   if (!res.ok) throw await failure(res);
   const j: unknown = await res.json();
-  if (!isObj(j) || typeof j.token !== "string" || typeof j.account_id !== "string" || typeof j.expires_at !== "number") throw new Error("Unexpected session response");
+  if (!isObj(j) || typeof j.token !== "string" || typeof j.account_id !== "string" || typeof j.expires_at !== "number") throw new Error(t("ac.unexpectedSession"));
   const session = { token: j.token, accountId: j.account_id, expiresAt: j.expires_at };
   saveSession(session);
   return session;
@@ -307,7 +308,7 @@ export async function* streamChat(token: string, body: ChatRequest, signal?: Abo
     ...(signal ? { signal } : {}),
   });
   if (!res.ok) throw await failure(res);
-  if (!res.body) throw new Error("The server sent no stream");
+  if (!res.body) throw new Error(t("ac.noStream"));
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   const parser = createSseParser();

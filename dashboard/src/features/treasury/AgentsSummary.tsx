@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { Link } from "react-router-dom";
 import { fraction, usdcGrouped } from "@/lib/amount";
 import type { AgentView, WorkerStatus } from "@/lib/types";
@@ -5,9 +6,10 @@ import { ACCENT_HEX, Avatar, Button, Card, CardHeader, Dot, EmptyState, limitTon
 import { useOwner } from "@/features/owner/OwnerProvider";
 
 function MiniBar({ pct }: { pct: number }) {
+  const t = useT();
   const w = Math.min(1, Math.max(0, pct)) * 100;
   return (
-    <div className="h-1.5 overflow-hidden rounded-full bg-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(w)} aria-label="Spent today">
+    <div className="h-1.5 overflow-hidden rounded-full bg-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(w)} aria-label={t("treasury.spentToday")}>
       <div className="fill-transition h-full rounded-full" style={{ width: `${w}%`, background: ACCENT_HEX[limitTone(pct, "agent")] }} />
     </div>
   );
@@ -17,6 +19,7 @@ const STATUS_DOT = { Active: "ok", Paused: "warn", Revoked: "neutral" } as const
 
 /** Agents summary card (DESIGN_AGENTS §4): up to 3 compact rows, "View all", worker footer. Replaces the single agent card. */
 export function AgentsSummary({ agents, paused, missed, worker, workerError }: { agents: AgentView[]; paused: boolean; missed: Map<string, number>; worker: WorkerStatus | null; workerError: string | null }) {
+  const t = useT();
   const { canAct } = useOwner();
   const live = agents.filter((a) => a.status !== "Revoked");
   const shown = live.slice(0, 3);
@@ -24,25 +27,25 @@ export function AgentsSummary({ agents, paused, missed, worker, workerError }: {
     <Card aria-labelledby="t-agents" className="flex flex-col gap-3">
       <CardHeader
         id="t-agents"
-        title={`Agents${live.length ? ` (${live.length})` : ""}`}
+        title={`${t("treasury.agentsTitle")}${live.length ? ` (${live.length})` : ""}`}
         actions={
           <Link to="/agents" className="text-[13px]">
-            View all →
+            {t("treasury.viewAll")}
           </Link>
         }
       />
       {shown.length === 0 ? (
         <EmptyState
-          title="No agents yet"
+          title={t("treasury.noAgents")}
           action={
             canAct ? (
               <Link to="/agents/new">
-                <Button variant="primary">Add agent</Button>
+                <Button variant="primary">{t("page.addAgent")}</Button>
               </Link>
             ) : undefined
           }
         >
-          Connect your first agent — it will only be able to spend within the limits you set.
+          {t("treasury.noAgentsHint")}
         </EmptyState>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-3 p-0">
@@ -58,23 +61,23 @@ export function AgentsSummary({ agents, paused, missed, worker, workerError }: {
                       {a.name}
                     </Link>
                     <Dot accent={paused ? "danger" : STATUS_DOT[a.status]} />
-                    <span className="text-xs text-ink-muted">{paused ? "Vault paused" : a.status}</span>
-                    {a.open_approvals > 0 && <Pill accent="warn">{a.open_approvals} to approve</Pill>}
+                    <span className="text-xs text-ink-muted">{paused ? t("treasury.vaultPaused") : t(`agentStatus.${a.status}`)}</span>
+                    {a.open_approvals > 0 && <Pill accent="warn">{t("treasury.toApprove", { n: a.open_approvals })}</Pill>}
                   </div>
                   <MiniBar pct={pct} />
                   <div className="mono mt-0.5 text-xs text-ink-muted">
                     {usdcGrouped(a.spent_today)} / {usdcGrouped(a.mandate.daily_limit)}
                   </div>
-                  {miss > 0 && <div className="text-xs text-warn">Missed {miss} scheduled payment{miss === 1 ? "" : "s"}</div>}
+                  {miss > 0 && <div className="text-xs text-warn">{t("treasury.missed", { count: miss })}</div>}
                 </div>
               </li>
             );
           })}
         </ul>
       )}
-      {live.length > shown.length && <p className="m-0 text-xs text-ink-muted">+ {live.length - shown.length} more</p>}
+      {live.length > shown.length && <p className="m-0 text-xs text-ink-muted">{t("treasury.moreCount", { n: live.length - shown.length })}</p>}
       <p className="m-0 border-t border-track pt-3 text-xs text-ink-muted">
-        Worker: {workerError ? "offline" : worker ? (worker.mode === "tee" ? "running in TEE" : "running locally (dev, not TEE)") : "…"}
+        {workerError ? t("treasury.workerOffline") : worker ? (worker.mode === "tee" ? t("treasury.workerTee") : t("treasury.workerLocal")) : `${t("treasury.worker")} …`}
       </p>
     </Card>
   );

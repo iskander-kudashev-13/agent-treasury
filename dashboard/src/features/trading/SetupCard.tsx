@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { useMemo, useRef, useState } from "react";
 import { Button, Callout, Card, CardHeader, Checkbox, Field, Icons, Input, SecretField, SigningHint, useSecretAck } from "@/kit";
 import { clearPending, loadPending, savePending, type PendingKeyAgent } from "@/features/agents/pendingKey";
@@ -22,6 +23,7 @@ export const pendingTrader = (): PendingKeyAgent | null => {
  * "Add agent" wizard (`planKeyAgentCreate`). The key is generated in this tab and shown once.
  */
 export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyAgent | null; onCreated: () => void; onDone: () => void }) {
+  const t = useT();
   const { canAct, busy, sign, accountId } = useAgentTx();
   const { ownerId } = useOwner();
   const now = useNow(60_000);
@@ -54,7 +56,7 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
     const pending: PendingKeyAgent = { id: TRADER_AGENT_ID, name: TRADER_AGENT_NAME, account, publicKey: k.publicKey, secretKey: k.secretKey };
     savePending(pending); // survives a wallet redirect
     const txs = planKeyAgentCreate({ id: TRADER_AGENT_ID, name: TRADER_AGENT_NAME, mandate: check.mandate, owner, vault: VAULT_ID, prefix, publicKey: k.publicKey, fundNear: fund });
-    const ok = await sign(`Add agent ${TRADER_AGENT_ID}`, txs);
+    const ok = await sign(t("trading.setupCard.signLabel", { id: TRADER_AGENT_ID }), txs);
     if (ok) {
       setResult(pending);
       onCreated(); // the agent now exists on chain; the page keeps this card up until the key is saved
@@ -65,40 +67,40 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
   const e = touched ? check.errors : {};
   return (
     <Card aria-labelledby="trader-setup" className="flex flex-col gap-4">
-      <CardHeader id="trader-setup" title="Set up the trading agent" />
+      <CardHeader id="trader-setup" title={t("trading.setupCard.title")} />
       <p className="m-0 text-sm text-ink-secondary">
-        The agent trades spot on Hyperliquid with USDC from your vault. The vault can send money only to the account below, within these limits.
+        {t("trading.setupCard.intro")}
       </p>
-      <Field label="Your Hyperliquid account" hint="A dedicated account for the bot, already active on Hyperliquid, not your personal trading account." {...(e.master ? { error: e.master } : {})}>
+      <Field label={t("trading.setupCard.account")} hint={t("trading.setupCard.accountHint")} {...(e.master ? { error: e.master } : {})}>
         {(a11y) => <Input {...a11y} mono placeholder="0x…" value={master} onChange={(ev) => setMaster(ev.target.value)} state={e.master ? "error" : "default"} autoComplete="off" spellCheck={false} />}
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Daily funding limit" hint="Most the vault sends per day." {...(e.daily ? { error: e.daily } : {})}>
+        <Field label={t("trading.setupCard.daily")} hint={t("trading.setupCard.dailyHint")} {...(e.daily ? { error: e.daily } : {})}>
           {(a11y) => <Input {...a11y} mono inputMode="decimal" suffix="USDC" value={daily} onChange={(ev) => setDaily(ev.target.value)} state={e.daily ? "error" : "default"} />}
         </Field>
-        <Field label="Per top-up" hint="Sent when the account runs low. At most 2 a day." {...(e.perTx ? { error: e.perTx } : {})}>
+        <Field label={t("trading.setupCard.perTopup")} hint={t("trading.setupCard.perTopupHint")} {...(e.perTx ? { error: e.perTx } : {})}>
           {(a11y) => <Input {...a11y} mono inputMode="decimal" suffix="USDC" value={perTx} onChange={(ev) => setPerTx(ev.target.value)} state={e.perTx ? "error" : "default"} />}
         </Field>
       </div>
       <details className="text-[13px] text-ink-secondary">
-        <summary className="cursor-pointer">Advanced</summary>
+        <summary className="cursor-pointer">{t("trading.setupCard.advanced")}</summary>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <Field label="Agent account" hint={owner ? subAccountId(prefix || "…", owner) : "Connect the owner wallet"} {...(touched && prefixErr ? { error: prefixErr } : {})}>
+          <Field label={t("trading.setupCard.agentAccount")} hint={owner ? subAccountId(prefix || "…", owner) : t("trading.setupCard.connectOwner")} {...(touched && prefixErr ? { error: prefixErr } : {})}>
             {(a11y) => <Input {...a11y} mono value={prefix} onChange={(ev) => setPrefix(ev.target.value.toLowerCase())} state={touched && prefixErr ? "error" : "default"} />}
           </Field>
-          <Field label="Gas funding" hint="NEAR sent to the agent account for fees." {...(touched && fundErr ? { error: fundErr } : {})}>
+          <Field label={t("trading.setupCard.gas")} hint={t("trading.setupCard.gasHint")} {...(touched && fundErr ? { error: fundErr } : {})}>
             {(a11y) => <Input {...a11y} mono suffix="NEAR" value={fund} onChange={(ev) => setFund(ev.target.value)} state={touched && fundErr ? "error" : "default"} />}
           </Field>
         </div>
       </details>
       <p className="m-0 text-xs text-ink-muted">
-        Creates the agent <span className="mono">{TRADER_AGENT_ID}</span> with an allowlist of that one address, up to 2 top-ups of {perTx || "…"} USDC a day, expiring in 30 days. You can pause it at any time.
+        {rich("trading.setupCard.creates", { id: <span className="mono">{TRADER_AGENT_ID}</span>, amount: perTx || "…" })}
       </p>
       <div className="flex flex-wrap items-center justify-end gap-3">
         {busy && <SigningHint />}
-        {!canAct && <span className="text-xs text-ink-muted">Only the vault owner can set this up</span>}
+        {!canAct && <span className="text-xs text-ink-muted">{t("trading.setupCard.onlyOwner")}</span>}
         <Button variant="primary" icon={<Icons.Plus size={14} />} disabled={!canAct || busy} loading={busy} onClick={() => void submit()}>
-          Create trading agent
+          {t("trading.setupCard.create")}
         </Button>
       </div>
     </Card>
@@ -107,20 +109,21 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
 
 /** One-time credentials for the worker `.env` (the private key is shown once). */
 function Credentials({ p, master, perTx, onDone }: { p: PendingKeyAgent; master: string; perTx: string; onDone: () => void }) {
+  const t = useT();
   const { canFinish, acked, setAcked } = useSecretAck(3000);
   const [copied, setCopied] = useState(false);
   const env = `TRADING_ENABLED=true\nTRADER_AGENT_ID=${p.id}\nTRADER_NEAR_ACCOUNT_ID=${p.account}\nTRADER_NEAR_PRIVATE_KEY=${p.secretKey}\n${master.trim() ? `HL_MASTER_ADDRESS=${master.trim().toLowerCase()}\n` : "HL_MASTER_ADDRESS=<your Hyperliquid account>\n"}${perTx.trim() ? `TRADING_TOPUP_USDC=${perTx.trim()}\n` : ""}`;
   return (
     <Card aria-labelledby="trader-creds" className="flex flex-col gap-4">
-      <CardHeader id="trader-creds" title="Trading agent created" badge={<Icons.Check size={16} className="text-ok" />} />
+      <CardHeader id="trader-creds" title={t("trading.creds.title")} badge={<Icons.Check size={16} className="text-ok" />} />
       <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
-        Save this key now. You won&apos;t see it again. It exists only in this browser tab.
+        {t("trading.creds.saveKey")}
       </Callout>
-      <SecretField value={p.secretKey} />
+      <SecretField value={p.secretKey} label={t("cs.secretLabel")} />
       <p className="m-0 text-xs text-ink-muted">
-        The key can only call <span className="mono">request_payment</span> and <span className="mono">report_payout_status</span> on your vault, and the vault enforces the limits you set. Add these lines to the worker&apos;s <span className="mono">.env</span> and restart it:
+        {rich("trading.creds.keyScope", { a: <span className="mono">request_payment</span>, b: <span className="mono">report_payout_status</span>, env: <span className="mono">.env</span> })}
       </p>
-      <pre tabIndex={0} aria-label="Worker configuration with the private key (focus to reveal)" className="secret mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
+      <pre tabIndex={0} aria-label={t("trading.creds.configAria")} className="secret mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
         {env}
       </pre>
       <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
@@ -134,12 +137,12 @@ function Credentials({ p, master, perTx, onDone }: { p: PendingKeyAgent; master:
             })
           }
         >
-          {copied ? "Copied" : "Copy config"}
+          {copied ? t("common.copied") : t("trading.creds.copyConfig")}
         </Button>
-        <Checkbox checked={acked} onChange={setAcked} label="I saved the key" />
+        <Checkbox checked={acked} onChange={setAcked} label={t("trading.creds.saved")} />
         <span className="grow" />
         <Button variant="primary" disabled={!canFinish} onClick={onDone}>
-          I saved it → Continue
+          {t("trading.creds.continue")}
         </Button>
       </div>
     </Card>
@@ -164,40 +167,41 @@ function MainnetSetup(p: {
   setFund: (v: string) => void;
   fundErr: string | null;
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const ready = p.master !== null && p.owner !== "" && !p.prefixErr && !p.fundErr;
   const commands = ready && p.master ? mainnetSetupCommands({ owner: p.owner, vault: VAULT_ID, master: p.master, name: p.prefix, fundNear: p.fund }) : null;
   return (
     <Card aria-labelledby="trader-setup" className="flex flex-col gap-4">
-      <CardHeader id="trader-setup" title="Set up the trading agent (mainnet session)" />
+      <CardHeader id="trader-setup" title={t("trading.main.title")} />
       <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
-        On mainnet the agent key is created in your terminal, not in this page. Enter your Hyperliquid account to get the exact commands.
+        {t("trading.main.cli")}
       </Callout>
-      <Field label="Your Hyperliquid account" hint="A dedicated account for the bot, already active on Hyperliquid, holding only the session amount." {...(p.masterError ? { error: p.masterError } : {})}>
+      <Field label={t("trading.setupCard.account")} hint={t("trading.main.accountHint")} {...(p.masterError ? { error: p.masterError } : {})}>
         {(a11y) => (
           <Input {...a11y} mono placeholder="0x…" value={p.masterValue} onChange={(ev) => p.setMaster(ev.target.value)} onBlur={p.touch} state={p.masterError ? "error" : "default"} autoComplete="off" spellCheck={false} />
         )}
       </Field>
       <details className="text-[13px] text-ink-secondary">
-        <summary className="cursor-pointer">Advanced</summary>
+        <summary className="cursor-pointer">{t("trading.setupCard.advanced")}</summary>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <Field label="Agent account" hint={p.owner ? subAccountId(p.prefix || "…", p.owner) : "Connect the owner wallet"} {...(p.prefixErr ? { error: p.prefixErr } : {})}>
+          <Field label={t("trading.setupCard.agentAccount")} hint={p.owner ? subAccountId(p.prefix || "…", p.owner) : t("trading.setupCard.connectOwner")} {...(p.prefixErr ? { error: p.prefixErr } : {})}>
             {(a11y) => <Input {...a11y} mono value={p.prefix} onChange={(ev) => p.setPrefix(ev.target.value.toLowerCase())} state={p.prefixErr ? "error" : "default"} />}
           </Field>
-          <Field label="Gas funding" hint="NEAR sent to the agent account for fees." {...(p.fundErr ? { error: p.fundErr } : {})}>
+          <Field label={t("trading.setupCard.gas")} hint={t("trading.setupCard.gasHint")} {...(p.fundErr ? { error: p.fundErr } : {})}>
             {(a11y) => <Input {...a11y} mono suffix="NEAR" value={p.fund} onChange={(ev) => p.setFund(ev.target.value)} state={p.fundErr ? "error" : "default"} />}
           </Field>
         </div>
       </details>
       <p className="m-0 text-xs text-ink-muted">
-        Session mandate, fixed: every top-up needs your approval (threshold 0), at most {SESSION_LIMIT_USDC} USDC per top-up and per day, 1 top-up a day, expires 47 hours after the command runs, one destination: your Hyperliquid account. Revoke the agent when the session ends.
+        {t("trading.main.mandate", { limit: SESSION_LIMIT_USDC })}
       </p>
       {commands ? (
         <>
           <p className="m-0 text-xs text-ink-muted">
-            Run in the repository root. <span className="mono">OWNER_PRIVATE_KEY</span> is yours, read from the environment for that one run. The script prints the agent key once; put it in the worker&apos;s <span className="mono">.env</span> as <span className="mono">TRADER_NEAR_PRIVATE_KEY</span>, with <span className="mono">TRADER_NEAR_ACCOUNT_ID={subAccountId(p.prefix, p.owner)}</span> and <span className="mono">HL_MASTER_ADDRESS={p.master}</span>.
+            {rich("trading.main.run", { ownerKey: <span className="mono">OWNER_PRIVATE_KEY</span>, env: <span className="mono">.env</span>, tk: <span className="mono">TRADER_NEAR_PRIVATE_KEY</span>, acc: <span className="mono">TRADER_NEAR_ACCOUNT_ID={subAccountId(p.prefix, p.owner)}</span>, hl: <span className="mono">HL_MASTER_ADDRESS={p.master}</span> })}
           </p>
-          <pre tabIndex={0} aria-label="Mainnet setup commands" className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
+          <pre tabIndex={0} aria-label={t("trading.main.cmdAria")} className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
             {commands}
           </pre>
           <div>
@@ -211,12 +215,12 @@ function MainnetSetup(p: {
                 })
               }
             >
-              {copied ? "Copied" : "Copy commands"}
+              {copied ? t("common.copied") : t("trading.main.copyCommands")}
             </Button>
           </div>
         </>
       ) : (
-        <p className="m-0 text-xs text-ink-subtle">Enter a valid Hyperliquid account{p.owner === "" ? " and connect the owner wallet" : ""} to see the commands.</p>
+        <p className="m-0 text-xs text-ink-subtle">{t("trading.main.enterValid", { more: p.owner === "" ? t("trading.main.andConnect") : "" })}</p>
       )}
     </Card>
   );

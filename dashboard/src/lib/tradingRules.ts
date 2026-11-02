@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 /**
  * Trading Rules DSL v1 on the dashboard side (docs/adr/0005-hyperliquid-trading-agent.md).
  *
@@ -297,49 +298,35 @@ export function parseRuleSet(input: unknown): ParsedRules {
 }
 
 /** Plain-words explanation for an issue code (the owner never sees raw codes alone). */
-export const ISSUE_TEXT: Partial<Record<RuleIssueCode, string>> = {
-  UNKNOWN_KEY: "The rules contain a field this dashboard does not know",
-  BAD_VERSION: "Unsupported rules version",
-  BAD_DECIMAL: "A number is malformed (at most 6 decimals, no exponent)",
-  BAD_SIGNED_DECIMAL: "A percent is malformed (at most 2 decimals)",
-  RULE_SIZE_BELOW_MIN: "An order is below the Hyperliquid minimum of 10 USDC",
-  MAX_ORDER_BELOW_MIN: "The max order is below the Hyperliquid minimum of 10 USDC",
-  RULE_SIZE_ABOVE_MAX_ORDER: "An order is larger than the max order, so that rule could never fire",
-  COOLDOWN_REQUIRED: "A rule has no cooldown",
-  POSITION_PCT_ON_BUY: "Buying by position percent is not allowed",
-};
-export const issueText = (c: RuleIssueCode): string => ISSUE_TEXT[c] ?? `Invalid rules (${c})`;
+const ISSUE_CODES = ["UNKNOWN_KEY", "BAD_VERSION", "BAD_DECIMAL", "BAD_SIGNED_DECIMAL", "RULE_SIZE_BELOW_MIN", "MAX_ORDER_BELOW_MIN", "RULE_SIZE_ABOVE_MAX_ORDER", "COOLDOWN_REQUIRED", "POSITION_PCT_ON_BUY"] as const;
+export const issueText = (c: RuleIssueCode): string => ((ISSUE_CODES as readonly string[]).includes(c) ? t(`trading.issue.${c as (typeof ISSUE_CODES)[number]}`) : t("trading.issue.fallback", { code: c }));
 
 /* ───────────── renderer ───────────── */
 
-const DURATION: Record<Window | Every | Ttl | Cooldown, string> = {
-  "15m": "15 minutes",
-  "1h": "1 hour",
-  "4h": "4 hours",
-  "1d": "1 day",
-  "1w": "1 week",
-};
+type Dur = Window | Every | Ttl | Cooldown;
+/** Duration phrase in the grammatical form the sentence needs (Russian/Ukrainian decline them differently per context). */
+const dur = (ctx: "plain" | "over" | "every" | "after", d: Dur): string => t(`trading.dur.${ctx}.${d}`);
 const signed = (pct: string) => (pct.startsWith("-") ? pct : `+${pct}`);
-const bound = (op: "lte" | "gte") => (op === "lte" ? "at or below" : "at or above");
+const bound = (op: "lte" | "gte") => (op === "lte" ? t("trading.dsl.boundLte") : t("trading.dsl.boundGte"));
 const baseOf = (pair: string) => pair.split("/")[0] ?? pair;
 
-function describeTrigger(t: Trigger): string {
-  switch (t.type) {
+function describeTrigger(trig: Trigger): string {
+  switch (trig.type) {
     case "price_change":
-      return `price change over ${DURATION[t.window]} is ${bound(t.op)} ${signed(t.pct)}%`;
+      return t("trading.dsl.trigPriceChange", { dur: dur("over", trig.window), bound: bound(trig.op), pct: signed(trig.pct) });
     case "price":
-      return `price is ${bound(t.op)} ${t.usdc} USDC`;
+      return t("trading.dsl.trigPrice", { bound: bound(trig.op), usdc: trig.usdc });
     case "interval":
-      return `every ${DURATION[t.every]} (first run when the rules are activated)`;
+      return t("trading.dsl.trigInterval", { every: dur("every", trig.every) });
     case "position_pnl":
-      return `position P&L is ${bound(t.op)} ${signed(t.pct)}% (vs average cost of fills under this rule set; never when flat)`;
+      return t("trading.dsl.trigPnl", { bound: bound(trig.op), pct: signed(trig.pct) });
   }
 }
 
 function describeOrder(side: "buy" | "sell", o: OrderSpec): string {
-  if (o.type === "ioc") return "as an immediate-or-cancel limit order at the market price, inside the price band";
-  if (o.offset_pct === "0") return `as a limit order at the market price, cancelled after ${DURATION[o.ttl]}`;
-  return `as a limit order ${o.offset_pct}% ${side === "buy" ? "below" : "above"} the market price, cancelled after ${DURATION[o.ttl]}`;
+  if (o.type === "ioc") return t("trading.dsl.orderIoc");
+  if (o.offset_pct === "0") return t("trading.dsl.orderLimitMarket", { dur: dur("after", o.ttl) });
+  return t("trading.dsl.orderLimitOffset", { offset: o.offset_pct, where: side === "buy" ? t("trading.dsl.below") : t("trading.dsl.above"), dur: dur("after", o.ttl) });
 }
 
 /** Cooldown that applies: `every` for interval rules. */
@@ -347,21 +334,27 @@ export const effectiveCooldown = (r: Rule): Cooldown | undefined => (r.when.type
 
 export function describeRule(r: Rule, index: number): string[] {
   const a = r.action;
-  const verb = a.side === "buy" ? "Buy" : "Sell";
-  const what = "usdc" in a.size ? `${verb} ${a.size.usdc} USDC of ${baseOf(r.pair)}` : `${verb} ${a.size.position_pct}% of the ${baseOf(r.pair)} position`;
+  const buy = a.side === "buy";
+  const base = baseOf(r.pair);
+  const what = "usdc" in a.size ? t(buy ? "trading.dsl.buyUsdc" : "trading.dsl.sellUsdc", { usdc: a.size.usdc, base }) : t(buy ? "trading.dsl.buyPct" : "trading.dsl.sellPct", { pct: a.size.position_pct, base });
   const cd = effectiveCooldown(r);
-  return [`Rule ${index + 1} [${r.id}] on ${r.pair}`, `  When: ${describeTrigger(r.when)}`, `  Do: ${what} ${describeOrder(a.side, a.order)}`, `  Cooldown: ${cd === undefined ? "none" : DURATION[cd]}`];
+  return [
+    t("trading.dsl.ruleTitle", { n: index + 1, id: r.id, pair: r.pair }),
+    t("trading.dsl.ruleWhen", { text: describeTrigger(r.when) }),
+    t("trading.dsl.ruleDo", { what, order: describeOrder(a.side, a.order) }),
+    t("trading.dsl.ruleCooldown", { text: cd === undefined ? t("trading.dsl.cooldownNone") : dur("plain", cd) }),
+  ];
 }
 
 /** Flat English lines, identical to the worker's `describe` (shared vectors). */
 export function describeRules(rs: RuleSetV1): string[] {
   return [
-    `Rule set: ${rs.name}`,
-    `Pairs: ${rs.pairs.join(", ")}`,
-    `Max position: ${rs.limits.max_position_usdc} USDC`,
-    `Max order: ${rs.limits.max_order_usdc} USDC`,
-    `Daily loss stop: ${rs.limits.daily_loss_stop_usdc} USDC`,
-    `Max orders per day: ${rs.limits.max_orders_per_day}`,
+    t("trading.dsl.ruleSet", { name: rs.name }),
+    t("trading.dsl.pairs", { pairs: rs.pairs.join(", ") }),
+    t("trading.dsl.maxPosition", { n: rs.limits.max_position_usdc }),
+    t("trading.dsl.maxOrder", { n: rs.limits.max_order_usdc }),
+    t("trading.dsl.dailyLossStop", { n: rs.limits.daily_loss_stop_usdc }),
+    t("trading.dsl.maxOrdersDay", { n: rs.limits.max_orders_per_day }),
     ...rs.rules.flatMap(describeRule),
   ];
 }
@@ -370,7 +363,13 @@ export function describeRules(rs: RuleSetV1): string[] {
 export function describeBlocks(rs: RuleSetV1): { name: string; summary: string[]; rules: { title: string; lines: string[] }[] } {
   return {
     name: rs.name,
-    summary: [`Pairs: ${rs.pairs.join(", ")}`, `Max position ${rs.limits.max_position_usdc} USDC`, `Max order ${rs.limits.max_order_usdc} USDC`, `Stops for the day after losing ${rs.limits.daily_loss_stop_usdc} USDC`, `At most ${rs.limits.max_orders_per_day} orders per day`],
+    summary: [
+      t("trading.dsl.pairs", { pairs: rs.pairs.join(", ") }),
+      t("trading.dsl.sumMaxPos", { n: rs.limits.max_position_usdc }),
+      t("trading.dsl.sumMaxOrder", { n: rs.limits.max_order_usdc }),
+      t("trading.dsl.sumLossStop", { n: rs.limits.daily_loss_stop_usdc }),
+      t("trading.dsl.sumOrders", { count: rs.limits.max_orders_per_day }),
+    ],
     rules: rs.rules.map((r, i) => {
       const [title = "", ...lines] = describeRule(r, i);
       return { title, lines: lines.map((l) => l.trim()) };

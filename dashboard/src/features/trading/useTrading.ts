@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { clearSession, loadSession } from "@/lib/assistantClient";
@@ -26,7 +27,7 @@ export function useTradingStatus() {
     staleTime: POLL_MS / 2,
     retry: false,
   });
-  return { status: q.data ?? null, loading: WORKER_URL !== "" && q.isPending, error: WORKER_URL === "" ? "VITE_WORKER_URL is not set" : q.error ? errText(q.error) : null, refresh: () => q.refetch() };
+  return { status: q.data ?? null, loading: WORKER_URL !== "" && q.isPending, error: WORKER_URL === "" ? t("trading.err.workerUrlMissing") : q.error ? errText(q.error) : null, refresh: () => q.refetch() };
 }
 
 /**

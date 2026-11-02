@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useEffect } from "react";
 import { AI_ENABLED } from "@/lib/config";
 import { IconButton, Icons } from "@/kit";
@@ -17,6 +18,7 @@ export function AssistantPanel() {
 }
 
 function Panel() {
+  const t = useT();
   const { open, setOpen, inputRef, prefill, clearPrefill } = useAssistantPanel();
   const assistant = useAssistant();
 
@@ -31,25 +33,25 @@ function Panel() {
   if (!open) return null;
   return (
     <aside
-      aria-label="Assistant"
+      aria-label={t("assistant.title")}
       className="fixed inset-0 z-40 flex flex-col bg-surface-sunken md:sticky md:inset-auto md:top-[65px] md:z-auto md:h-[calc(100dvh-65px)] md:w-[400px] md:shrink-0 md:border-l md:border-line"
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
         <Icons.Sparkles size={16} />
-        <h2 className="m-0 text-[15px] font-semibold">Assistant</h2>
+        <h2 className="m-0 text-[15px] font-semibold">{t("assistant.title")}</h2>
         <AssistantPrivacyBadge />
         <div className="grow" />
         <IconButton
-          label="New conversation"
+          label={t("assistant.new")}
           disabled={assistant.items.length === 0}
           onClick={() => {
             const queued = assistant.items.some((i) => i.kind === "proposal" && i.status === "queued");
-            if (!queued || window.confirm("Start over? Changes you queued but have not signed will be dropped.")) assistant.reset();
+            if (!queued || window.confirm(t("assistant.confirmReset"))) assistant.reset();
           }}
         >
           <Icons.Loader size={16} />
         </IconButton>
-        <IconButton label="Close assistant" onClick={() => setOpen(false)}>
+        <IconButton label={t("assistant.closePanel")} onClick={() => setOpen(false)}>
           <Icons.X size={16} />
         </IconButton>
       </div>

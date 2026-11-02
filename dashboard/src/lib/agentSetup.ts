@@ -1,5 +1,6 @@
 // Pure planning for "Add agent": ids, sub-account naming, the transactions the wallet signs, and the connect snippets.
 // Mirrors sdk/scripts/key-agent-plan.ts (same method list, allowance, add_agent args). No network, no secrets in plans.
+import { t } from "@/i18n";
 import type { TxAction, TxInput } from "./calls";
 import type { Mandate } from "./types";
 
@@ -15,8 +16,8 @@ const YOCTO = 10n ** 24n;
 
 export const validateAgentName = (name: string): string | null => {
   const n = name.trim();
-  if (n.length < 2) return "Name must be at least 2 characters";
-  if (n.length > 32) return "Name can't be longer than 32 characters";
+  if (n.length < 2) return t("as.nameShort");
+  if (n.length > 32) return t("as.nameLong");
   return null;
 };
 
@@ -31,16 +32,16 @@ export function slugify(name: string): string {
 }
 
 export function validateAgentId(id: string, existing: readonly string[] = []): string | null {
-  if (!/^[a-z0-9-]{1,32}$/.test(id)) return "Use 1–32 characters: a–z, 0–9 and -";
-  if (existing.includes(id)) return "An agent with this id already exists";
+  if (!/^[a-z0-9-]{1,32}$/.test(id)) return t("as.idFormat");
+  if (existing.includes(id)) return t("as.idTaken");
   return null;
 }
 
 /** One NEAR account-id part (no dots): the new sub-account prefix. */
 export function validateAccountPrefix(prefix: string, owner: string): string | null {
-  if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(prefix)) return "Use a–z, 0–9, - and _ (no dots, no leading or trailing separator)";
-  if (prefix.length > 32) return "At most 32 characters";
-  if (`${prefix}.${owner}`.length > 64) return "The full account id would be longer than 64 characters";
+  if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(prefix)) return t("as.prefixFormat");
+  if (prefix.length > 32) return t("as.prefixLong");
+  if (`${prefix}.${owner}`.length > 64) return t("as.accountLong");
   return null;
 }
 
@@ -58,7 +59,7 @@ export const isImplicitAccount = (s: string): boolean => /^[0-9a-f]{64}$/.test(s
 /** "0.35" NEAR -> yocto string. Throws on bad input. */
 export function nearToYocto(input: string): string {
   const s = input.trim();
-  if (!/^\d+(\.\d{1,24})?$/.test(s)) throw new Error(`Invalid NEAR amount: "${input}"`);
+  if (!/^\d+(\.\d{1,24})?$/.test(s)) throw new Error(t("as.nearInvalid", { value: input }));
   const [w = "0", f = ""] = s.split(".");
   return (BigInt(w) * YOCTO + BigInt(f.padEnd(24, "0"))).toString();
 }
@@ -69,11 +70,11 @@ export const MIN_FUND_YOCTO = 50_000_000_000_000_000_000_000n; // 0.05 NEAR
 export function validateFund(input: string): string | null {
   try {
     const y = BigInt(nearToYocto(input));
-    if (y < MIN_FUND_YOCTO) return "At least 0.05 NEAR, or the agent can't pay for gas";
-    if (y > 10n * YOCTO) return "That is more than 10 NEAR; fund less and top up later";
+    if (y < MIN_FUND_YOCTO) return t("as.fundMin");
+    if (y > 10n * YOCTO) return t("as.fundMax");
     return null;
   } catch {
-    return "Enter an amount in NEAR, e.g. 0.35";
+    return t("as.fundFormat");
   }
 }
 
@@ -117,12 +118,12 @@ export function planKeyAgentCreate(i: KeyAgentPlanInput): RawTx[] {
   return [
     {
       receiverId: account,
-      description: `Create account ${account} with ${i.fundNear} NEAR and a key that can only call request_payment and report_payout_status on your vault`,
+      description: t("as.txCreateAccount", { account, near: i.fundNear }),
       actions: create,
     },
     {
       receiverId: i.vault,
-      description: `Register agent "${i.id}" in the vault with this mandate`,
+      description: t("as.txRegister", { id: i.id }),
       actions: [addAgentCall({ id: i.id, name: i.name.trim(), kind: "Key", account_id: account, public_key: i.publicKey, mandate: i.mandate })],
     },
   ];
@@ -133,7 +134,7 @@ export function planKeyAgentExisting(i: NewAgentInput & { vault: string; account
   return [
     {
       receiverId: i.vault,
-      description: `Register agent "${i.id}" for account ${i.accountId}`,
+      description: t("as.txRegisterExisting", { id: i.id, account: i.accountId }),
       actions: [addAgentCall({ id: i.id, name: i.name.trim(), kind: "Key", account_id: i.accountId, public_key: i.publicKey, mandate: i.mandate })],
     },
   ];
@@ -144,7 +145,7 @@ export function planTeeSlot(i: NewAgentInput & { vault: string; pinnedAccount: s
   return [
     {
       receiverId: i.vault,
-      description: i.pinnedAccount ? `Create TEE slot "${i.id}" pinned to ${i.pinnedAccount}` : `Create TEE slot "${i.id}" (the enclave binds itself when it registers)`,
+      description: i.pinnedAccount ? t("as.txTeePinned", { id: i.id, account: i.pinnedAccount }) : t("as.txTee", { id: i.id }),
       actions: [addAgentCall({ id: i.id, name: i.name.trim(), kind: "Tee", account_id: i.pinnedAccount, public_key: null, mandate: i.mandate })],
     },
   ];
@@ -152,7 +153,7 @@ export function planTeeSlot(i: NewAgentInput & { vault: string; pinnedAccount: s
 
 /** Second revoke step for Key agents: remove its function-call key. Must be signed by an account with a full-access key on the agent account. */
 export function planDeleteAgentKey(account: string, publicKey: string): RawTx {
-  return { receiverId: account, description: `Delete access key ${publicKey} from ${account}`, actions: [{ type: "DeleteKey", publicKey }] };
+  return { receiverId: account, description: t("as.txDeleteKey", { key: publicKey, account }), actions: [{ type: "DeleteKey", publicKey }] };
 }
 
 /* ───────────── connect snippets ───────────── */

@@ -1,3 +1,4 @@
+import { useT, rich } from "@/i18n";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Callout, Card, CardHeader, cx, Field, Icons, Input, SigningHint, Stepper } from "@/kit";
@@ -33,8 +34,6 @@ import { useAgentTx } from "./useAgentTx";
 type Kind = "Tee" | "Key";
 type Setup = "new" | "existing";
 
-const STEPS_BASE = ["Type", "Identity", "Mandate", "Review & sign"];
-
 function TypeCard({ selected, title, badge, onClick, children, icon }: { selected: boolean; title: string; badge: string; onClick: () => void; children: string; icon: React.ReactNode }) {
   return (
     <button
@@ -57,6 +56,8 @@ function TypeCard({ selected, title, badge, onClick, children, icon }: { selecte
 
 /** `/agents/new`: Type -> Identity -> Mandate -> Review & sign (-> Connect for new Key agents). DESIGN_AGENTS §3.2 adapted to ADR-0003. */
 export function AddAgentWizard() {
+  const t = useT();
+  const STEPS_BASE = [t("wiz.stepType"), t("wiz.stepIdentity"), t("wiz.stepMandate"), t("wiz.stepReview")];
   const navigate = useNavigate();
   const { canAct, busy, sign, accountId } = useAgentTx();
   const { ownerId } = useOwner();
@@ -96,12 +97,12 @@ export function AddAgentWizard() {
   const idErr = id === "" ? null : validateAgentId(id, existingIds);
   const prefixErr = kind === "Key" && setup === "new" ? validateAccountPrefix(effectivePrefix, owner || "owner") : null;
   const fundErr = kind === "Key" && setup === "new" ? validateFund(fund) : null;
-  const faErr = faKey.trim() !== "" && !isEd25519PublicKey(faKey) ? "Expected ed25519:<base58 public key>" : null;
+  const faErr = faKey.trim() !== "" && !isEd25519PublicKey(faKey) ? t("wiz.expectedKey") : null;
   const newAccount = owner && !prefixErr ? subAccountId(effectivePrefix, owner) : "";
   const accountTaken = (acc: string) => agents.data.some((a) => a.account_id === acc && a.status !== "Revoked");
-  const exAccErr = existingAccount === "" ? "Enter the agent's NEAR account" : !isNearAccountId(existingAccount.trim()) ? "Not a valid NEAR account id" : accountTaken(existingAccount.trim()) ? "Another agent already uses this account" : null;
-  const exKeyErr = existingKey.trim() !== "" && !isEd25519PublicKey(existingKey) ? "Expected ed25519:<base58 public key>" : null;
-  const pinErr = pinned.trim() === "" ? null : !isImplicitAccount(pinned.trim()) ? "A TEE account is implicit: 64 lowercase hex characters" : accountTaken(pinned.trim()) ? "Another agent already uses this account" : null;
+  const exAccErr = existingAccount === "" ? t("wiz.enterAccount") : !isNearAccountId(existingAccount.trim()) ? t("wiz.notValidAccount") : accountTaken(existingAccount.trim()) ? t("wiz.accountUsed") : null;
+  const exKeyErr = existingKey.trim() !== "" && !isEd25519PublicKey(existingKey) ? t("wiz.expectedKey") : null;
+  const pinErr = pinned.trim() === "" ? null : !isImplicitAccount(pinned.trim()) ? t("wiz.implicitOnly") : accountTaken(pinned.trim()) ? t("wiz.accountUsed") : null;
 
   const typeOk = kind !== null && validateAgentName(name) === null && id !== "" && validateAgentId(id, existingIds) === null;
   const identityOk = kind === "Tee" ? pinErr === null : setup === "new" ? !prefixErr && !fundErr && !faErr && effectivePrefix !== "" && owner !== "" : !exAccErr && !exKeyErr;
@@ -121,7 +122,7 @@ export function AddAgentWizard() {
     });
   }, [cliOnly, mandateResult.mandate, typeOk, identityOk, owner, effectivePrefix, id, name, fund]);
   const stepOk = [typeOk, identityOk, mandateResult.mandate !== null, true][step] ?? false;
-  const steps = kind === "Key" && setup === "new" ? [...STEPS_BASE, "Connect"] : STEPS_BASE;
+  const steps = kind === "Key" && setup === "new" ? [...STEPS_BASE, t("wiz.stepConnect")] : STEPS_BASE;
 
   const txs: RawTx[] | null = useMemo(() => {
     const mandate = mandateResult.mandate;
@@ -155,7 +156,7 @@ export function AddAgentWizard() {
       pending = { id, name: name.trim(), account: newAccount, publicKey: key.publicKey, secretKey: key.secretKey };
       savePending(pending); // survives a wallet redirect
     }
-    const ok = await sign(`Add agent ${id}`, txs);
+    const ok = await sign(t("wiz.signLabel", { id }), txs);
     if (!ok) {
       if (pending) clearPending();
       return;
@@ -170,7 +171,7 @@ export function AddAgentWizard() {
     const p = done.pending;
     return (
       <div className="flex flex-col gap-4">
-        <Stepper steps={[...STEPS_BASE, "Connect"]} current={4} />
+        <Stepper steps={[...STEPS_BASE, t("wiz.stepConnect")]} current={4} />
         <ConnectStep
           agentName={p.name}
           connect={{ vault: VAULT_ID, network: NETWORK, account: p.account, privateKey: p.secretKey }}
@@ -182,30 +183,30 @@ export function AddAgentWizard() {
   if (done) {
     return (
       <Card aria-labelledby="done-title" className="flex flex-col gap-4">
-        <CardHeader id="done-title" title={done.kind === "tee" ? `TEE slot "${done.name}" created` : `Agent "${done.name}" registered`} badge={<Icons.Check size={16} className="text-ok" />} />
+        <CardHeader id="done-title" title={done.kind === "tee" ? t("wiz.teeCreated", { name: done.name }) : t("wiz.agentRegistered", { name: done.name })} badge={<Icons.Check size={16} className="text-ok" />} />
         {done.kind === "tee" ? (
           <ol className="m-0 flex flex-col gap-2 pl-5 text-sm text-ink-secondary">
             <li>
-              Deploy the worker with <span className="mono">AGENT_ID={done.id}</span> and <span className="mono">VAULT_CONTRACT_ID={VAULT_ID}</span>. It generates its own key inside the enclave and registers itself.
+              {rich("wiz.done1", { agentId: <span className="mono">AGENT_ID={done.id}</span>, vaultId: <span className="mono">VAULT_CONTRACT_ID={VAULT_ID}</span> })}
             </li>
             <li>
-              Approve its measurements and hardware (PPID) on <Link to="/policy">Policy</Link>. Registration is refused until both are approved.
+              {rich("wiz.done2", { policy: <Link to="/policy">{t("nav.policy")}</Link> })}
             </li>
             <li>
-              Wait for registration: the agent shows &quot;waiting for registration&quot; until then. Once it has registered, check the account it was bound to and <strong>Pin</strong> it on the agent page so no other instance can take over the slot.
+              {rich("wiz.done3", { pin: <strong>{t("ag.pinAccount")}</strong> })}
             </li>
           </ol>
         ) : (
           <>
             <p className="m-0 text-sm text-ink-secondary">
-              {done.account} is registered as <span className="mono">{done.id}</span>. Give the agent its own key (you keep the private key). Configuration for the MCP server:
+              {rich("wiz.doneKey", { account: done.account, id: <span className="mono">{done.id}</span> })}
             </p>
-            <pre className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs">{envSnippet({ vault: VAULT_ID, network: NETWORK, account: done.account ?? "", privateKey: "ed25519:<the key you hold>" })}</pre>
+            <pre className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs">{envSnippet({ vault: VAULT_ID, network: NETWORK, account: done.account ?? "", privateKey: t("wiz.keyYouHold") })}</pre>
           </>
         )}
         <div className="flex justify-end">
           <Button variant="primary" onClick={() => navigate(`/agents/${done.id}`)}>
-            Open agent
+            {t("wiz.openAgent")}
           </Button>
         </div>
       </Card>
@@ -216,7 +217,7 @@ export function AddAgentWizard() {
   return (
     <div className="flex flex-col gap-4">
       <Stepper steps={steps} current={step} />
-      {!canAct && <Callout accent="info">Connect the vault owner&apos;s wallet to add agents. You can look around, but signing is disabled.</Callout>}
+      {!canAct && <Callout accent="info">{t("wiz.connectOwner")}</Callout>}
       {pendingOld && !done && (
         <Callout
           accent="warn"
@@ -228,29 +229,29 @@ export function AddAgentWizard() {
                 setPendingOld(null);
               }}
             >
-              Discard
+              {t("wiz.discard")}
             </Button>
           }
         >
-          An earlier setup of <span className="mono">{pendingOld.id}</span> didn&apos;t finish (the agent isn&apos;t in the vault). Its key is kept in this tab until you discard it.
+          {rich("wiz.earlierSetup", { id: <span className="mono">{pendingOld.id}</span> })}
         </Callout>
       )}
 
       {step === 0 && (
-        <Card className="flex flex-col gap-5" aria-label="Agent type">
-          <div role="radiogroup" aria-label="Agent type" className="grid gap-3 md:grid-cols-2">
-            <TypeCard selected={kind === "Tee"} onClick={() => pickKind("Tee")} title="Verified agent" badge="Highest trust" icon={<Icons.ShieldCheck size={18} className="text-ok" />}>
-              Runs in a secure enclave. The vault checks its attestation before it can pay. Best for agents you run long-term.
+        <Card className="flex flex-col gap-5" aria-label={t("wiz.agentType")}>
+          <div role="radiogroup" aria-label={t("wiz.agentType")} className="grid gap-3 md:grid-cols-2">
+            <TypeCard selected={kind === "Tee"} onClick={() => pickKind("Tee")} title={t("wiz.teeTitle")} badge={t("wiz.teeBadge")} icon={<Icons.ShieldCheck size={18} className="text-ok" />}>
+              {t("wiz.teeDesc")}
             </TypeCard>
-            <TypeCard selected={kind === "Key"} onClick={() => pickKind("Key")} title="Connected agent" badge="Fastest" icon={<Icons.KeyRound size={18} className="text-ink-muted" />}>
-              Any agent: Claude, IronClaw, your own script. Gets a key that can only ask this vault for payments. Set up in 2 minutes.
+            <TypeCard selected={kind === "Key"} onClick={() => pickKind("Key")} title={t("wiz.keyTitle")} badge={t("wiz.keyBadge")} icon={<Icons.KeyRound size={18} className="text-ink-muted" />}>
+              {t("wiz.keyDesc")}
             </TypeCard>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name" hint="2–32 characters" error={nameErr}>
+            <Field label={t("wiz.name")} hint={t("wiz.nameHint")} error={nameErr}>
               {(a11y) => <Input {...a11y} value={name} maxLength={32} placeholder="procurement" state={nameErr ? "error" : "default"} onChange={(e) => onName(e.target.value)} />}
             </Field>
-            <Field label="Agent id" hint="a–z, 0–9 and -. Can't be changed later." error={idErr}>
+            <Field label={t("wiz.agentId")} hint={t("wiz.agentIdHint")} error={idErr}>
               {(a11y) => (
                 <Input
                   {...a11y}
@@ -270,32 +271,32 @@ export function AddAgentWizard() {
       )}
 
       {step === 1 && kind === "Tee" && (
-        <Card className="flex flex-col gap-4" aria-label="TEE identity">
+        <Card className="flex flex-col gap-4" aria-label={t("wiz.teeIdentity")}>
           <p className="m-0 text-sm text-ink-secondary">
-            This creates a <strong>slot</strong> for <span className="mono">{id}</span>. You don&apos;t need a code hash or an account now: the enclave generates its own key at boot and registers itself with its attestation. Then you check the account it got and pin it.
+            {rich("wiz.teeSlotExplain", { slot: <strong>{t("wiz.slot")}</strong>, id: <span className="mono">{id}</span> })}
           </p>
-          <Field label="Pin to an account (optional)" hint="Only if you already know the enclave's account (64 hex characters). Otherwise leave empty and pin after the first registration." error={pinErr}>
-            {(a11y) => <Input {...a11y} mono value={pinned} placeholder="64 lowercase hex characters" state={pinErr ? "error" : "default"} onChange={(e) => setPinned(e.target.value.trim().toLowerCase())} />}
+          <Field label={t("wiz.pinOptional")} hint={t("wiz.pinOptionalHint")} error={pinErr}>
+            {(a11y) => <Input {...a11y} mono value={pinned} placeholder={t("wiz.pinPlaceholder")} state={pinErr ? "error" : "default"} onChange={(e) => setPinned(e.target.value.trim().toLowerCase())} />}
           </Field>
           <Callout accent="info">
-            Until the account is pinned, the first valid enclave to register takes the slot, and another one may replace it once the attestation expires. Measurements and hardware are approved on <Link to="/policy">Policy</Link>.
+            {rich("wiz.teeUnpinnedInfo", { policy: <Link to="/policy">{t("nav.policy")}</Link> })}
           </Callout>
         </Card>
       )}
 
       {step === 1 && kind === "Key" && (
-        <Card className="flex flex-col gap-4" aria-label="Key identity">
-          <div role="radiogroup" aria-label="Account setup" className="grid gap-3 md:grid-cols-2">
-            <TypeCard selected={setup === "new"} onClick={() => setSetup("new")} title="Create a new agent account for me" badge="Recommended" icon={<Icons.Plus size={16} />}>
-              A sub-account of your own account, with a key limited to this vault.
+        <Card className="flex flex-col gap-4" aria-label={t("wiz.keyIdentity")}>
+          <div role="radiogroup" aria-label={t("wiz.accountSetup")} className="grid gap-3 md:grid-cols-2">
+            <TypeCard selected={setup === "new"} onClick={() => setSetup("new")} title={t("wiz.newTitle")} badge={t("wiz.recommended")} icon={<Icons.Plus size={16} />}>
+              {t("wiz.newDesc")}
             </TypeCard>
-            <TypeCard selected={setup === "existing"} onClick={() => setSetup("existing")} title="Use an existing account" badge="You hold the key" icon={<Icons.KeyRound size={16} />}>
-              Bring your own account and key. The vault only records the account.
+            <TypeCard selected={setup === "existing"} onClick={() => setSetup("existing")} title={t("wiz.existingTitle")} badge={t("wiz.youHoldKey")} icon={<Icons.KeyRound size={16} />}>
+              {t("wiz.existingDesc")}
             </TypeCard>
           </div>
           {setup === "new" ? (
             <>
-              <Field label="Account name" hint={newAccount ? <>Creates <span className="mono">{newAccount}</span></> : "Sub-account of the vault owner"} error={prefixErr}>
+              <Field label={t("wiz.accountName")} hint={newAccount ? rich("wiz.creates", { account: <span className="mono">{newAccount}</span> }) : t("wiz.subOfOwner")} error={prefixErr}>
                 {(a11y) => (
                   <Input
                     {...a11y}
@@ -309,24 +310,24 @@ export function AddAgentWizard() {
                   />
                 )}
               </Field>
-              <Field label="Fund the account with" hint="Pays the agent's gas (about 0.015 NEAR per payment). The key's allowance is capped at 0.25 NEAR." error={fundErr}>
+              <Field label={t("wiz.fund")} hint={t("wiz.fundHint")} error={fundErr}>
                 {(a11y) => <Input {...a11y} mono inputMode="decimal" suffix="NEAR" value={fund} state={fundErr ? "error" : "default"} onChange={(e) => setFund(e.target.value.replace(/[^\d.]/g, ""))} />}
               </Field>
-              <Field label="Your own full-access key on the agent account (optional)" hint="Public key you control, e.g. from a CLI. It lets you delete the agent's access key later. Leave empty and the account has only the agent key; revoking in the vault still stops all payments." error={faErr}>
+              <Field label={t("wiz.faKey")} hint={t("wiz.faKeyHint")} error={faErr}>
                 {(a11y) => <Input {...a11y} mono placeholder="ed25519:…" value={faKey} state={faErr ? "error" : "default"} onChange={(e) => setFaKey(e.target.value.trim())} />}
               </Field>
-              <Callout accent="info">The key pair is generated in this browser at the next step. The private key is shown once after you sign.</Callout>
+              <Callout accent="info">{t("wiz.keyGenInfo")}</Callout>
             </>
           ) : (
             <>
-              <Field label="Agent account" error={exAccErr && existingAccount !== "" ? exAccErr : null}>
+              <Field label={t("wiz.agentAccount")} error={exAccErr && existingAccount !== "" ? exAccErr : null}>
                 {(a11y) => <Input {...a11y} mono placeholder="bot.example.near" value={existingAccount} state={exAccErr && existingAccount !== "" ? "error" : "default"} onChange={(e) => setExistingAccount(e.target.value.trim().toLowerCase())} />}
               </Field>
-              <Field label="Public key (optional)" hint="For display only. The contract checks the calling account, and the key must be restricted to this vault on that account." error={exKeyErr}>
+              <Field label={t("wiz.pubKeyOptional")} hint={t("wiz.pubKeyHint")} error={exKeyErr}>
                 {(a11y) => <Input {...a11y} mono placeholder="ed25519:…" value={existingKey} state={exKeyErr ? "error" : "default"} onChange={(e) => setExistingKey(e.target.value.trim())} />}
               </Field>
               <Callout accent="warn">
-                Add a function-call key yourself: receiver <span className="mono">{VAULT_ID}</span>, methods <span className="mono">request_payment, report_payout_status</span>, an allowance of about 0.25 NEAR. A full-access key lets the agent do anything the account can.
+                {rich("wiz.addFcKey", { vault: <span className="mono">{VAULT_ID}</span>, methods: <span className="mono">request_payment, report_payout_status</span> })}
               </Callout>
             </>
           )}
@@ -348,44 +349,44 @@ export function AddAgentWizard() {
 
       {step === 3 && mandateResult.mandate && (
         <Card className="flex flex-col gap-4" aria-labelledby="review-title">
-          <CardHeader id="review-title" title={`Review ${name.trim() || id}`} />
+          <CardHeader id="review-title" title={t("wiz.review", { name: name.trim() || id })} />
           <MandateText mandate={mandateResult.mandate} names={recipientNames(recipients.data)} nowMs={nowMs} />
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="text-ink-muted">Trust</dt>
-            <dd className="m-0">{kind === "Tee" ? "TEE slot: the enclave registers itself, you approve measurements on Policy and pin the account" : setup === "new" ? "Key: new account with a function-call key" : "Key: your own account"}</dd>
-            <dt className="text-ink-muted">Account</dt>
-            <dd className="mono m-0 break-all">{kind === "Tee" ? pinned || "bound at registration" : setup === "new" ? newAccount : existingAccount}</dd>
+            <dt className="text-ink-muted">{t("wiz.trust")}</dt>
+            <dd className="m-0">{kind === "Tee" ? t("wiz.trustTee") : setup === "new" ? t("wiz.trustKeyNew") : t("wiz.trustKeyOwn")}</dd>
+            <dt className="text-ink-muted">{t("wiz.account")}</dt>
+            <dd className="mono m-0 break-all">{kind === "Tee" ? pinned || t("wiz.boundAtReg") : setup === "new" ? newAccount : existingAccount}</dd>
             {key && setup === "new" && kind === "Key" && (
               <>
-                <dt className="text-ink-muted">Public key</dt>
+                <dt className="text-ink-muted">{t("wiz.publicKey")}</dt>
                 <dd className="mono m-0 break-all">{key.publicKey}</dd>
               </>
             )}
           </dl>
           <div>
-            <div className="mb-1.5 text-[13px] font-medium text-ink-secondary">Your wallet will be asked to sign {txs?.length ?? 0} transaction{txs?.length === 1 ? "" : "s"}</div>
+            <div className="mb-1.5 text-[13px] font-medium text-ink-secondary">{t("wiz.willSign", { count: txs?.length ?? 0 })}</div>
             <ol className="m-0 flex flex-col gap-1.5 pl-5 text-sm text-ink-secondary">
-              {txs?.map((t, i) => (
-                <li key={i}>{t.description}</li>
+              {txs?.map((tx, i) => (
+                <li key={i}>{tx.description}</li>
               ))}
             </ol>
           </div>
           {cliCommands && (
             <>
               <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
-                On mainnet the agent key is created in your terminal, not in this page. Run these commands in the repository root; the script prints the agent key once.
+                {t("wiz.mainnetCli")}
               </Callout>
-              <pre tabIndex={0} aria-label="Mainnet agent setup commands" className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
+              <pre tabIndex={0} aria-label={t("wiz.cliAria")} className="mono m-0 overflow-auto rounded-input border border-line bg-surface-sunken p-3 text-xs break-all whitespace-pre-wrap">
                 {cliCommands}
               </pre>
             </>
           )}
           {kind === "Key" && setup === "new" && !cliOnly && (
             <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
-              After signing you will see the agent&apos;s private key once. Don&apos;t close the tab before you saved it. If your wallet redirects you away, the key is kept in this tab until you come back.
+              {t("wiz.keyShownOnce")}
             </Callout>
           )}
-          {!canAct && <Callout accent="info">Only the vault owner can sign this.</Callout>}
+          {!canAct && <Callout accent="info">{t("wiz.onlyOwnerSign")}</Callout>}
         </Card>
       )}
 
@@ -394,18 +395,18 @@ export function AddAgentWizard() {
         <span className="grow" />
         {step > 0 ? (
           <Button onClick={back} disabled={busy}>
-            Back
+            {t("common.back")}
           </Button>
         ) : (
-          <Button onClick={() => navigate("/agents")}>Cancel</Button>
+          <Button onClick={() => navigate("/agents")}>{t("common.cancel")}</Button>
         )}
         {step < 3 ? (
           <Button variant="primary" disabled={!stepOk} onClick={next}>
-            Next
+            {t("common.next")}
           </Button>
         ) : (
           <Button variant="primary" disabled={!canAct || busy || !txs || cliOnly} loading={busy} onClick={() => void submit()}>
-            Sign in wallet
+            {t("wiz.signInWallet")}
           </Button>
         )}
       </div>

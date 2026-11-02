@@ -1,3 +1,4 @@
+import { useT, rich, t } from "@/i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Button, Callout, cx, Hash, Icons, ProposalActions, ProposalCard, SigningHint } from "@/kit";
@@ -37,7 +38,7 @@ export function ProposalCardView({
   onEdit: () => void;
   onPauseNow: () => void;
 }) {
-  if (item.status === "discarded") return <p className="m-0 px-1 text-xs text-ink-subtle">Discarded: {item.proposal.title}</p>;
+  if (item.status === "discarded") return <p className="m-0 px-1 text-xs text-ink-subtle">{t("as.discarded", { title: item.proposal.title })}</p>;
   const p = effectiveProposal(item, now);
   const { errors, warnings } = p.validation;
   const blocked = !p.validation.ok;
@@ -64,30 +65,30 @@ export function ProposalCardView({
       rows={proposalRows(p, look)}
       danger={urgent || blocked}
       {...(hasNote ? { warning: note } : {})}
-      {...(item.edited ? { ok: "Edited by you in the form" } : {})}
+      {...(item.edited ? { ok: t("as.editedByYou") } : {})}
       actions={
         item.status === "draft" ? (
           urgent ? (
             <>
               <Button size="sm" variant="ghost" onClick={onDiscard} disabled={busy}>
-                Discard
+                {t("kit.discard")}
               </Button>
               <Button size="sm" variant="secondary" onClick={onQueue} disabled={blocked || busy}>
-                Add to batch
+                {t("kit.addToBatch")}
               </Button>
               <Button size="sm" variant="danger-fill" icon={<Icons.Pause size={14} />} disabled={blocked || !canSign || busy} loading={busy} onClick={onPauseNow}>
-                Pause now
+                {t("as.pauseNow")}
               </Button>
             </>
           ) : blocked ? (
             <>
               {EDITABLE.has(item.proposal.type) && (
                 <Button size="sm" variant="ghost" onClick={onEdit}>
-                  Edit in form
+                  {t("kit.editInForm")}
                 </Button>
               )}
               <Button size="sm" variant="secondary" onClick={onDiscard}>
-                Discard
+                {t("kit.discard")}
               </Button>
             </>
           ) : (
@@ -95,11 +96,11 @@ export function ProposalCardView({
           )
         ) : item.status === "queued" ? (
           <Button size="sm" variant="ghost" onClick={onUnqueue}>
-            Remove from batch
+            {t("as.removeFromBatch")}
           </Button>
         ) : item.hash ? (
           <a href={explorerTxUrl(item.hash)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs">
-            View transaction <Icons.ExternalLink size={12} />
+            {t("as.viewTx")} <Icons.ExternalLink size={12} />
           </a>
         ) : undefined
       }
@@ -114,6 +115,7 @@ export function ProposalCardView({
  */
 export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: { item: TradingRulesItem; canSign: boolean; onConfirmed: (at: number) => void; onDiscard: () => void }) {
   const { accountId, signMessage } = useWallet();
+  const tr = useT();
   const qc = useQueryClient();
   const { status } = useTradingStatus();
   const liveStatus = status?.enabled ? status : null;
@@ -131,7 +133,7 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
     };
   }, [p.rules]);
 
-  if (item.status === "discarded") return <p className="m-0 px-1 text-xs text-ink-subtle">Discarded trading rules: {p.rules.name}</p>;
+  if (item.status === "discarded") return <p className="m-0 px-1 text-xs text-ink-subtle">{tr("as.rulesDiscarded", { name: p.rules.name })}</p>;
 
   const mismatch = localHash !== null && localHash !== p.hash;
   const live = status?.enabled ? status : null;
@@ -156,15 +158,15 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
   return (
     <article className={cx("card-in flex flex-col gap-3 rounded-card border bg-surface p-4", mismatch || !p.validation.ok ? "border-danger/60" : "border-line", signed && "just-signed")}>
       <header className="flex items-center gap-2">
-        <h3 className="m-0 flex-1 text-sm font-semibold">Trading rules</h3>
+        <h3 className="m-0 flex-1 text-sm font-semibold">{tr("as.rulesTitle")}</h3>
         <span className={cx("inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px]", signed ? "border-ok/50 bg-ok-tint text-ok" : "border-line-strong text-ink-muted")}>
           {signed && <Icons.Check size={11} strokeWidth={3} />}
-          {signed ? "Active" : "draft"}
+          {signed ? tr("as.rulesActive") : tr("kit.propDraft")}
         </span>
       </header>
       <RulesView rules={p.rules} hash={localHash ?? undefined} />
-      <p className="m-0 text-xs text-ink-subtle">Shown by the dashboard from the rules data. The hash above was computed in your browser.</p>
-      {mismatch && <Callout accent="danger">The hash sent by the assistant does not match these rules. Do not confirm. Ask again or discard this card.</Callout>}
+      <p className="m-0 text-xs text-ink-subtle">{tr("as.rulesShown")}</p>
+      {mismatch && <Callout accent="danger">{tr("as.rulesMismatch")}</Callout>}
       {p.validation.errors.map((e, i) => (
         <Callout key={`e${i}`} accent="danger">
           {e}
@@ -177,32 +179,27 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
       ))}
       {!signed && live && (
         <p className="m-0 text-xs text-ink-muted">
-          You authorize these rules to trade spot on Hyperliquid <strong>{live.hl_network}</strong> for account <Hash value={live.hl_account} short={false} copy={false} className="align-bottom" />
-          {live.api_wallet.address && (
-            <>
-              {" "}
-              through its API wallet <Hash value={live.api_wallet.address} short={false} copy={false} className="align-bottom" />
-            </>
-          )}
-          . The bot runs them without asking again, until you stop it.
+          {rich("as.rulesAuthorize", { network: <strong>{live.hl_network}</strong>, account: <Hash value={live.hl_account} short={false} copy={false} className="align-bottom" /> })}
+          {live.api_wallet.address && rich("as.rulesThrough", { wallet: <Hash value={live.api_wallet.address} short={false} copy={false} className="align-bottom" /> })}
+          {tr("as.rulesRunsUntil")}
         </p>
       )}
       {!signed && live && <AccountTrustCallout trust={trust} />}
-      {!signed && status !== null && !status.enabled && <Callout accent="warn">Trading is switched off on the worker, so these rules cannot be confirmed.</Callout>}
-      {!signed && !canSign && <Callout accent="neutral">Only the vault owner can confirm rules.</Callout>}
+      {!signed && status !== null && !status.enabled && <Callout accent="warn">{tr("as.rulesOff")}</Callout>}
+      {!signed && !canSign && <Callout accent="neutral">{tr("as.rulesOwnerOnly")}</Callout>}
       {error && <Callout accent="danger">{error}</Callout>}
       {signed ? (
         <p className="m-0 flex items-center gap-1.5 text-xs text-ok">
-          <Icons.Check size={13} /> Confirmed with your signature. The bot now runs these rules.
+          <Icons.Check size={13} /> {tr("as.rulesConfirmed")}
         </p>
       ) : (
         <div className="flex flex-wrap items-center justify-end gap-2">
           {busy && <SigningHint />}
           <Button size="sm" variant="ghost" onClick={onDiscard} disabled={busy}>
-            Discard
+            {tr("kit.discard")}
           </Button>
           <Button size="sm" variant="approve" icon={<Icons.ShieldCheck size={14} />} loading={busy} disabled={blocked || busy} onClick={() => void confirm()}>
-            Confirm rules
+            {tr("as.confirmRules")}
           </Button>
         </div>
       )}

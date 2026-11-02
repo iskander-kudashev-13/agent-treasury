@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useEffect, useRef } from "react";
 import { Callout, Chip, Message, TypingDots } from "@/kit";
 import type { RowLookups } from "@/lib/proposals";
@@ -39,6 +40,7 @@ export function MessageList({
   handlers: CardHandlers;
   onAnswer: (text: string) => void;
 }) {
+  const t = useT();
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
@@ -47,7 +49,7 @@ export function MessageList({
   const last = items[items.length - 1];
   const showDots = thinking && !(last?.kind === "text" && last.streaming);
   return (
-    <div className="flex flex-col gap-3 px-4 py-4" role="log" aria-live="polite" aria-label="Conversation">
+    <div className="flex flex-col gap-3 px-4 py-4" role="log" aria-live="polite" aria-label={t("as.convAria")}>
       {items.map((i) => {
         switch (i.kind) {
           case "user":
@@ -69,7 +71,7 @@ export function MessageList({
                   <span className="whitespace-pre-wrap break-words">{i.text}</span>
                 </Message>
                 {i.options.length > 0 && (
-                  <div className="flex flex-wrap gap-2" role="group" aria-label="Quick replies">
+                  <div className="flex flex-wrap gap-2" role="group" aria-label={t("as.quickReplies")}>
                     {i.options.map((o) => (
                       <Chip key={o} size="sm" selected={false} onClick={() => !i.answered && onAnswer(o)}>
                         {o}
