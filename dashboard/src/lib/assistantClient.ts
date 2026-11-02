@@ -83,7 +83,7 @@ export type ChatEvent =
   | { type: "question"; text: string; options: string[] }
   | { type: "data"; kind: DataKind; payload: unknown }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; code?: string };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -117,10 +117,45 @@ export function parseChatEvent(m: SseMessage): ChatEvent | null {
     case "done":
       return { type };
     case "error":
-      return { type, message: typeof j.message === "string" ? j.message : t("ac.failed") };
+      return { type, message: friendlyAiError(typeof j.message === "string" ? j.message : "", typeof j.code === "string" ? j.code : undefined), ...(typeof j.code === "string" ? { code: j.code } : {}) };
     default:
       return null;
   }
+}
+
+/* ───────────── friendly provider errors ───────────── */
+
+/**
+ * A failing model provider becomes a sentence that says what to do. Newer workers send a stable `code` (AI_NO_CREDITS, …);
+ * for older ones the HTTP status is read from "The AI provider answered HTTP 402 …". Other text is returned unchanged.
+ */
+export function friendlyAiError(message: string, code?: string): string {
+  switch (code) {
+    case "AI_NO_CREDITS":
+      return t("ac.err402");
+    case "AI_BAD_KEY":
+      return t("ac.err401");
+    case "AI_RATE_LIMITED":
+      return t("ac.err429");
+    case "AI_UNAVAILABLE":
+      return t("ac.err5xx", { status: "5xx" });
+    case "AI_NOT_CONFIGURED":
+      return t("ac.errNotConfigured");
+    case "AI_TIMEOUT":
+      return t("ac.errTimeout");
+    default:
+      break;
+  }
+  // Older worker: no code, parse the English text.
+  const m = /AI provider answered HTTP (\d{3})/i.exec(message);
+  if (!m) return message || t("ac.failed");
+  const n = Number(m[1]);
+  if (n === 402) return t("ac.err402");
+  if (n === 401 || n === 403) return t("ac.err401");
+  if (n === 404) return t("ac.err404");
+  if (n === 429) return t("ac.err429");
+  if (n >= 500 && n <= 599) return t("ac.err5xx", { status: n });
+  return t("ac.errOther", { status: n });
 }
 
 /* ───────────── HTTP ───────────── */
@@ -139,7 +174,7 @@ async function failure(res: Response): Promise<AssistantHttpError> {
   let msg = t("ac.sessionHttp", { status: res.status });
   try {
     const j: unknown = await res.json();
-    if (isObj(j) && typeof j.message === "string") msg = j.message;
+    if (isObj(j) && typeof j.message === "string") msg = friendlyAiError(j.message);
   } catch {
     /* keep the status text */
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearSession, createSseParser, loadSession, parseAiInfo, parseChatEvent, saveSession, type SseMessage } from "./assistantClient";
+import { clearSession, createSseParser, loadSession, parseAiInfo, friendlyAiError, parseChatEvent, saveSession, type SseMessage } from "./assistantClient";
 
 const collect = (chunks: string[]): SseMessage[] => {
   const p = createSseParser();
@@ -90,5 +90,26 @@ describe("parseAiInfo", () => {
     expect(i?.attestation?.status).toBe("fetched_unverified");
     expect(i?.attestation?.verify_url).toBe("https://cloud.near.ai/verify");
     expect(parseAiInfo({})).toBeNull();
+  });
+});
+
+describe("friendlyAiError", () => {
+  it("maps stable codes first", () => {
+    expect(friendlyAiError("anything", "AI_NO_CREDITS")).toMatch(/cloud\.near\.ai/);
+    expect(friendlyAiError("x", "AI_BAD_KEY")).toMatch(/key/i);
+    expect(friendlyAiError("x", "AI_RATE_LIMITED")).toMatch(/Too many/);
+    expect(friendlyAiError("x", "AI_TIMEOUT")).toMatch(/too long/);
+    expect(friendlyAiError("x", "AI_NOT_CONFIGURED")).toMatch(/not configured/);
+  });
+  it("falls back to the HTTP status of an older worker", () => {
+    expect(friendlyAiError("The AI provider answered HTTP 402 (x)")).toMatch(/no credits/);
+    expect(friendlyAiError("The AI provider answered HTTP 401")).toMatch(/key/i);
+    expect(friendlyAiError("The AI provider answered HTTP 429")).toMatch(/Too many/);
+    expect(friendlyAiError("The AI provider answered HTTP 503")).toMatch(/HTTP 503/);
+    expect(friendlyAiError("plain message")).toBe("plain message");
+  });
+  it("applies to SSE error events with and without a code", () => {
+    expect(parseChatEvent({ event: "error", data: '{"type":"error","code":"AI_NO_CREDITS","message":"m"}' })).toMatchObject({ type: "error", code: "AI_NO_CREDITS", message: expect.stringMatching(/credits/) });
+    expect(parseChatEvent({ event: "error", data: '{"type":"error","message":"The AI provider answered HTTP 402"}' })).toMatchObject({ message: expect.stringMatching(/credits/) });
   });
 });

@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useT } from "@/i18n";
 import { useMemo, useState, type FormEvent, type RefObject } from "react";
 import { AssistantFooter, BatchBar, Button, EmptyState, Icons, SuggestionChip } from "@/kit";
@@ -123,6 +124,9 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
     top = (
       <div className="flex flex-col gap-3 px-4 py-4">
         <p className="m-0 text-[13px] text-ink-muted">{t("as.intro")}</p>
+        <p className="m-0 text-xs text-ink-subtle">
+          <Link to="/trading">{t("as.tradingHelp")}</Link>
+        </p>
         <div className="flex flex-wrap gap-2">
           {SUGGESTION_KEYS.map((k) => (
             <SuggestionChip key={k} onClick={() => void assistant.send(t(k))}>

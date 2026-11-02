@@ -49,6 +49,11 @@ describe("parsers", () => {
     expect(s).toMatchObject({ enabled: true, state: "running", hl_account: HL, balances: { usdc_free: "12.5" } });
     expect(parseTradingStatus({ enabled: false })).toEqual({ enabled: false });
   });
+  it("tolerates the new pnl fields being absent (older worker) and reads them when present", () => {
+    expect(parseTradingStatus(STATUS)).toMatchObject({ pnl: { fees_usdc: "0", external_outflow_usdc: "0", untracked_delta_usdc: "0", funded_by_vault_usdc: "0" } });
+    const s = parseTradingStatus({ ...STATUS, pnl: { total_usdc: "1", fees_usdc: "0.2", external_outflow_usdc: "3", untracked_delta_usdc: "-1", funded_by_vault_usdc: "25", external_inflow_usdc: "4" } });
+    expect(s).toMatchObject({ pnl: { fees_usdc: "0.2", external_outflow_usdc: "3", untracked_delta_usdc: "-1", funded_by_vault_usdc: "25", external_inflow_usdc: "4" } });
+  });
   it("parses other approved agents defensively", () => {
     expect(parseTradingStatus(STATUS)).toMatchObject({ other_approved_agents: [{ address: "0x2222222222222222222222222222222222222222", name: "old", valid_until_ms: 9 }] });
     expect(parseTradingStatus({ ...STATUS, other_approved_agents: [1, { name: "x" }] })).toMatchObject({ other_approved_agents: [] });

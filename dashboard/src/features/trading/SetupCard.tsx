@@ -1,5 +1,7 @@
 import { useT, rich } from "@/i18n";
 import { useMemo, useRef, useState } from "react";
+import { Sentence } from "./Sentence";
+import { mandateSegments } from "@/lib/describeMandate";
 import { Button, Callout, Card, CardHeader, Checkbox, Field, Icons, Input, SecretField, SigningHint, useSecretAck } from "@/kit";
 import { clearPending, loadPending, savePending, type PendingKeyAgent } from "@/features/agents/pendingKey";
 import { useAgentTx } from "@/features/agents/useAgentTx";
@@ -22,12 +24,11 @@ export const pendingTrader = (): PendingKeyAgent | null => {
  * top-up. It creates the Key agent `hl-trader` with an Allowlist mandate through the same transaction builders as the
  * "Add agent" wizard (`planKeyAgentCreate`). The key is generated in this tab and shown once.
  */
-export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyAgent | null; onCreated: () => void; onDone: () => void }) {
+export function SetupCard({ created, onCreated, onDone, master, ready }: { created: PendingKeyAgent | null; onCreated: () => void; onDone: () => void; master: string; ready: boolean }) {
   const t = useT();
   const { canAct, busy, sign, accountId } = useAgentTx();
   const { ownerId } = useOwner();
   const now = useNow(60_000);
-  const [master, setMaster] = useState("");
   const mainnet = NETWORK === "mainnet";
   const [daily, setDaily] = useState(mainnet ? SESSION_LIMIT_USDC : DEFAULT_DAILY_FUNDING);
   const [perTx, setPerTx] = useState(mainnet ? SESSION_LIMIT_USDC : DEFAULT_TOPUP);
@@ -43,7 +44,7 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
   const fundErr = validateFund(fund);
   const valid = check.mandate !== null && !prefixErr && !fundErr && owner !== "";
 
-  if (mainnet) return <MainnetSetup master={check.master} masterError={touched ? check.errors.master : undefined} setMaster={setMaster} masterValue={master} touch={() => setTouched(true)} owner={owner} prefix={prefix} setPrefix={setPrefix} prefixErr={prefixErr} fund={fund} setFund={setFund} fundErr={fundErr} />;
+  if (mainnet) return <MainnetSetup master={check.master} owner={owner} prefix={prefix} setPrefix={setPrefix} prefixErr={prefixErr} fund={fund} setFund={setFund} fundErr={fundErr} />;
 
   if (result) return <Credentials p={result} master={master} perTx={perTx} onDone={() => { clearPending(); setResult(null); onDone(); }} />;
 
@@ -66,14 +67,9 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
 
   const e = touched ? check.errors : {};
   return (
-    <Card aria-labelledby="trader-setup" className="flex flex-col gap-4">
-      <CardHeader id="trader-setup" title={t("trading.setupCard.title")} />
-      <p className="m-0 text-sm text-ink-secondary">
-        {t("trading.setupCard.intro")}
-      </p>
-      <Field label={t("trading.setupCard.account")} hint={t("trading.setupCard.accountHint")} {...(e.master ? { error: e.master } : {})}>
-        {(a11y) => <Input {...a11y} mono placeholder="0x…" value={master} onChange={(ev) => setMaster(ev.target.value)} state={e.master ? "error" : "default"} autoComplete="off" spellCheck={false} />}
-      </Field>
+    <div aria-labelledby="trader-setup" className="flex flex-col gap-4">
+      <p className="m-0 text-sm text-ink-secondary">{t("trading.setupCard.intro")}</p>
+      {!ready && <Callout accent="neutral">{t("trading.setupCard.needAddress")}</Callout>}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={t("trading.setupCard.daily")} hint={t("trading.setupCard.dailyHint")} {...(e.daily ? { error: e.daily } : {})}>
           {(a11y) => <Input {...a11y} mono inputMode="decimal" suffix="USDC" value={daily} onChange={(ev) => setDaily(ev.target.value)} state={e.daily ? "error" : "default"} />}
@@ -93,17 +89,33 @@ export function SetupCard({ created, onCreated, onDone }: { created: PendingKeyA
           </Field>
         </div>
       </details>
-      <p className="m-0 text-xs text-ink-muted">
-        {rich("trading.setupCard.creates", { id: <span className="mono">{TRADER_AGENT_ID}</span>, amount: perTx || "…" })}
-      </p>
+      {check.mandate ? (
+        <p className="m-0 rounded-tile border border-tile-line bg-surface-sunken px-3 py-2.5 text-sm text-ink-secondary">
+          <span className="mb-1 block text-xs text-ink-muted">{rich("trading.setupCard.creates", { id: <span className="mono">{TRADER_AGENT_ID}</span> })}</span>
+          <Sentence segs={mandateSegments(check.mandate, {}, now)} />
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center justify-end gap-3">
         {busy && <SigningHint />}
         {!canAct && <span className="text-xs text-ink-muted">{t("trading.setupCard.onlyOwner")}</span>}
-        <Button variant="primary" icon={<Icons.Plus size={14} />} disabled={!canAct || busy} loading={busy} onClick={() => void submit()}>
+        <Button variant="primary" icon={<Icons.Plus size={14} />} disabled={!canAct || busy || !ready} loading={busy} onClick={() => void submit()}>
           {t("trading.setupCard.create")}
         </Button>
       </div>
-    </Card>
+    </div>
+  );
+}
+
+/** Step 1 field: the owner's Hyperliquid (EVM) address. Lives in the page so step 1 can turn green before the agent exists. */
+export function MasterField({ master, setMaster, now }: { master: string; setMaster: (v: string) => void; now: number }) {
+  const t = useT();
+  const [touched, setTouched] = useState(false);
+  const check = useMemo(() => buildTraderSetup({ master, daily: DEFAULT_DAILY_FUNDING, perTx: DEFAULT_TOPUP }, now), [master, now]);
+  const err = touched ? check.errors.master : undefined;
+  return (
+    <Field label={t("trading.setupCard.account")} hint={t("trading.setupCard.accountHint")} {...(err ? { error: err } : {})}>
+      {(a11y) => <Input {...a11y} mono placeholder="0x…" value={master} onChange={(ev) => setMaster(ev.target.value)} onBlur={() => setTouched(true)} state={err ? "error" : "default"} autoComplete="off" spellCheck={false} />}
+    </Field>
   );
 }
 
@@ -155,10 +167,6 @@ function Credentials({ p, master, perTx, onDone }: { p: PendingKeyAgent; master:
  */
 function MainnetSetup(p: {
   master: string | null;
-  masterValue: string;
-  masterError: string | undefined;
-  setMaster: (v: string) => void;
-  touch: () => void;
   owner: string;
   prefix: string;
   setPrefix: (v: string) => void;
@@ -172,16 +180,10 @@ function MainnetSetup(p: {
   const ready = p.master !== null && p.owner !== "" && !p.prefixErr && !p.fundErr;
   const commands = ready && p.master ? mainnetSetupCommands({ owner: p.owner, vault: VAULT_ID, master: p.master, name: p.prefix, fundNear: p.fund }) : null;
   return (
-    <Card aria-labelledby="trader-setup" className="flex flex-col gap-4">
-      <CardHeader id="trader-setup" title={t("trading.main.title")} />
+    <div aria-labelledby="trader-setup" className="flex flex-col gap-4">
       <Callout accent="warn" icon={<Icons.AlertTriangle size={16} />}>
         {t("trading.main.cli")}
       </Callout>
-      <Field label={t("trading.setupCard.account")} hint={t("trading.main.accountHint")} {...(p.masterError ? { error: p.masterError } : {})}>
-        {(a11y) => (
-          <Input {...a11y} mono placeholder="0x…" value={p.masterValue} onChange={(ev) => p.setMaster(ev.target.value)} onBlur={p.touch} state={p.masterError ? "error" : "default"} autoComplete="off" spellCheck={false} />
-        )}
-      </Field>
       <details className="text-[13px] text-ink-secondary">
         <summary className="cursor-pointer">{t("trading.setupCard.advanced")}</summary>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -222,6 +224,6 @@ function MainnetSetup(p: {
       ) : (
         <p className="m-0 text-xs text-ink-subtle">{t("trading.main.enterValid", { more: p.owner === "" ? t("trading.main.andConnect") : "" })}</p>
       )}
-    </Card>
+    </div>
   );
 }

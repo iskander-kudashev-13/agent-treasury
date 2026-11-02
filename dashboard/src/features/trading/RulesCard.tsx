@@ -3,11 +3,13 @@ import { Button, Callout, Card, CardHeader, Hash, Icons } from "@/kit";
 import { AI_ENABLED } from "@/lib/config";
 import { formatTime } from "@/lib/format";
 import type { ConfirmedRules, TradingStatus } from "@/lib/tradingClient";
+import { midsOf } from "@/lib/tradingGuide";
+import type { ReactNode } from "react";
 import { useAssistantPanel } from "@/features/layout/AssistantContext";
 import { RulesView } from "./RulesView";
 
 /** The rules the bot runs: name, hash and who confirmed them from the status; the full text after the owner signs in. */
-export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn, error }: { status: TradingStatus; rules: ConfirmedRules | null; verified: boolean; signedIn: boolean; signingIn: boolean; signIn: () => void; error: string | null }) {
+export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn, error, pair, help }: { status: TradingStatus; rules: ConfirmedRules | null; verified: boolean; signedIn: boolean; signingIn: boolean; signIn: () => void; error: string | null; pair: string; help: ReactNode }) {
   const t = useT();
   const { openWith } = useAssistantPanel();
   const a = status.active_rules;
@@ -19,7 +21,7 @@ export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn
           <p className="m-0 text-sm text-ink-secondary">{t("trading.rules.none")}</p>
           {AI_ENABLED ? (
             <div>
-              <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={() => openWith(t("trading.rules.prefillNew"))}>
+              <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={() => openWith(t("trading.rules.prefillNew", { pair }))}>
                 {t("trading.rules.describeBtn")}
               </Button>
             </div>
@@ -41,7 +43,7 @@ export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn
           </div>
           {rules ? (
             <>
-              <RulesView rules={rules.rules} />
+              <RulesView rules={rules.rules} mids={midsOf(status)} />
               {rules.hash !== a.hash && <Callout accent="warn">{t("trading.rules.hashMismatch")}</Callout>}
             </>
           ) : !verified ? (
@@ -63,6 +65,10 @@ export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn
               </Button>
             </div>
           )}
+          <details className="text-[13px]">
+            <summary className="cursor-pointer text-ink-secondary">{t("trading.help.summary")}</summary>
+            <div className="mt-3">{help}</div>
+          </details>
         </>
       )}
     </Card>

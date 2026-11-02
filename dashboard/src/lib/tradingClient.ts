@@ -48,7 +48,18 @@ export interface TradingStatus {
   /** Other API wallets approved on the HL account (worker's view). Untrusted; the dashboard also asks Hyperliquid directly. */
   other_approved_agents: HlAgent[];
   balances: { usdc_free: string; usdc_total: string; equity_usdc: string; positions: TradingPosition[] };
-  pnl: { today_usdc: string; total_usdc: string; net_funded_usdc: string; day_start_equity_usdc: string };
+  pnl: {
+    today_usdc: string;
+    total_usdc: string;
+    net_funded_usdc: string;
+    day_start_equity_usdc: string;
+    /** Newer workers only; "0" when absent. */
+    funded_by_vault_usdc: string;
+    external_inflow_usdc: string;
+    external_outflow_usdc: string;
+    fees_usdc: string;
+    untracked_delta_usdc: string;
+  };
   limits: {
     effective: { max_position_usdc: string; max_order_usdc: string; daily_loss_stop_usdc: string; max_orders_per_day: number; price_band_bps: number };
     today: { orders: number; loss_usdc: string };
@@ -152,7 +163,17 @@ export function parseTradingStatus(j: unknown): TradingStatusResult | null {
       equity_usdc: str(b.equity_usdc, "0"),
       positions: arr(b.positions, 20).flatMap((x) => (isObj(x) ? [{ pair: str(x.pair), base: str(x.base), size: str(x.size, "0"), mid: str(x.mid, "0"), value_usdc: str(x.value_usdc, "0") }] : [])),
     },
-    pnl: { today_usdc: str(p.today_usdc, "0"), total_usdc: str(p.total_usdc, "0"), net_funded_usdc: str(p.net_funded_usdc, "0"), day_start_equity_usdc: str(p.day_start_equity_usdc, "0") },
+    pnl: {
+      today_usdc: str(p.today_usdc, "0"),
+      total_usdc: str(p.total_usdc, "0"),
+      net_funded_usdc: str(p.net_funded_usdc, "0"),
+      day_start_equity_usdc: str(p.day_start_equity_usdc, "0"),
+      funded_by_vault_usdc: str(p.funded_by_vault_usdc, "0"),
+      external_inflow_usdc: str(p.external_inflow_usdc, "0"),
+      external_outflow_usdc: str(p.external_outflow_usdc, "0"),
+      fees_usdc: str(p.fees_usdc, "0"),
+      untracked_delta_usdc: str(p.untracked_delta_usdc, "0"),
+    },
     limits: {
       effective: {
         max_position_usdc: str(eff.max_position_usdc, "0"),

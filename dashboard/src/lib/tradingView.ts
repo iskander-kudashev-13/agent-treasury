@@ -78,7 +78,11 @@ const STATE_ACCENT: Record<TradingState, Accent> = {
   error: "danger",
 };
 /** Label and hint come from the dictionary in the current language (read at call time). */
-export const stateInfo = (s: TradingState): { label: string; accent: Accent; hint: string } => ({ label: t(`trading.state.${s}`), accent: STATE_ACCENT[s], hint: t(`trading.hint.${s}`) });
+export const stateInfo = (s: TradingState, p: { sec?: number; lost?: string; limit?: string } = {}): { label: string; accent: Accent; hint: string } => ({
+  label: t(`trading.state.${s}`),
+  accent: STATE_ACCENT[s],
+  hint: t(`trading.hint.${s}`, { sec: p.sec ?? 60, lost: p.lost ?? "0", limit: p.limit ?? "0" }),
+});
 
 const REASON_CODES = ["PERP_POSITION_DETECTED", "KILL"] as const;
 export const reasonText = (reason: string | null, detail: string | null): string | null => {

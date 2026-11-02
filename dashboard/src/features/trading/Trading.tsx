@@ -1,27 +1,40 @@
 import { useT, rich } from "@/i18n";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Callout, Card, EmptyState, Pill, Skeleton } from "@/kit";
 import { QueryErrors } from "@/features/layout/QueryErrors";
-import { WORKER_URL } from "@/lib/config";
+import { useAssistantPanel } from "@/features/layout/AssistantContext";
+import { AI_ENABLED, NETWORK, WORKER_URL } from "@/lib/config";
 import { TRADER_AGENT_ID } from "@/lib/tradingClient";
-import { useAgents } from "@/lib/useVault";
-import { ApiWalletCard } from "./ApiWalletCard";
+import { DEFAULT_HARD, deriveSteps, hardLimitsOf, pickPair } from "@/lib/tradingGuide";
+import { buildTraderSetup, DEFAULT_DAILY_FUNDING, DEFAULT_TOPUP } from "@/lib/tradingView";
+import { useNow } from "@/lib/useNow";
+import { useAgents, usePendingApprovals } from "@/lib/useVault";
+import { Intro } from "./Intro";
 import { KillSwitch } from "./KillSwitch";
 import { RulesCard } from "./RulesCard";
+import { RulesHelp } from "./RulesHelp";
 import { pendingTrader, SetupCard } from "./SetupCard";
+import { SetupRow, Stepper } from "./Steps";
 import { StatusCard } from "./StatusCard";
 import { AccountTrustCallout } from "./AccountTrust";
 import { useAccountTrust, useHlApprovedAgents, useOwnerDetails, useTradingStatus } from "./useTrading";
 
-/** `/trading`: set up, approve the bot's wallet, see status and rules, stop. Calm and linear (docs/research: one-screen setup). */
+/**
+ * `/trading`: an intro (what it is, where the money goes, what is protected, which wallet is which), a six-step setup with live
+ * state, and, once rules are signed, the running view (status, event feed, rules in sentences) and the kill switch.
+ */
 export function Trading() {
   const t = useT();
   const agents = useAgents();
+  const pendingApprovals = usePendingApprovals();
   const { status, loading, error, refresh } = useTradingStatus();
   const details = useOwnerDetails();
+  const { openWith } = useAssistantPanel();
+  const now = useNow(30_000);
   const [recovered] = useState(pendingTrader);
   const [creating, setCreating] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [master, setMaster] = useState("");
 
   const trader = agents.data.find((a) => a.id === TRADER_AGENT_ID && a.status !== "Revoked") ?? null;
   const recoveredNow = recovered !== null && !dismissed && trader?.account_id === recovered.account;
@@ -29,13 +42,52 @@ export function Trading() {
   const live = status?.enabled ? status : null;
   const { trust, trusted } = useAccountTrust(live);
   const hlAgents = useHlApprovedAgents(live?.hl_network ?? "testnet", live && trust?.kind === "ok" ? trusted : null);
-  const accountOk = trust?.kind === "ok";
+  const network = live?.hl_network ?? (NETWORK === "mainnet" ? "mainnet" : "testnet");
+  const formAddress = useMemo(() => buildTraderSetup({ master, daily: DEFAULT_DAILY_FUNDING, perTx: DEFAULT_TOPUP }, now).master, [master, now]);
+  const hard = hardLimitsOf(live) ?? DEFAULT_HARD;
+  const pair = pickPair({ status: live, rulesPairs: details.rules?.rules.pairs, network });
+
+  const steps = deriveSteps({
+    workerConfigured: WORKER_URL !== "",
+    trader: trader ? { status: trader.status } : null,
+    onchainAccount: trusted,
+    formAddress,
+    status: live,
+    trust,
+    hlAgents,
+    aiEnabled: AI_ENABLED,
+    nowMs: now,
+  });
+  const setupDone = steps.slice(0, 5).every((s) => s.state === "done");
+  const allDone = steps.every((s) => s.state === "done");
+  const running = live !== null && live.active_rules !== null;
+  const help = <RulesHelp pair={pair} hard={hard} />;
+  const pendingTopups = pendingApprovals.data.filter((p) => p.agent_id === TRADER_AGENT_ID);
+
+  const stepper = (
+    <Stepper
+      steps={steps}
+      status={live}
+      trader={trader}
+      network={network}
+      trust={trust}
+      hlAgents={hlAgents}
+      master={trusted ?? master}
+      setMaster={setMaster}
+      setup={showSetup ? <SetupCard created={recoveredNow ? recovered : null} onCreated={() => setCreating(true)} onDone={() => { setCreating(false); setDismissed(true); }} master={master} ready={formAddress !== null} /> : null}
+      pendingTopups={pendingTopups}
+      rules={live?.active_rules ? { name: live.active_rules.name, hash: live.active_rules.hash } : null}
+      rulesHelp={help}
+      onChangeRules={AI_ENABLED ? () => openWith(t("trading.rules.prefillChange")) : null}
+      now={now}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-4">
       <QueryErrors sources={[{ label: t("src.agents"), error: agents.error, refresh: agents.refresh }]} />
 
-      {showSetup && <SetupCard created={recoveredNow ? recovered : null} onCreated={() => setCreating(true)} onDone={() => { setCreating(false); setDismissed(true); }} />}
+      <Intro trader={trader} status={live} defaultOpen={!setupDone} />
 
       {WORKER_URL === "" ? (
         <EmptyState title={t("trading.page.workerNotConfigured")}>{t("trading.page.setWorkerUrl")}</EmptyState>
@@ -57,10 +109,12 @@ export function Trading() {
             {rich("trading.page.workerOffBody", { flag: <span className="mono">TRADING_ENABLED=true</span>, env: <span className="mono">.env</span> })}
           </p>
         </Card>
-      ) : live ? (
+      ) : null}
+
+      {live && <AccountTrustCallout trust={trust} />}
+
+      {running && live && (
         <>
-          <AccountTrustCallout trust={trust} />
-          {(!live.api_wallet.approved || live.state === "awaiting_api_wallet") && <ApiWalletCard status={live} accountOk={accountOk} hlAgents={hlAgents} />}
           <StatusCard
             status={live}
             log={details.log}
@@ -75,11 +129,22 @@ export function Trading() {
               )
             }
           />
-          <RulesCard status={live} rules={details.rules} verified={details.rulesVerified} signedIn={details.signedIn} signingIn={details.signingIn} signIn={() => void details.signIn()} error={details.authError ?? details.error} />
-          {live.api_wallet.approved && live.api_wallet.address && <ApiWalletCard status={live} accountOk={accountOk} hlAgents={hlAgents} />}
-          <KillSwitch status={live} />
+          <RulesCard status={live} rules={details.rules} verified={details.rulesVerified} signedIn={details.signedIn} signingIn={details.signingIn} signIn={() => void details.signIn()} error={details.authError ?? details.error} pair={pair} help={help} />
         </>
-      ) : null}
+      )}
+
+      {allDone && running ? (
+        <SetupRow steps={steps}>{stepper}</SetupRow>
+      ) : (
+        <section aria-labelledby="trading-stepper" className="flex flex-col gap-2">
+          <h2 id="trading-stepper" className="m-0 text-[15px] font-semibold">
+            {t("trading.stepper.title")}
+          </h2>
+          {stepper}
+        </section>
+      )}
+
+      {live && trader && <KillSwitch status={live} />}
     </div>
   );
 }

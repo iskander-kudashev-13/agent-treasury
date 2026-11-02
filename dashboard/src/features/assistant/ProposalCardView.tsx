@@ -7,6 +7,7 @@ import { proposalRows, type RowLookups } from "@/lib/proposals";
 import { confirmTradingRules } from "@/lib/tradingClient";
 import { hashRuleSet } from "@/lib/tradingRules";
 import { RulesView } from "@/features/trading/RulesView";
+import { midsOf } from "@/lib/tradingGuide";
 import { AccountTrustCallout } from "@/features/trading/AccountTrust";
 import { tradingKeys, useAccountTrust, useTradingStatus } from "@/features/trading/useTrading";
 import { useWallet } from "@/features/wallet/WalletProvider";
@@ -164,7 +165,7 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
           {signed ? tr("as.rulesActive") : tr("kit.propDraft")}
         </span>
       </header>
-      <RulesView rules={p.rules} hash={localHash ?? undefined} />
+      <RulesView rules={p.rules} hash={localHash ?? undefined} {...(live ? { mids: midsOf(live) } : {})} />
       <p className="m-0 text-xs text-ink-subtle">{tr("as.rulesShown")}</p>
       {mismatch && <Callout accent="danger">{tr("as.rulesMismatch")}</Callout>}
       {p.validation.errors.map((e, i) => (
