@@ -2680,5 +2680,55 @@
         "PAIR_LOW_VOLUME"
       ]
     }
-  ]
+  ],
+  "messages": {
+    "$comment": "NEP-413 confirmation messages (docs/adr/0006 section 5). v2 has the `bot:` line after `agent:` and is the only format for new confirmations. v1 (no bot line) is accepted by the worker only for the migrated bot `default` whose hash equals the pre-migration active rule set. hlAccount is lower-cased in the message. The recipient of the NEP-413 payload is the vault id.",
+    "v2": [
+      {
+        "input": {
+          "vault": "vault.testnet",
+          "agentId": "hl-trader",
+          "hlNetwork": "testnet",
+          "hlAccount": "0xAbCdEf0123456789aBcDeF0123456789abCDEF01",
+          "botId": "default",
+          "rulesSha256": "91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+        },
+        "message": "Agent Treasury: activate trading rules\nvault: vault.testnet\nagent: hl-trader\nbot: default\nhl_network: testnet\nhl_account: 0xabcdef0123456789abcdef0123456789abcdef01\nrules_sha256: 91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+      },
+      {
+        "input": {
+          "vault": "vault.testnet",
+          "agentId": "hl-trader",
+          "hlNetwork": "testnet",
+          "hlAccount": "0xAbCdEf0123456789aBcDeF0123456789abCDEF01",
+          "botId": "dip-buyer",
+          "rulesSha256": "91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+        },
+        "message": "Agent Treasury: activate trading rules\nvault: vault.testnet\nagent: hl-trader\nbot: dip-buyer\nhl_network: testnet\nhl_account: 0xabcdef0123456789abcdef0123456789abcdef01\nrules_sha256: 91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+      },
+      {
+        "input": {
+          "vault": "vault.testnet",
+          "agentId": "hl-trader",
+          "hlNetwork": "testnet",
+          "hlAccount": "0xAbCdEf0123456789aBcDeF0123456789abCDEF01",
+          "botId": "dca-2",
+          "rulesSha256": "91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+        },
+        "message": "Agent Treasury: activate trading rules\nvault: vault.testnet\nagent: hl-trader\nbot: dca-2\nhl_network: testnet\nhl_account: 0xabcdef0123456789abcdef0123456789abcdef01\nrules_sha256: 91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+      }
+    ],
+    "v1_legacy": [
+      {
+        "input": {
+          "vault": "vault.testnet",
+          "agentId": "hl-trader",
+          "hlNetwork": "mainnet",
+          "hlAccount": "0xAbCdEf0123456789aBcDeF0123456789abCDEF01",
+          "rulesSha256": "91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+        },
+        "message": "Agent Treasury: activate trading rules\nvault: vault.testnet\nagent: hl-trader\nhl_network: mainnet\nhl_account: 0xabcdef0123456789abcdef0123456789abcdef01\nrules_sha256: 91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+      }
+    ]
+  }
 }

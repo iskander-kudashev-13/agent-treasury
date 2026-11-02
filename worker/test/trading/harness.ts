@@ -132,7 +132,7 @@ export function harness(o: HarnessOpts = {}) {
     now: () => clock.t,
   });
   const pairs = createPairInfoProvider(() => service.hlPort(), { now: () => clock.t });
-  const confirmer = new RulesConfirmer({ ctx, store, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), now: () => clock.t });
+  const confirmer = new RulesConfirmer({ ctx, store, registry: service.registry, maxBots: 3, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), now: () => clock.t });
   const routeDeps: TradingRouteDeps = { service, confirmer, store, confirmCtx: ctx, sessionSecret: SECRET, vault: VAULT, trustProxy: true, now: () => clock.t, propose: o.proposer };
   const app = new Hono().route("/trading", createTradingRouter(routeDeps));
 
@@ -140,8 +140,9 @@ export function harness(o: HarnessOpts = {}) {
   const authed = (sub?: string): Record<string, string> => ({ authorization: `Bearer ${token(sub)}`, "content-type": "application/json", "x-forwarded-for": "9.9.9.9" });
 
   /** challenge -> sign -> confirm over HTTP, like the dashboard. Returns the confirm Response. */
-  async function confirmOverHttp(rules: RuleSetV1, opts: { key?: typeof ownerKeyPair } = {}) {
-    const chRes = await app.request("/trading/rules/challenge", { method: "POST", headers: authed(), body: JSON.stringify({ rules }) });
+  async function confirmOverHttp(rules: RuleSetV1, opts: { key?: typeof ownerKeyPair; botId?: string; botName?: string } = {}) {
+    const bot = opts.botId === undefined ? {} : { bot_id: opts.botId, ...(opts.botName ? { bot_name: opts.botName } : {}) };
+    const chRes = await app.request("/trading/rules/challenge", { method: "POST", headers: authed(), body: JSON.stringify({ rules, ...bot }) });
     const ch = (await chRes.json()) as Challenge;
     const key = opts.key ?? ownerKeyPair;
     const res = await app.request("/trading/rules/confirm", {
@@ -153,22 +154,24 @@ export function harness(o: HarnessOpts = {}) {
         public_key: key.publicKey,
         signature: key.signNep413({ message: ch.message, nonce: Buffer.from(ch.nonce, "base64"), recipient: VAULT, callbackUrl: null }),
         nonce: ch.nonce,
+        ...bot,
       }),
     });
     return res;
   }
 
   /** Confirm directly through the confirmer (no HTTP) and make the service aware. */
-  async function confirmDirect(rules: RuleSetV1) {
-    const ch = await confirmer.challenge(rules);
-    const env = await confirmer.confirm({
+  async function confirmDirect(rules: RuleSetV1, botId?: string, botName?: string) {
+    const ch = await confirmer.challenge(rules, botId, botName);
+    const { env, bot } = await confirmer.confirm({
+      ...(botId === undefined ? {} : { bot_id: botId, ...(botName === undefined ? {} : { bot_name: botName }) }),
       rules,
       account_id: OWNER,
       public_key: ownerKeyPair.publicKey,
       signature: ownerKeyPair.signNep413({ message: ch.message, nonce: Buffer.from(ch.nonce, "base64"), recipient: VAULT, callbackUrl: null }),
       nonce: ch.nonce,
     });
-    await service.activated(env);
+    await service.activated(env, bot.id);
     return env;
   }
 

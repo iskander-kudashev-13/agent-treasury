@@ -10,8 +10,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { cloidPrefix } from "../../src/trading/engine/risk.js";
-import { initialEngineState, runTick } from "../../src/trading/engine/tick.js";
-import type { ActiveRules, EngineState, TickConfig, VaultView } from "../../src/trading/engine/tick.js";
+import type { ActiveRules, TickConfig, VaultView } from "../../src/trading/engine/tick.js";
+import { type EngineState, initialEngineState, runTick } from "./legacy.js";
 import { FakeHl } from "../../src/trading/hl/fake.js";
 import { isValidPrice } from "../../src/trading/hl/format.js";
 import type { HardLimits, HlPlaceOrder, HlSpotPair, Rule, RuleSetV1 } from "../../src/trading/types.js";
@@ -157,6 +157,7 @@ async function runScenario(seed: number): Promise<{ attempts: number; placed: nu
   const active: ActiveRules = { rules: sc.rules, hash, confirmedAtMs: T0 - 3_600_000 };
   const effMaxOrder = minStr(sc.hard.maxOrderUsdc, sc.rules.limits.max_order_usdc);
   const effMaxPos = minStr(sc.hard.maxPositionUsdc, sc.rules.limits.max_position_usdc);
+  const accountMaxPos = q(sc.hard.maxPositionUsdc);
   const effOrdersPerDay = Math.min(sc.hard.maxOrdersPerDay, sc.rules.limits.max_orders_per_day);
   const bps = BigInt(sc.hard.priceBandBps);
   const violations: string[] = [];
@@ -228,7 +229,10 @@ async function runScenario(seed: number): Promise<{ attempts: number; placed: nu
       if (notional > effMaxOrder) violations.push(`${where}: notional above max order`);
       if (o.isBuy) {
         tickBuys += notional;
-        if (held + openBuys + tickBuys > effMaxPos) violations.push(`${where}: position cap (held ${held}, open ${openBuys}, buys ${tickBuys}, cap ${effMaxPos})`);
+        // ADR-0006: the ACCOUNT cap (hard limit) covers everything the account holds, by hand or from bots, plus every open buy;
+        // the rule set's own limit covers the bot's own holdings, so this tick's buys alone may never exceed it either.
+        if (held + openBuys + tickBuys > accountMaxPos) violations.push(`${where}: account position cap (held ${held}, open ${openBuys}, buys ${tickBuys}, cap ${accountMaxPos})`);
+        if (tickBuys > effMaxPos) violations.push(`${where}: bot position cap (buys ${tickBuys}, cap ${effMaxPos})`);
         if (notional > freeUsdc) violations.push(`${where}: buy not covered by free USDC`);
         freeUsdc -= notional;
       } else {

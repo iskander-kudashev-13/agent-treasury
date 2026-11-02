@@ -390,6 +390,10 @@ export interface ConfirmDeps {
    * the worker. `null` = the chain cannot vouch for one: confirming is refused. (audit 2026-11-03 M7)
    */
   trustedHlAccount: string | null;
+  /** The agent (bot) the rules are for: part of the signed message (v2). */
+  botId: string;
+  /** Name for a bot that does not exist yet (it is created by the confirmation). */
+  botName?: string;
   /** Overridable for tests. */
   vault?: string;
 }
@@ -399,8 +403,9 @@ export interface ConfirmDeps {
  * The dashboard never signs a message it did not build itself: the worker's challenge must carry exactly the ADR message for
  * the hash the dashboard computed from the JSON it rendered. Any difference aborts before the wallet is asked.
  */
-export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): Promise<{ active: ConfirmedRules | null; state: string }> {
+export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): Promise<{ active: ConfirmedRules | null; state: string; bot: BotSummary | null }> {
   const vault = deps.vault ?? VAULT_ID;
+  if (!BOT_ID_RE.test(deps.botId)) throw new Error(t("trading.err.badBotId"));
   const localHash = await hashRuleSet(rules);
   const status = await fetchTradingStatus();
   if (!status.enabled) throw new Error(t("trading.err.off"));
@@ -419,11 +424,22 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
   }
 
   const session = await ensureSession(deps.accountId, deps.signMessage);
-  const ch = await request("/rules/challenge", { method: "POST", token: session.token, body: { rules } });
+  const ch = await request("/rules/challenge", { method: "POST", token: session.token, body: { rules, bot_id: deps.botId, ...(deps.botName ? { bot_name: deps.botName.slice(0, 60) } : {}) } });
   if (!isObj(ch) || typeof ch.nonce !== "string" || typeof ch.message !== "string" || typeof ch.recipient !== "string") throw new Error(t("trading.err.unexpectedChallenge"));
   if (ch.hash !== undefined && ch.hash !== localHash) throw new Error(t("trading.err.hashDiffers"));
   if (vault && ch.recipient !== vault) throw new Error(t("trading.err.challengeVault"));
-  const expected = confirmationMessage({ vault: status.vault || vault, agentId: status.agent_id, hlNetwork: status.hl_network, hlAccount: status.hl_account, rulesSha256: localHash });
+  // The bot is part of the signed text: a challenge for another bot is refused before the wallet is asked. A worker from before
+  // bots answers without `bot_id` (v1 message); that is only acceptable for the single bot `default`.
+  if (ch.bot_id !== undefined && ch.bot_id !== deps.botId) throw new Error(t("trading.err.botDiffers", { got: str(ch.bot_id, "?", 40), want: deps.botId }));
+  if (ch.bot_id === undefined && deps.botId !== "default") throw new Error(t("trading.err.botDiffers", { got: "-", want: deps.botId }));
+  const expected = confirmationMessage({
+    vault: status.vault || vault,
+    agentId: status.agent_id,
+    hlNetwork: status.hl_network,
+    hlAccount: status.hl_account,
+    rulesSha256: localHash,
+    ...(ch.bot_id === undefined ? {} : { botId: deps.botId }),
+  });
   if (ch.message !== expected) throw new Error(t("trading.err.messageDiffers"));
 
   const signed = await deps.signMessage({ message: ch.message, recipient: ch.recipient, nonce: b64ToBytes(ch.nonce) });
@@ -432,10 +448,12 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
 
   const j = await request("/rules/confirm", {
     method: "POST",
-    body: { rules, account_id: signed.accountId, public_key: signed.publicKey, signature: signed.signature, nonce: ch.nonce },
+    body: { rules, account_id: signed.accountId, public_key: signed.publicKey, signature: signed.signature, nonce: ch.nonce, ...(ch.bot_id === undefined ? {} : { bot_id: deps.botId }) },
   });
   if (!isObj(j)) throw new Error(t("trading.err.unexpectedConfirm"));
-  return { active: parseConfirmed(j.active), state: str(j.state) };
+  const bot = parseBotSummary(j.bot);
+  if (bot && bot.id !== deps.botId) throw new Error(t("trading.err.botDiffers", { got: bot.id, want: deps.botId }));
+  return { active: parseConfirmed(j.active), state: str(j.state), bot };
 }
 
 /* ───────────── bots (ADR-0006 §8) ───────────── */
@@ -706,6 +724,20 @@ export async function fetchBotMetrics(token: string, id: string, range: HistoryR
   const r = parseBotMetrics(await request(`${botPath(id)}/metrics?range=${range}`, { token, ...sig(signal) }), range);
   if (!r) throw new Error(t("trading.err.unexpectedBots"));
   return r;
+}
+/** Owner: new display name (not signed). Returns the updated bot. */
+export async function renameBot(token: string, id: string, name: string): Promise<BotSummary> {
+  const j = await request(`${botPath(id)}/rename`, { method: "POST", token, body: { name: name.trim().slice(0, 60) } });
+  const b = isObj(j) ? parseBotSummary(j.bot) : null;
+  if (!b) throw new Error(t("trading.err.unexpectedBots"));
+  return b;
+}
+/** Owner: archive. Refused with `BOT_HOLDS_POSITION` (409) while the bot still holds coins: the caller shows a plain message. */
+export async function archiveBot(token: string, id: string): Promise<{ bot: BotSummary; cancelled_orders: number }> {
+  const j = await request(`${botPath(id)}/archive`, { method: "POST", token, body: {} });
+  const b = isObj(j) ? parseBotSummary(j.bot) : null;
+  if (!b || !isObj(j)) throw new Error(t("trading.err.unexpectedBots"));
+  return { bot: b, cancelled_orders: num(j.cancelled_orders) };
 }
 /** Stops one bot: its orders are cancelled and it halts; the other bots keep running. */
 export async function killBot(token: string, id: string, reason?: string): Promise<BotKillResult> {

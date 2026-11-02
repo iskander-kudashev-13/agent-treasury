@@ -148,12 +148,12 @@ describe("HTTP client (mocked fetch)", () => {
 
   describe("confirmTradingRules", () => {
     const nonce = btoa("n".repeat(32));
-    const setup = async (over: { message?: string; hash?: string; recipient?: string } = {}) => {
+    const setup = async (over: { message?: string; hash?: string; recipient?: string; botId?: string | null } = {}) => {
       const hash = await hashRuleSet(RULES);
-      const message = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash });
+      const message = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash, botId: "default" });
       route({
         "/trading/status": () => json(STATUS),
-        "/trading/rules/challenge": () => json({ nonce, message: over.message ?? message, recipient: over.recipient ?? VAULT, hash: over.hash ?? hash, expires_at: 1 }),
+        "/trading/rules/challenge": () => json({ nonce, message: over.message ?? message, recipient: over.recipient ?? VAULT, hash: over.hash ?? hash, expires_at: 1, ...(over.botId === null ? {} : { bot_id: over.botId ?? "default", is_new: false }) }),
         "/trading/rules/confirm": () => json({ active: { rules: RULES, hash, message, signature: "s", public_key: "p", account_id: "owner.testnet", nonce, callback_url: null, confirmed_at_ms: 9 }, state: "running" }),
       });
       const signMessage = vi.fn(() => Promise.resolve({ accountId: "owner.testnet", publicKey: "ed25519:pk", signature: "sig" }));
@@ -162,43 +162,68 @@ describe("HTTP client (mocked fetch)", () => {
 
     it("signs the locally built message and posts the confirmation", async () => {
       const { signMessage, message } = await setup();
-      const r = await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL });
+      const r = await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" });
       expect(signMessage).toHaveBeenCalledWith(expect.objectContaining({ message, recipient: VAULT }));
       expect(r.state).toBe("running");
       expect(r.active?.confirmed_at_ms).toBe(9);
       const body = JSON.parse(String(calls.find((c) => c.path.endsWith("/confirm"))?.init?.body)) as Record<string, unknown>;
       expect(body).toMatchObject({ account_id: "owner.testnet", public_key: "ed25519:pk", signature: "sig", nonce });
     });
+    it("sends bot_id/bot_name in the challenge and bot_id in the confirmation", async () => {
+      const { signMessage } = await setup();
+      await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", botName: "Dip" });
+      const ch = JSON.parse(String(calls.find((c) => c.path.endsWith("/challenge"))?.init?.body)) as Record<string, unknown>;
+      expect(ch).toMatchObject({ bot_id: "default", bot_name: "Dip" });
+      const body = JSON.parse(String(calls.find((c) => c.path.endsWith("/confirm"))?.init?.body)) as Record<string, unknown>;
+      expect(body.bot_id).toBe("default");
+    });
+    it("refuses (without asking the wallet) when the worker answers for another bot", async () => {
+      const { signMessage } = await setup({ botId: "dip-buyer" });
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/dip-buyer/);
+      expect(signMessage).not.toHaveBeenCalled();
+    });
+    it("refuses a v1 message (worker without bots) for any bot but default", async () => {
+      const { signMessage } = await setup({ botId: null });
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "dca-2" })).rejects.toThrow(/dca-2/);
+      expect(signMessage).not.toHaveBeenCalled();
+    });
+    it("refuses a v2 message when the bot line is missing or wrong", async () => {
+      const hash = await hashRuleSet(RULES);
+      const v1 = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash });
+      const { signMessage } = await setup({ message: v1 });
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/does not match/);
+      expect(signMessage).not.toHaveBeenCalled();
+    });
     it("refuses (without asking the wallet) when the worker hashes differently", async () => {
       const { signMessage } = await setup({ hash: "0".repeat(64) });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL })).rejects.toThrow(/different hash/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/different hash/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses when the message differs from the ADR text", async () => {
       const { signMessage } = await setup({ message: "Agent Treasury: activate trading rules\nvault: evil" });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL })).rejects.toThrow(/does not match/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/does not match/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses (without asking the wallet) when the worker's HL account is not the one the vault pays", async () => {
       const { signMessage } = await setup();
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: "0x" + "11".repeat(20) })).rejects.toThrow(/vault pays/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: "0x" + "11".repeat(20), botId: "default" })).rejects.toThrow(/vault pays/);
       expect(signMessage).not.toHaveBeenCalled();
       expect(calls.some((c) => c.path.includes("challenge"))).toBe(false);
     });
     it("refuses when the chain names no single HL account", async () => {
       const { signMessage } = await setup();
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: null })).rejects.toThrow(/cannot be verified/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: null, botId: "default" })).rejects.toThrow(/cannot be verified/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses a challenge for another vault", async () => {
       const { signMessage } = await setup({ recipient: "evil.near" });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL })).rejects.toThrow(/different vault/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/different vault/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses when the wallet signs with another account", async () => {
       const { signMessage } = await setup();
       signMessage.mockResolvedValueOnce({ accountId: "other.testnet", publicKey: "k", signature: "s" });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL })).rejects.toThrow(/different account/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/different account/);
       expect(calls.some((c) => c.path.endsWith("/confirm"))).toBe(false);
     });
   });

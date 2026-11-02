@@ -36,18 +36,23 @@ export function hashRuleSet(rules: RuleSetV1): string {
   return hashCanonical(canonicalize(rules));
 }
 
-/** The exact NEP-413 message the owner signs (ADR-0005 "NEP-413 confirmation message"). */
+/**
+ * The exact NEP-413 message the owner signs. With `botId` it is the v2 message of ADR-0006 (a `bot:` line after `agent:`); without
+ * it, the v1 message of ADR-0005, which the worker accepts only for the migrated bot `default` (see confirm.ts).
+ */
 export function confirmationMessage(p: {
   vault: string;
   agentId: string;
   hlNetwork: "mainnet" | "testnet";
   hlAccount: string;
   rulesSha256: string;
+  botId?: string;
 }): string {
   return [
     "Agent Treasury: activate trading rules",
     `vault: ${p.vault}`,
     `agent: ${p.agentId}`,
+    ...(p.botId === undefined ? [] : [`bot: ${p.botId}`]),
     `hl_network: ${p.hlNetwork}`,
     `hl_account: ${p.hlAccount.toLowerCase()}`,
     `rules_sha256: ${p.rulesSha256}`,

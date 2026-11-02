@@ -28,6 +28,8 @@ export interface ChatDeps {
   usdcAsset: ProposalContext["usdcAsset"];
   /** Max model rounds per turn (each round may call several tools). */
   maxRounds?: number;
+  /** `trading_bot` of the request (ADR-0006): a bot id or "new". The worker, not the model, decides which bot a trading card is for. */
+  tradingBot?: string | undefined;
 }
 
 const MAX_TOOL_CALLS_PER_ROUND = 8;
@@ -45,7 +47,7 @@ export async function* runChat(deps: ChatDeps, messages: ChatMessage[], ownerAcc
     nowMs,
     // Grounding for addresses: only what the owner typed, never assistant text.
     userText: messages.filter((m) => m.role === "user").map((m) => m.content).join("\n"),
-    state: new TurnState(),
+    state: new TurnState(deps.tradingBot),
     usdcAsset: deps.usdcAsset,
   };
   const toolByName = new Map(deps.tools.map((t) => [t.name, t]));

@@ -16,9 +16,12 @@ import { ConfirmError } from "./confirm.js";
 import type { ConfirmBody, RulesConfirmer } from "./confirm.js";
 import { ProposeError } from "./propose.js";
 import type { Proposer } from "./propose.js";
+import { CursorError } from "./journal.js";
+import { isRange } from "./history.js";
 import { ServiceError } from "./service.js";
 import type { TradingService } from "./service.js";
 import type { RulesStore } from "./store.js";
+import { BOT_ID_RE } from "./types.js";
 import type { ConfirmCtx } from "./confirm.js";
 
 export interface TradingRouteDeps {
@@ -30,7 +33,7 @@ export interface TradingRouteDeps {
   sessionSecret: string;
   vault: string;
   trustProxy: boolean;
-  /** Requests per minute per client for everything except kill. */
+  /** Requests per minute per client for everything except the kill switches. */
   rateLimitPerMin?: number;
   /** Model calls per minute per client (`/rules/propose`). */
   proposeLimitPerMin?: number;
@@ -40,14 +43,16 @@ export interface TradingRouteDeps {
   now?: () => number;
 }
 
-type ErrStatus = 400 | 401 | 403 | 409 | 413 | 429 | 502;
+type ErrStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 502;
 
 const MAX_BODY_BYTES = 64 * 1024;
 const OWNER_CACHE_MS = 30_000;
 
 const proposeBody = z.object({ text: z.string().min(1).max(2000) });
 const killBody = z.object({ reason: z.string().max(500).optional() }).strict();
-const rulesBody = z.object({ rules: z.unknown() });
+const rulesBody = z.object({ rules: z.unknown(), bot_id: z.string().max(40).optional(), bot_name: z.string().max(200).optional() });
+const renameBody = z.object({ name: z.string().min(1).max(200) }).strict();
+const emptyBody = z.object({}).strict();
 
 export function createTradingRouter(d: TradingRouteDeps): Hono {
   const app = new Hono();
@@ -120,6 +125,7 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
     return c.json(d.service.status());
   });
 
+  // Legacy (single-bot dashboard): the rule set of bot `default`. New clients read `BotDetail.rules`.
   app.get("/rules", async (c) => {
     const t = throttle(c);
     if (t) return t;
@@ -127,8 +133,96 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
     if (typeof o !== "string") return o;
     try {
       // Fresh verification, same as the engine does each tick; a refused file is shown as "no active rules".
-      const loaded = await d.store.loadActive(d.confirmCtx);
-      return c.json({ active: loaded.status === "ok" ? loaded.confirmed : null, history: d.store.history() });
+      const active = await d.service.loadRules("default");
+      return c.json({ active, history: d.service.rulesHistory("default") });
+    } catch (e) {
+      return mapError(c, e);
+    }
+  });
+
+  /** A path id that is not a bot id cannot exist: 404 without touching the registry. */
+  const botId = (c: Context): string | Response => {
+    const id = c.req.param("id") ?? "";
+    return BOT_ID_RE.test(id) ? id : fail(c, 404, "BOT_NOT_FOUND", "No such bot");
+  };
+
+  // Public: id, name, state, pair. With a valid owner session: also P&L, position, sparkline. A bad token is a 401 (the
+  // dashboard then signs in again) rather than a silently thinner answer.
+  app.get("/bots", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    let full = false;
+    if (c.req.header("authorization") !== undefined) {
+      const o = await owner(c, false);
+      if (typeof o !== "string") return o;
+      full = true;
+    }
+    return c.json({ bots: d.service.botsList(full), max_bots: d.service.maxBots });
+  });
+
+  app.get("/bots/:id", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const o = await owner(c, false);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    try {
+      return c.json(await d.service.botDetail(id));
+    } catch (e) {
+      return mapError(c, e);
+    }
+  });
+
+  app.get("/bots/:id/history", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const o = await owner(c, false);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    const range = c.req.query("range") ?? "1d";
+    if (!isRange(range)) return fail(c, 400, "BAD_REQUEST", "range must be one of 1h, 1d, 1w, 1m, all");
+    try {
+      return c.json(d.service.botHistory(id, range));
+    } catch (e) {
+      return mapError(c, e);
+    }
+  });
+
+  app.get("/bots/:id/fills", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const o = await owner(c, false);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    const lq = c.req.query("limit");
+    const limit = lq === undefined ? 50 : Number(lq);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) return fail(c, 400, "BAD_REQUEST", "limit must be an integer from 1 to 200");
+    const fq = c.req.query("from_ms");
+    const fromMs = fq === undefined ? undefined : Number(fq);
+    if (fromMs !== undefined && (!Number.isSafeInteger(fromMs) || fromMs < 0)) return fail(c, 400, "BAD_REQUEST", "from_ms must be a non-negative integer");
+    const cursor = c.req.query("cursor");
+    try {
+      return c.json(d.service.botFills(id, { limit, ...(cursor !== undefined ? { cursor } : {}), ...(fromMs !== undefined ? { fromMs } : {}) }));
+    } catch (e) {
+      if (e instanceof CursorError) return fail(c, 400, "BAD_CURSOR", "cursor is not valid");
+      return mapError(c, e);
+    }
+  });
+
+  app.get("/bots/:id/metrics", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const o = await owner(c, false);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    const range = c.req.query("range") ?? "1d";
+    if (!isRange(range)) return fail(c, 400, "BAD_REQUEST", "range must be one of 1h, 1d, 1w, 1m, all");
+    try {
+      return c.json(d.service.botMetrics(id, range));
     } catch (e) {
       return mapError(c, e);
     }
@@ -142,7 +236,9 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
     const q = c.req.query("limit");
     const limit = q === undefined ? 50 : Number(q);
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) return fail(c, 400, "BAD_REQUEST", "limit must be an integer from 1 to 200");
-    return c.json({ entries: d.service.readLog(limit) });
+    const bot = c.req.query("bot");
+    if (bot !== undefined && !BOT_ID_RE.test(bot)) return fail(c, 400, "BAD_REQUEST", "bot must be a bot id");
+    return c.json({ entries: d.service.readLog(limit, bot) });
   });
 
   app.post("/rules/propose", async (c) => {
@@ -186,7 +282,7 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
     const parsed = rulesBody.safeParse(b.value);
     if (!parsed.success || !(typeof b.value === "object" && b.value !== null && "rules" in b.value)) return fail(c, 400, "BAD_REQUEST", "Expected { rules }");
     try {
-      return c.json(await d.confirmer.challenge(parsed.data.rules));
+      return c.json(await d.confirmer.challenge(parsed.data.rules, parsed.data.bot_id, parsed.data.bot_name));
     } catch (e) {
       return mapError(c, e);
     }
@@ -202,9 +298,10 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
     try {
       // The perp-alarm check comes BEFORE the nonce is consumed, so the owner can retry the same signature flow later.
       await d.service.assertMayActivate();
-      const env = await d.confirmer.confirm(b.value as ConfirmBody);
-      const state = await d.service.activated(env);
-      return c.json({ active: env, state });
+      const { env, bot } = await d.confirmer.confirm(b.value as ConfirmBody);
+      const state = await d.service.activated(env, bot.id);
+      // `active` stays for the single-bot dashboard; `bot` is the multi-bot answer.
+      return c.json({ bot: d.service.botSummary(bot, true), state, active: env });
     } catch (e) {
       return mapError(c, e);
     }
@@ -220,6 +317,58 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
     if (!parsed.success) return fail(c, 400, "BAD_REQUEST", "Expected { reason?: string }");
     try {
       return c.json(await d.service.kill(parsed.data.reason));
+    } catch (e) {
+      return mapError(c, e);
+    }
+  });
+
+  // Kill of one bot: same class as the account kill switch (owner, safetyOnly, never rate limited).
+  app.post("/bots/:id/kill", async (c) => {
+    const o = await owner(c, true, true);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    const b = await json(c);
+    if (!b.ok) return b.res;
+    const parsed = killBody.safeParse(b.value);
+    if (!parsed.success) return fail(c, 400, "BAD_REQUEST", "Expected { reason?: string }");
+    try {
+      return c.json(await d.service.killBot(id, parsed.data.reason));
+    } catch (e) {
+      return mapError(c, e);
+    }
+  });
+
+  app.post("/bots/:id/rename", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const o = await owner(c, true);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    const b = await json(c);
+    if (!b.ok) return b.res;
+    const parsed = renameBody.safeParse(b.value);
+    if (!parsed.success) return fail(c, 400, "BAD_REQUEST", "Expected { name: string (1..60 chars) }");
+    try {
+      return c.json({ bot: d.service.rename(id, parsed.data.name) });
+    } catch (e) {
+      return mapError(c, e);
+    }
+  });
+
+  app.post("/bots/:id/archive", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const o = await owner(c, true);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    const b = await json(c);
+    if (!b.ok) return b.res;
+    if (!emptyBody.safeParse(b.value).success) return fail(c, 400, "BAD_REQUEST", "Expected {}");
+    try {
+      return c.json(await d.service.archive(id));
     } catch (e) {
       return mapError(c, e);
     }

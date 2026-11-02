@@ -297,14 +297,18 @@ export class FakeHl implements HlPort {
     return r;
   }
 
+  /** Fraction of a BUY's size charged as fee in the base token (HL spot: the buyer pays in what it buys). "0" = no fee. */
+  buyFeeBaseFraction = "0";
+
   private fill(order: HlPlaceOrder, pair: HlSpotPair, px: string): HlOrderResult {
     const quote = this.bal("USDC");
     const base = this.bal(pair.base);
     const notional = mulDec(px, order.size);
+    const feeBase = order.isBuy ? mulDec(order.size, this.buyFeeBaseFraction) : "0";
     if (order.isBuy) {
       if (cmpDec(subDec(quote.total, quote.hold), notional) < 0) return { status: "rejected", error: "Insufficient spot balance" };
       quote.total = subDec(quote.total, notional);
-      base.total = addDec(base.total, order.size);
+      base.total = addDec(base.total, subDec(order.size, feeBase));
     } else {
       if (cmpDec(subDec(base.total, base.hold), order.size) < 0) return { status: "rejected", error: "Insufficient spot balance" };
       base.total = subDec(base.total, order.size);
@@ -318,7 +322,9 @@ export class FakeHl implements HlPort {
       side: order.isBuy ? "buy" : "sell",
       price: px,
       size: order.size,
-      feeUsdc: "0",
+      feeUsdc: order.isBuy ? mulDec(feeBase, px) : "0",
+      feeToken: order.isBuy && cmpDec(feeBase, "0") > 0 ? pair.base : "USDC",
+      feeAmount: order.isBuy && cmpDec(feeBase, "0") > 0 ? feeBase : "0",
       timeMs: this.now(),
       tid: this.nextTid++,
     });

@@ -82,12 +82,17 @@ export async function sha256Hex(text: string): Promise<string> {
 
 export const hashRuleSet = async (rules: RuleSetV1): Promise<string> => sha256Hex(canonicalize(rules));
 
-/** The exact NEP-413 message the owner signs (ADR-0005). `recipient` of the signature is the vault id. */
-export function confirmationMessage(p: { vault: string; agentId: string; hlNetwork: "mainnet" | "testnet"; hlAccount: string; rulesSha256: string }): string {
+/**
+ * The exact NEP-413 message the owner signs. With `botId` it is the v2 message of ADR-0006 (a `bot:` line after `agent:`), the
+ * only format for new confirmations; without it, the v1 message of ADR-0005 (kept for the shared vectors and the legacy bot).
+ * `recipient` of the signature is the vault id.
+ */
+export function confirmationMessage(p: { vault: string; agentId: string; hlNetwork: "mainnet" | "testnet"; hlAccount: string; rulesSha256: string; botId?: string }): string {
   return [
     "Agent Treasury: activate trading rules",
     `vault: ${p.vault}`,
     `agent: ${p.agentId}`,
+    ...(p.botId === undefined ? [] : [`bot: ${p.botId}`]),
     `hl_network: ${p.hlNetwork}`,
     `hl_account: ${p.hlAccount.toLowerCase()}`,
     `rules_sha256: ${p.rulesSha256}`,

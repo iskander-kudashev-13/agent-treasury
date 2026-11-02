@@ -15,19 +15,32 @@
  * - Funding runs after the tick, with the free HL spot USDC the tick just read, and only if the engine state allows it
  *   (see `Funder`).
  */
-import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, copyFileSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { formatUsdc } from "agent-treasury-sdk";
 import { z } from "zod";
 import { addDec } from "./hl/format.js";
-import { clearHalt, haltState, initialEngineState, runTick } from "./engine/tick.js";
-import type { EngineState, LogEntry, StatusPieces, VaultView } from "./engine/tick.js";
-import { effectiveLimits, effectiveLimitsStatus } from "./engine/risk.js";
+import { BotRegistry, RegistryError, openRegistry } from "./bots.js";
+import type { BotsFile } from "./bots.js";
+import { clearHalt, haltAll, haltBot, initialEngineState, runTick } from "./engine/tick.js";
+import { positionOf } from "./engine/fills.js";
+import type { BotInput, BotView, EngineState, LogEntry, StatusPieces, VaultView } from "./engine/tick.js";
+import { type EngineStateV1, initialEngineStateV1, migrateV1 } from "./engine/migrate.js";
+import { emptyBotState } from "./engine/state.js";
+import { type Fx, MIN_NOTIONAL, effectiveLimits, effectiveLimitsStatus, fx, fxStr } from "./engine/risk.js";
 import type { ConfirmCtx } from "./confirm.js";
 import type { Funder, FundingResult } from "./funding.js";
+import { HistoryStore, RANGE_MS } from "./history.js";
+import type { HistoryPoint, Range } from "./history.js";
+import { FillsJournal } from "./journal.js";
+import type { BotFill, JournalFill } from "./journal.js";
+import { type BotMetrics, applyFill, computeMetrics, type CostBook } from "./metrics.js";
 import type { RulesStore } from "./store.js";
 import type { ApiWallet, ApiWalletManager } from "./wallet.js";
-import type { ConfirmedRules, HardLimits, HlPort, TradingState, TradingStatus } from "./types.js";
+import { ACCOUNT_SCOPE } from "./history.js";
+import { DEFAULT_BOT_ID } from "./types.js";
+import { HALT_REASONS } from "./types.js";
+import type { Bot, BotDetail, BotState, BotSummary, ConfirmedRules, HaltReason, HardLimits, HlFill, HlPort, HlSpotPair, TradingState, TradingStatus } from "./types.js";
 
 export interface TradingSettings {
   vault: string;
@@ -41,6 +54,8 @@ export interface TradingSettings {
   stateDir: string;
   /** `TRADING_START_MS`; unset = the time of the first tick (persisted). */
   startMs?: number | undefined;
+  /** `TRADING_MAX_BOTS`: bots that are not archived (default 3, 1..5). */
+  maxBots?: number | undefined;
 }
 
 export interface TradingServiceDeps {
@@ -65,13 +80,20 @@ export interface TradingServiceDeps {
 /** Service-level failure with an HTTP status the route maps one to one. */
 export class ServiceError extends Error {
   constructor(
-    readonly status: 400 | 409 | 502,
+    readonly status: 400 | 404 | 409 | 502,
     readonly code: string,
     message: string,
   ) {
     super(message);
     this.name = "ServiceError";
   }
+}
+
+/** Result of `archive`. `warning` is set when the archive went through on weaker evidence than usual. */
+export interface ArchiveResult {
+  bot: BotSummary;
+  cancelled_orders: number;
+  warning?: string;
 }
 
 export interface KillResult {
@@ -87,14 +109,26 @@ export interface KillResult {
   };
 }
 
-const engineStateSchema = z.looseObject({
+/** Result of `POST /trading/bots/:id/kill`: only this bot stops, the account and the other bots continue. */
+export interface BotKillResult {
+  bot_id: string;
+  state: "halted";
+  cancelled_orders: number;
+  steps: { cancel: "ok" | "failed"; state_saved: "ok" | "failed" };
+}
+
+const looseDec = z.string();
+const aggMapSchema = z.record(z.string(), z.looseObject({ cash: looseDec, dq: looseDec, fees: looseDec, lastPx: looseDec }));
+const haltSchema = z.nullable(z.looseObject({ reason: z.string(), atMs: z.number(), detail: z.string() }));
+
+/** `version: 1` (single bot): converted by `migrateV1`. Fields added over time are optional (defaults come from `initialEngineStateV1`). */
+const engineStateSchemaV1 = z.looseObject({
   version: z.literal(1),
-  halt: z.nullable(z.looseObject({ reason: z.string(), atMs: z.number(), detail: z.string() })),
+  halt: haltSchema,
   orderCounter: z.number().int().nonnegative(),
   firedAt: z.record(z.string(), z.number()),
   orders: z.record(z.string(), z.looseObject({ ruleId: z.string(), expiresAtMs: z.number().nullable() })),
   recent: z.array(z.looseObject({})),
-  // Added 2026-11-03 (absent in older files; the defaults come from initialEngineState).
   botPrefixes: z.array(z.string().regex(/^0x[0-9a-f]{16}$/)).optional(),
   botOids: z.array(z.number().int().nonnegative()).optional(),
   prefixesDropped: z.number().int().nonnegative().optional(),
@@ -112,13 +146,75 @@ const engineStateSchema = z.looseObject({
         botOidsToday: z.array(z.number().int().nonnegative()).optional(),
         basis: z.record(z.string(), z.record(z.string(), z.looseObject({ size: z.string(), cost: z.string() }))).optional(),
         todayFromMs: z.nullable(z.number()),
-        total: z.record(z.string(), z.looseObject({ cash: z.string(), dq: z.string(), fees: z.string(), lastPx: z.string() })),
-        today: z.record(z.string(), z.looseObject({ cash: z.string(), dq: z.string(), fees: z.string(), lastPx: z.string() })),
+        total: aggMapSchema,
+        today: aggMapSchema,
         botFillsToday: z.number().int().nonnegative(),
         foreignFills: z.number().int().nonnegative(),
       }),
     )
     .optional(),
+});
+
+const intNN = z.number().int().nonnegative();
+const decStr = z.string().regex(/^-?\d+(\.\d+)?$/);
+/** Fields below are optional (older v2 files lack some) but, when present, must have the right type: a mismatch is fatal. */
+const daySchema = z.nullable(
+  z.looseObject({
+    dayIndex: intNN,
+    startEquity: decStr,
+    snapshotAtMs: z.number(),
+    startBackstop: decStr.optional(),
+    balanceAtMs: z.number().optional(),
+    startPositions: z.record(z.string(), z.looseObject({ size: decStr, mid: decStr })).optional(),
+  }),
+);
+const startPositionsSchema = z.record(z.string(), z.looseObject({ size: decStr, mid: decStr }));
+
+const botStateSchema = z.looseObject({
+  firedAt: z.record(z.string(), z.number()),
+  orders: z.record(z.string(), z.looseObject({ ruleId: z.string(), expiresAtMs: z.number().nullable() })),
+  halt: haltSchema,
+  ordersToday: intNN.optional(),
+  filledOrdersToday: intNN.optional(),
+  filledOidsToday: z.array(intNN).optional(),
+  stoppedDayIndex: z.nullable(intNN).optional(),
+  stopReason: z.nullable(z.literal("DAILY_LOSS_STOP")).optional(),
+  startPositions: startPositionsSchema.optional(),
+  agg: z.looseObject({
+    total: aggMapSchema,
+    today: aggMapSchema,
+    totalComplete: z.boolean(),
+    botFillsToday: z.number().int().nonnegative(),
+    botOidsToday: z.array(z.number().int().nonnegative()),
+    basis: z.record(z.string(), z.record(z.string(), z.looseObject({ size: z.string(), cost: z.string() }))),
+  }),
+});
+
+/** `version: 2`. */
+const engineStateSchemaV2 = z.looseObject({
+  version: z.literal(2),
+  account: z.looseObject({
+    halt: haltSchema,
+    day: daySchema.optional(),
+    ordersToday: intNN.optional(),
+    stoppedDayIndex: z.nullable(intNN).optional(),
+    stopReason: z.nullable(z.enum(["ACCOUNT_LOSS_STOP", "EQUITY_DROP"])).optional(),
+    orderCounter: z.number().int().nonnegative(),
+    recent: z.array(z.looseObject({})),
+    fillCursor: z
+      .nullable(
+        z.looseObject({
+          cursorMs: z.number(),
+          seen: z.array(z.looseObject({ k: z.string(), t: z.number() })),
+          completeFromMs: z.number(),
+          todayFromMs: z.nullable(z.number()),
+          foreignFills: z.number().int().nonnegative(),
+        }),
+      )
+      .optional(),
+  }),
+  oidBot: z.record(z.string(), z.string()),
+  bots: z.record(z.string(), botStateSchema),
 });
 
 /** HL needs scheduleCancel at least 5 s in the future; "now" for the kill switch is the earliest allowed moment plus margin. */
@@ -173,6 +269,26 @@ function writeAtomic(path: string, content: string): void {
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/** A log entry as the API returns it: `bot_id` is always present (null = account-level). */
+export type LoggedEntry = Omit<LogEntry, "bot_id"> & { bot_id: string | null };
+
+/** Per-bot facts of the last tick the HTTP layer needs. */
+interface LastTick {
+  pieces: StatusPieces;
+  tradingState: TradingState;
+  bots: Record<string, BotView>;
+  /** Verified envelope per bot id (null = none / refused). */
+  rules: Map<string, ConfirmedRules | null>;
+  /** Bot ids whose stored active envelope was refused. */
+  refused: Set<string>;
+}
+
+const HOUR_MS = 3_600_000;
+const SPARK_POINTS = 24;
+/** Archiving is refused while the bot holds at least this much (the HL minimum order, so it could still sell it). */
+const ARCHIVE_MAX_POSITION: Fx = MIN_NOTIONAL;
+const PAIRS_CACHE_MS = 300_000;
+
 export class TradingService {
   private hl: HlPort;
   private readonly now: () => number;
@@ -180,12 +296,12 @@ export class TradingService {
   private readonly logFile: string;
   private readonly metaFile: string;
   private state: EngineState;
-  /** Set when the state file exists but is unusable: the service then refuses to trade. */
+  /** Set when a state file exists but is unusable: the service then refuses to trade. */
   private fatal: string | null = null;
   private inflight: Promise<void> | null = null;
   /** Owner mutations that arrived while a tick was running (replayed on its result). */
   private pendingOps: ((s: EngineState) => EngineState)[] | null = null;
-  private last: { pieces: StatusPieces; tradingState: TradingState; rules: ConfirmedRules | null } | null = null;
+  private last: LastTick | null = null;
   private extraWarnings = new Map<string, string>();
   private lastFundingKey = "";
   private startMs: number | undefined;
@@ -193,8 +309,18 @@ export class TradingService {
   private stopped = false;
   /** Bumped by every kill. A tick remembers the value it started with and stops trading when it changes. */
   private killEpoch = 0;
+  /** Per-bot counterpart of `killEpoch` (kill of one bot, archive). */
+  private readonly botEpoch = new Map<string, number>();
   /** The last state write failed. While true the service refuses to trade (a halt or counter could be lost). */
   private persistFailed = false;
+  /** Bumped whenever `last.bots` comes from a completed engine tick (archive needs a view newer than its own cancel). */
+  private viewSeq = 0;
+  /** Bot registry (`bots.json`): the permanent prefix map and each bot's active hash. */
+  readonly registry: BotRegistry;
+  private readonly history: HistoryStore;
+  private readonly journal: FillsJournal;
+  private readonly books = new Map<string, CostBook>();
+  private pairsCache: { at: number; pairs: HlSpotPair[] } | null = null;
 
   constructor(private readonly d: TradingServiceDeps) {
     this.hl = d.hl;
@@ -204,13 +330,147 @@ export class TradingService {
     this.stateFile = join(dir, "engine-state.json");
     this.logFile = join(dir, "log.jsonl");
     this.metaFile = join(dir, "meta.json");
-    this.state = this.loadState();
     this.startMs = d.settings.startMs ?? this.loadStartMs();
+    this.history = new HistoryStore(dir, this.now);
+    this.journal = new FillsJournal(dir);
+    // State first (pure parse; a v1 file also yields the cloid prefixes the old engine remembered), then the registry
+    // (which migrates `active.json`), then the converted state is written. Each step is idempotent, see bots.ts / migrate.ts.
+    const loaded = this.readStateFile();
+    if (this.fatal !== null) this.preserveCorrupt("engine-state.json");
+    let registry: BotRegistry;
+    const emptyFile: BotsFile = { version: 1, bots: [], legacy_v1: null };
+    try {
+      // An unreadable engine state must not trigger the registry migration: it would record only the prefixes it can see and
+      // lose the older ones for good. The service is fatal anyway; the migration runs once the operator fixed the state file.
+      if (this.fatal !== null && !existsSync(join(dir, "bots.json"))) registry = new BotRegistry(dir, emptyFile, this.fatal);
+      else registry = openRegistry(dir, { legacyPrefixes: loaded.prefixes, startMs: this.startMs });
+    } catch (e) {
+      this.fatal = `bots.json / active.json is unusable (${errMsg(e)})`;
+      this.preserveCorrupt(existsSync(join(dir, "bots.json")) ? "bots.json" : "active.json");
+      registry = new BotRegistry(dir, emptyFile, this.fatal);
+    }
+    this.registry = registry;
+    this.state = loaded.state;
+    // A v1 state always yields a `default` bot block; if the registry has no such bot (it never had rules) and the block is
+    // pristine, it is not state worth keeping (and would otherwise look like a bot that bots.json lost).
+    if (loaded.migratedFromV1 && this.fatal === null && registry.get(DEFAULT_BOT_ID) === undefined) {
+      const d = this.state.bots[DEFAULT_BOT_ID];
+      if (d !== undefined && Object.keys(d.agg.total).length === 0 && Object.keys(d.orders).length === 0) {
+        const rest = Object.fromEntries(Object.entries(this.state.bots).filter(([id]) => id !== DEFAULT_BOT_ID));
+        this.state = { ...this.state, bots: rest, oidBot: Object.fromEntries(Object.entries(this.state.oidBot).filter(([, b]) => b !== DEFAULT_BOT_ID)) };
+      }
+    }
+    // Bot ids are permanent. If bots.json lost a bot that the engine state still knows (deleted, restored from an old backup),
+    // trading on would let a new strategy reuse the id and inherit the old position and fills: refuse to start.
+    registry.reserveStateIds(() => this.stateBotIds());
+    if (this.fatal === null) {
+      const missing = this.missingFromRegistry();
+      if (missing.length > 0) {
+        this.fatal = `bots.json does not list bot(s) ${missing.slice(0, 5).join(", ")} that engine-state.json still knows; restore bots.json from a backup (bot ids are never reused)`;
+      }
+    }
+    if (loaded.migratedFromV1 && this.fatal === null) this.finishMigration();
+    if (this.fatal === null) this.applyHaltMarker();
+    if (this.fatal === null) {
+      try {
+        this.history.enforceRetention(ACCOUNT_SCOPE);
+        for (const b of registry.list()) this.history.enforceRetention(b.id);
+      } catch {
+        /* retention is housekeeping; the next compaction retries */
+      }
+    }
   }
 
   /** False while HL refuses the dead-man switch for volume: limit orders get a warning when proposed or confirmed. */
   deadManAvailable(): boolean {
-    return this.state.deadManGatedAtMs == null;
+    return this.state.account.deadManGatedAtMs == null;
+  }
+
+  /** Why owner writes (confirm, rename, archive) are refused right now, or null. Set when a state file is unusable. */
+  writeBlockedReason(): string | null {
+    return this.fatal;
+  }
+
+  private assertWritable(): void {
+    if (this.fatal !== null) throw new ServiceError(409, "STATE_CORRUPT", `The trading state is unusable, so no changes are accepted: ${this.fatal}`);
+  }
+
+  /** Every bot id the engine state refers to. */
+  private stateBotIds(): string[] {
+    return [...new Set([...Object.keys(this.state.bots), ...Object.values(this.state.oidBot)])];
+  }
+
+  private missingFromRegistry(): string[] {
+    const known = new Set(this.registry.list().map((b) => b.id));
+    return this.stateBotIds().filter((id) => !known.has(id));
+  }
+
+  /**
+   * Keeps a copy of an unreadable state / registry file as `<name>.corrupt.<ts>.json` (once per distinct content) so nothing an
+   * operator or a later write could replace is lost. Best effort.
+   */
+  private preserveCorrupt(file: string): void {
+    try {
+      const dir = this.d.settings.stateDir;
+      const src = join(dir, file);
+      if (!existsSync(src)) return;
+      const bytes = readFileSync(src);
+      const stem = file.replace(/\.json$/, "");
+      for (const f of readdirSync(dir)) if (f.startsWith(`${stem}.corrupt.`) && readFileSync(join(dir, f)).equals(bytes)) return;
+      writeFileSync(join(dir, `${stem}.corrupt.${this.now()}.json`), bytes, { mode: 0o600 });
+    } catch {
+      /* best effort */
+    }
+  }
+
+  // The halt marker: when engine-state.json cannot be trusted the kill switch must not overwrite it, but it must still be
+  // remembered. The halt goes to `halt-marker.json` and is applied (then deleted) by the first start that can read the state.
+  private get markerFile(): string {
+    return join(this.d.settings.stateDir, "halt-marker.json");
+  }
+
+  private readMarker(): { bot_id: string | null; reason: HaltReason; atMs: number; detail: string }[] | "unreadable" {
+    if (!existsSync(this.markerFile)) return [];
+    try {
+      const j: unknown = JSON.parse(readFileSync(this.markerFile, "utf8"));
+      const p = z.object({ version: z.literal(1), halts: z.array(z.object({ bot_id: z.nullable(z.string()), reason: z.enum(HALT_REASONS), atMs: z.number(), detail: z.string() })) }).parse(j);
+      return p.halts;
+    } catch {
+      return "unreadable";
+    }
+  }
+
+  private writeHaltMarker(botId: string | null, atMs: number, reason: HaltReason, detail: string): boolean {
+    try {
+      const prev = this.readMarker();
+      const halts = prev === "unreadable" ? [] : prev;
+      if (prev === "unreadable") this.preserveCorrupt("halt-marker.json");
+      writeAtomic(this.markerFile, JSON.stringify({ version: 1, halts: [...halts, { bot_id: botId, reason, atMs, detail }] }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private applyHaltMarker(): void {
+    const m = this.readMarker();
+    if (m === "unreadable") {
+      this.fatal = "halt-marker.json is unreadable (a kill was recorded there while the engine state was unusable); fix or delete it after checking what was killed";
+      this.preserveCorrupt("halt-marker.json");
+      return;
+    }
+    if (m.length === 0) return;
+    for (const h of m) {
+      this.state = h.bot_id === null ? haltAll(this.state, h.atMs, h.reason, h.detail, this.registry.live().map((b) => b.id)) : haltBot(this.state, h.bot_id, h.atMs, h.reason, h.detail);
+    }
+    this.appendLog([{ at_ms: this.now(), kind: "state", detail: `halt marker applied (${m.length} halt(s) recorded while the engine state was unusable)` }]);
+    if (this.persistState()) {
+      try {
+        unlinkSync(this.markerFile);
+      } catch {
+        /* applying it again is harmless (a halt is sticky) */
+      }
+    }
   }
 
   /** The current HL adapter (changes after `rotate`). Read-only uses only (pair metadata for validation). */
@@ -218,19 +478,55 @@ export class TradingService {
     return this.hl;
   }
 
+  get maxBots(): number {
+    return this.d.settings.maxBots ?? 3;
+  }
+
   // -------------------------------------------------------------------------------------------------------------------
   // Persistence
   // -------------------------------------------------------------------------------------------------------------------
 
-  private loadState(): EngineState {
-    if (!existsSync(this.stateFile)) return initialEngineState();
+  /** Parses engine-state.json (v1 or v2). A v1 file is converted in memory here; `finishMigration` writes it. */
+  private readStateFile(): { state: EngineState; prefixes: string[]; migratedFromV1: boolean } {
+    if (!existsSync(this.stateFile)) return { state: initialEngineState(), prefixes: [], migratedFromV1: false };
     try {
-      const parsed = engineStateSchema.safeParse(JSON.parse(readFileSync(this.stateFile, "utf8")));
-      if (!parsed.success) throw new Error(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
-      return { ...initialEngineState(), ...(parsed.data as unknown as EngineState) };
+      const raw: unknown = JSON.parse(readFileSync(this.stateFile, "utf8"));
+      const version = typeof raw === "object" && raw !== null ? (raw as { version?: unknown }).version : undefined;
+      if (version === 1) {
+        const p = engineStateSchemaV1.safeParse(raw);
+        if (!p.success) throw new Error(p.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+        const m = migrateV1({ ...initialEngineStateV1(), ...(p.data as unknown as EngineStateV1) });
+        return { state: m.state, prefixes: m.prefixes, migratedFromV1: true };
+      }
+      const p = engineStateSchemaV2.safeParse(raw);
+      if (!p.success) throw new Error(p.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+      const d = p.data as unknown as EngineState;
+      const base = initialEngineState();
+      return {
+        state: {
+          ...base,
+          ...d,
+          account: { ...base.account, ...d.account },
+          bots: Object.fromEntries(Object.entries(d.bots).map(([id, b]) => [id, { ...emptyBotState(), ...b }])),
+        },
+        prefixes: [],
+        migratedFromV1: false,
+      };
     } catch (e) {
       this.fatal = `engine-state.json is unreadable (${errMsg(e)}); fix or delete it after checking that no halt was recorded`;
-      return initialEngineState();
+      return { state: initialEngineState(), prefixes: [], migratedFromV1: false };
+    }
+  }
+
+  /** Keeps the v1 file as `engine-state.v1.json` (never overwritten), then writes the converted state. */
+  private finishMigration(): void {
+    try {
+      const backup = join(this.d.settings.stateDir, "engine-state.v1.json");
+      if (!existsSync(backup)) copyFileSync(this.stateFile, backup);
+      writeAtomic(this.stateFile, JSON.stringify(this.state));
+      this.appendLog([{ at_ms: this.now(), kind: "state", detail: "engine state migrated to version 2 (single bot became bot 'default'); the old file is kept as engine-state.v1.json" }]);
+    } catch (e) {
+      this.fatal = `could not write the migrated engine state (${errMsg(e)}); the v1 file is untouched, fix the directory and restart`;
     }
   }
 
@@ -245,6 +541,8 @@ export class TradingService {
   }
 
   private persistState(): boolean {
+    // Never write over a state file that could not be read: its content (a halt, a counter) may be recoverable by the operator.
+    if (this.fatal !== null) return false;
     try {
       writeAtomic(this.stateFile, JSON.stringify(this.state));
       this.extraWarnings.delete("persist");
@@ -266,8 +564,11 @@ export class TradingService {
     }
   }
 
-  /** Newest first, at most `limit` entries (reads only the tail of the file). */
-  readLog(limit: number): LogEntry[] {
+  /**
+   * Newest first, at most `limit` entries (reads only the tail of the file). `botId` keeps one bot's entries. Entries written
+   * before bots existed have no `bot_id`: orders and skips were the single bot's (`default`), the rest is account-level.
+   */
+  readLog(limit: number, botId?: string): LoggedEntry[] {
     if (!existsSync(this.logFile)) return [];
     const fd = openSync(this.logFile, "r");
     try {
@@ -277,13 +578,16 @@ export class TradingService {
       readSync(fd, buf, 0, len, size - len);
       const lines = buf.toString("utf8").split("\n");
       if (size > len) lines.shift(); // first line is cut
-      const out: LogEntry[] = [];
+      const out: LoggedEntry[] = [];
       for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
         const line = lines[i];
         if (!line) continue;
         try {
           const e = JSON.parse(line) as LogEntry;
-          if (typeof e.at_ms === "number" && typeof e.kind === "string" && typeof e.detail === "string") out.push(e);
+          if (typeof e.at_ms !== "number" || typeof e.kind !== "string" || typeof e.detail !== "string") continue;
+          const owner = e.bot_id ?? (e.kind === "order" || e.kind === "skip" ? DEFAULT_BOT_ID : null);
+          if (botId !== undefined && owner !== botId) continue;
+          out.push({ ...e, bot_id: owner });
         } catch {
           /* skip a damaged line */
         }
@@ -294,11 +598,21 @@ export class TradingService {
     }
   }
 
+  /** Order attempts of a bot since `fromMs`, from the log tail (a bound, not an audit: the tail is 512 KB). */
+  private countOrders(botId: string, fromMs: number): number {
+    let n = 0;
+    for (const e of this.readLog(10_000, botId)) {
+      if (e.at_ms < fromMs) break;
+      if (e.kind === "order") n++;
+    }
+    return n;
+  }
+
   /** Applies an owner mutation now and replays it on the result of a tick that is running. */
   private mutate(fn: (s: EngineState) => EngineState): boolean {
     this.state = fn(this.state);
     this.pendingOps?.push(fn);
-    return this.persistState();
+    return this.persistState(); // false while fatal: memory only, the caller records halts in the marker file
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -329,6 +643,7 @@ export class TradingService {
     const now = this.now();
     const s = this.d.settings;
     const epoch = this.killEpoch;
+    const botEpochs = new Map(this.registry.list().map((b) => [b.id, this.botEpoch.get(b.id) ?? 0]));
     this.pendingOps = [];
     try {
       if (this.fatal !== null) {
@@ -340,6 +655,11 @@ export class TradingService {
         this.setErrorStatus(now, "STATE_WRITE_FAILED", "engine state cannot be written; not trading until it can");
         return;
       }
+      const missing = this.missingFromRegistry();
+      if (missing.length > 0) {
+        this.setErrorStatus(now, "REGISTRY_MISSING_BOT", `engine state refers to bot(s) ${missing.slice(0, 5).join(", ")} that the registry does not list`);
+        return;
+      }
       if (this.startMs === undefined) {
         this.startMs = now;
         try {
@@ -348,17 +668,35 @@ export class TradingService {
           /* non-fatal: the baseline is recomputed from the next start */
         }
       }
-      const loaded = await this.d.store.loadActive(this.d.confirmCtx).catch((e: unknown) => ({ status: "refused" as const, code: "LOAD_ERROR", reason: errMsg(e) }));
-      let rules: { rules: ConfirmedRules["rules"]; hash: string; confirmedAtMs: number } | null = null;
-      let confirmed: ConfirmedRules | null = null;
-      if (loaded.status === "ok") {
-        confirmed = loaded.confirmed;
-        rules = { rules: confirmed.rules, hash: confirmed.hash, confirmedAtMs: confirmed.confirmed_at_ms };
-        this.extraWarnings.delete("rules");
-      } else if (loaded.status === "refused") {
-        this.extraWarnings.set("rules", `the stored active rules were refused: ${loaded.code}: ${loaded.reason}`);
-      } else {
-        this.extraWarnings.delete("rules");
+      // Every bot's active rule set is loaded and fully re-verified on EVERY tick (owner still the owner, signature, hash,
+      // limits, the envelope belongs to this bot). A refused bot has no rules; the others are not affected.
+      const botsIn: BotInput[] = [];
+      const rules = new Map<string, ConfirmedRules | null>();
+      const refused = new Set<string>();
+      const legacy = this.registry.legacyV1();
+      for (const b of this.registry.list()) {
+        let envelope: ConfirmedRules | null = null;
+        if (b.archived_at_ms === null && b.active_hash !== null) {
+          const loaded = await this.d.store
+            .loadBot(b, this.d.confirmCtx, { legacyV1Hash: legacy?.bot_id === b.id ? legacy.hash : null })
+            .catch((e: unknown) => ({ status: "refused" as const, code: "LOAD_ERROR", reason: errMsg(e) }));
+          if (loaded.status === "ok") {
+            envelope = loaded.confirmed;
+            this.extraWarnings.delete(`rules:${b.id}`);
+          } else if (loaded.status === "refused") {
+            refused.add(b.id);
+            this.extraWarnings.set(`rules:${b.id}`, `bot ${b.id}: the stored active rules were refused: ${loaded.code}: ${loaded.reason}`);
+          }
+        } else this.extraWarnings.delete(`rules:${b.id}`);
+        rules.set(b.id, envelope);
+        botsIn.push({
+          id: b.id,
+          createdAtMs: b.created_at_ms,
+          archived: b.archived_at_ms !== null,
+          prefixes: b.hashes.map((h) => h.prefix),
+          rules: envelope ? { rules: envelope.rules, hash: envelope.hash, confirmedAtMs: envelope.confirmed_at_ms } : null,
+          refused: refused.has(b.id),
+        });
       }
 
       let apiAddress: string;
@@ -375,13 +713,20 @@ export class TradingService {
           vault: this.d.readVault,
           config: { account: s.account, apiWalletAddress: apiAddress, hard: s.hard, tickSec: s.tickSec, deadmanSec: s.deadmanSec, fundedSinceMs: this.startMs },
           // A kill that arrived after this tick started (or a KILLED halt that is still in force) stops every order and
-          // every dead-man refresh of this tick.
+          // every dead-man refresh of this tick; a kill of one bot (or its archive) stops that bot's orders only.
           vaultTopups: () => this.d.funder?.confirmedTopups() ?? [],
           // Stamps the day snapshot's balance read (outflow window of the equity backstop).
           clock: this.now,
-          shouldStop: () => this.killEpoch !== epoch || this.state.halt?.reason === "KILLED",
+          shouldStop: (botId) => {
+            if (this.killEpoch !== epoch || this.state.account.halt?.reason === "KILLED") return true;
+            if (botId === undefined) return false;
+            return (this.botEpoch.get(botId) ?? 0) !== (botEpochs.get(botId) ?? 0) || this.state.bots[botId]?.halt?.reason === "KILLED";
+          },
           // Write-ahead: order counter / cooldown / daily count reach the disk before the order can reach HL.
-          beforeOrder: (st) => {
+          beforeOrder: (st, attributed) => {
+            // Journal first: this tick's fills are already inside `st` (cursor moved past them). If we crashed after writing the
+            // state but before the journal, those rows would be lost for good; the journal de-duplicates the later replay.
+            this.recordFills(attributed);
             try {
               const merged = (this.pendingOps ?? []).reduce((acc, fn) => fn(acc), st);
               writeAtomic(this.stateFile, JSON.stringify(merged));
@@ -392,16 +737,19 @@ export class TradingService {
             }
           },
         },
-        { nowMs: now, rules, state: this.state },
+        { nowMs: now, bots: botsIn, state: this.state },
       );
       let next = result.state;
       for (const op of this.pendingOps) next = op(next);
+      // Journal and history first, state second: a crash in between replays the fills, which the journal de-duplicates.
+      this.record(now, result);
       this.state = next;
       this.persistState();
       this.appendLog(result.entries);
+      this.viewSeq += 1;
 
-      const tradingState: TradingState = next.halt !== null ? "halted" : result.tradingState;
-      this.last = { pieces: result.status, tradingState, rules: confirmed };
+      const tradingState: TradingState = next.account.halt !== null ? "halted" : result.tradingState;
+      this.last = { pieces: result.status, tradingState, bots: result.bots, rules, refused };
 
       // Funding runs on what this tick just read. The Funder itself refuses in every state except running / no_rules /
       // awaiting_api_wallet and when the mandate differs from ADR-0005.
@@ -425,12 +773,75 @@ export class TradingService {
     }
   }
 
+  /** Cost book of a bot, rebuilt from its journal the first time it is needed. */
+  private bookOf(botId: string): CostBook {
+    let b = this.books.get(botId);
+    if (b === undefined) {
+      b = new Map();
+      for (const f of this.journal.readAll(botId)) applyFill(b, f);
+      this.books.set(botId, b);
+    }
+    return b;
+  }
+
+  /**
+   * Writes the fills journal (realized P&L and position after each fill, by average cost) and folds the per-bot and account
+   * samples into the history buckets. Failures are warnings: charts and tables must never stop trading.
+   */
+  private record(now: number, r: Awaited<ReturnType<typeof runTick>>): void {
+    this.recordFills(r.attributed);
+    try {
+      for (const v of Object.values(r.bots)) {
+        if (!v.priced || v.state === "archived") continue;
+        this.history.record({ botId: v.id, atMs: now, pnl: v.pnlTotal, positionUsdc: v.positionUsdc, today: v.pnlToday, pos: v.pos, px: v.px });
+      }
+      if (r.accountSample) this.history.record({ botId: ACCOUNT_SCOPE, atMs: now, pnl: r.accountSample.pnl, positionUsdc: r.accountSample.positionUsdc, equity: r.accountSample.equity, today: r.accountSample.today, px: r.accountSample.px });
+    } catch (e) {
+      this.extraWarnings.set("history", `history / fills journal not writable: ${errMsg(e)}`);
+    }
+  }
+
+  /** Appends fills to the journal (idempotent: a fill already journaled is skipped). Failure is a warning, never a stop. */
+  private recordFills(attributed: readonly Awaited<ReturnType<typeof runTick>>["attributed"][number][]): void {
+    try {
+      for (const a of attributed) {
+        const f: HlFill = a.fill;
+        const jf: JournalFill = {
+          tid: f.tid ?? null,
+          oid: f.oid,
+          cloid: f.cloid,
+          rule_id: a.ruleId,
+          time_ms: f.timeMs,
+          pair: f.pair,
+          side: f.side,
+          px: f.price,
+          sz: f.size,
+          fee_usdc: f.feeUsdc,
+          fee_token: f.feeToken ?? "USDC",
+          fee_amount: f.feeAmount ?? f.feeUsdc,
+          realized_usdc: null,
+          pos_after: "0",
+        };
+        if (this.journal.has(a.botId, jf)) continue;
+        const applied = applyFill(this.bookOf(a.botId), jf);
+        jf.realized_usdc = applied.realized === null ? null : fxStr(applied.realized);
+        jf.pos_after = fxStr(applied.posAfter > 0n ? applied.posAfter : 0n, 8);
+        this.journal.append(a.botId, [jf]);
+      }
+      this.extraWarnings.delete("history");
+    } catch (e) {
+      this.extraWarnings.set("history", `history / fills journal not writable: ${errMsg(e)}`);
+    }
+  }
+
   private setErrorStatus(now: number, reason: string, detail: string): void {
     const base = this.last?.pieces ?? this.emptyPieces();
     this.last = {
       pieces: { ...base, state: "error", state_reason: reason, state_detail: detail.slice(0, 600), last_tick_ms: now, next_tick_ms: now + this.d.settings.tickSec * 1000 },
       tradingState: "error",
-      rules: this.last?.rules ?? null,
+      bots: this.last?.bots ?? {},
+      rules: this.last?.rules ?? new Map<string, ConfirmedRules | null>(),
+      refused: this.last?.refused ?? new Set(),
     };
     this.appendLog([{ at_ms: now, kind: "state", detail: `error: ${reason} (${detail.slice(0, 200)})` }]);
   }
@@ -533,12 +944,13 @@ export class TradingService {
       },
       limits: {
         effective: effectiveLimitsStatus(eff, this.d.settings.hard.priceBandBps),
+        effective_bot_id: null,
         today: { orders: 0, loss_usdc: "0" },
         position_usdc: "0",
         vault: { status: "Paused", remaining_today_usdc: "0", per_tx_limit_usdc: "0", payments_today: 0, max_payments_per_day: 0, expires_at_ms: null },
       },
       open_orders: [],
-      dead_man: { cancel_at_ms: this.state.deadManAtMs, available: true, reason: null },
+      dead_man: { cancel_at_ms: this.state.account.deadManAtMs, available: true, reason: null },
       perp_check: { ok: true, at_ms: 0 },
       last_tick_ms: null,
       next_tick_ms: null,
@@ -554,6 +966,18 @@ export class TradingService {
     }
   }
 
+  /** State of a bot for the status list: the last tick's view, else what the registry alone can say. */
+  private botState(b: Bot): { state: BotState; reason: string | null } {
+    const v = this.last?.bots[b.id];
+    if (b.archived_at_ms !== null) return { state: "archived", reason: null };
+    // A halt that arrived after the last tick (kill, perp alarm) is visible at once.
+    const h = this.state.bots[b.id]?.halt ?? this.state.account.halt;
+    if (h != null && b.active_hash !== null) return { state: "halted", reason: h.reason };
+    if (v !== undefined) return { state: v.state, reason: v.reason };
+    if (b.active_hash === null) return { state: "draft", reason: null };
+    return { state: "blocked", reason: this.last?.pieces.state_reason ?? "NO_TICK_YET" };
+  }
+
   /** Full `TradingStatus` (public: everything in it is also visible on HL and NEAR). */
   status(): TradingStatus {
     const s = this.d.settings;
@@ -562,21 +986,21 @@ export class TradingService {
     let reason = pieces.state_reason;
     let detail = pieces.state_detail;
     // A kill (or a perp alarm) that arrived after the last tick is visible at once.
-    if (this.state.halt !== null && state !== "halted") {
+    if (this.state.account.halt !== null && state !== "halted") {
       state = "halted";
-      reason = this.state.halt.reason;
-      detail = this.state.halt.detail;
+      reason = this.state.account.halt.reason;
+      detail = this.state.account.halt.detail;
     }
     if (this.fatal !== null && this.last === null) {
       state = "error";
       reason = "STATE_CORRUPT";
       detail = this.fatal;
     }
-    const rules = this.last?.rules ?? null;
-    const refused = this.extraWarnings.get("rules");
-    if (state === "no_rules" && refused) {
+    const def = this.last?.rules.get(DEFAULT_BOT_ID) ?? null;
+    const refusedAny = [...(this.last?.refused ?? [])].length > 0;
+    if (state === "no_rules" && refusedAny) {
       reason = "RULES_REFUSED";
-      detail = refused;
+      detail = [...this.extraWarnings.entries()].find(([k]) => k.startsWith("rules:"))?.[1] ?? detail;
     }
     return {
       enabled: true,
@@ -589,10 +1013,148 @@ export class TradingService {
       vault: s.vault,
       agent_id: s.agentId,
       api_wallet: { ...pieces.api_wallet, address: this.safeAddress() || pieces.api_wallet.address },
-      dead_man: { ...pieces.dead_man, cancel_at_ms: this.state.deadManAtMs },
-      active_rules: rules ? { hash: rules.hash, name: rules.rules.name, confirmed_at_ms: rules.confirmed_at_ms, confirmed_by: rules.account_id } : null,
+      dead_man: { ...pieces.dead_man, cancel_at_ms: this.state.account.deadManAtMs },
+      active_rules: def ? { hash: def.hash, name: def.rules.name, confirmed_at_ms: def.confirmed_at_ms, confirmed_by: def.account_id } : null,
+      bots: this.registry.live().map((b) => ({ id: b.id, name: b.name, state: this.botState(b).state })),
+      max_bots: this.maxBots,
       warnings: [...pieces.warnings, ...this.extraWarnings.values()].map((w) => publicText(w) ?? ""),
     };
+  }
+
+  // -------------------------------------------------------------------------------------------------------------------
+  // Bots (read side, ADR-0006 section 8)
+  // -------------------------------------------------------------------------------------------------------------------
+
+  /** 24 hourly closes of the total P&L, oldest first (from the 15-minute tier), carrying the last value over empty hours. */
+  private spark(botId: string): string[] {
+    const pts = this.history.read(botId, "1d").points;
+    const now = this.now();
+    const hourEnd = Math.floor(now / HOUR_MS) * HOUR_MS + HOUR_MS;
+    const out: string[] = [];
+    let i = 0;
+    let lastVal: string | null = null;
+    const first = pts[0];
+    if (first === undefined) return out;
+    for (let h = SPARK_POINTS - 1; h >= 0; h--) {
+      const end = hourEnd - h * HOUR_MS;
+      while (i < pts.length && (pts[i] as HistoryPoint).t < end) lastVal = (pts[i++] as HistoryPoint).pnl;
+      if (lastVal !== null) out.push(lastVal);
+    }
+    return out;
+  }
+
+  /** Public view of a bot: id, name, state, pair. With `full` (owner session) also P&L, position and the sparkline. */
+  botSummary(b: Bot, full: boolean): BotSummary {
+    const st = this.botState(b);
+    const rules = this.last?.rules.get(b.id) ?? null;
+    const v = this.last?.bots[b.id];
+    const base: BotSummary = {
+      id: b.id,
+      name: b.name,
+      state: st.state,
+      state_reason: st.reason,
+      pairs: rules?.rules.pairs ?? [],
+      created_at_ms: b.created_at_ms,
+      archived_at_ms: b.archived_at_ms,
+    };
+    if (!full) return base;
+    return {
+      ...base,
+      pnl_today_usdc: v?.pnlToday ?? "0",
+      pnl_total_usdc: v?.pnlTotal ?? "0",
+      position_usdc: v?.positionUsdc ?? "0",
+      spark: this.spark(b.id),
+      last_fill_ms: this.journal.lastFillMs(b.id),
+    };
+  }
+
+  botsList(full: boolean): BotSummary[] {
+    return this.registry.list().map((b) => this.botSummary(b, full));
+  }
+
+  private botOrThrow(id: string): Bot {
+    const b = this.registry.get(id);
+    if (b === undefined) throw new ServiceError(404, "BOT_NOT_FOUND", "No such bot");
+    return b;
+  }
+
+  private async pairsMeta(): Promise<HlSpotPair[]> {
+    const t = this.now();
+    if (this.pairsCache !== null && t - this.pairsCache.at < PAIRS_CACHE_MS) return this.pairsCache.pairs;
+    try {
+      const pairs = await this.hl.getSpotPairs();
+      this.pairsCache = { at: t, pairs };
+      return pairs;
+    } catch {
+      return this.pairsCache?.pairs ?? [];
+    }
+  }
+
+  async botDetail(id: string): Promise<BotDetail> {
+    const b = this.botOrThrow(id);
+    const rules = this.last?.rules.get(id) ?? null;
+    const v = this.last?.bots[id];
+    const meta = await this.pairsMeta();
+    const pairNames = rules?.rules.pairs ?? [];
+    return {
+      bot: this.botSummary(b, true),
+      rules,
+      rules_history: this.rulesHistory(id),
+      limits: {
+        bot: rules?.rules.limits ?? null,
+        account: effectiveLimitsStatus(effectiveLimits(null, this.d.settings.hard), this.d.settings.hard.priceBandBps),
+      },
+      today: { orders: this.state.bots[id]?.ordersToday ?? 0, loss_usdc: v?.lossToday ?? "0" },
+      positions: (v?.positions ?? []).map((p) => ({ pair: p.pair, size: p.size, avg_cost: p.avgCost, mid: p.mid, value_usdc: p.value })),
+      pairs: pairNames.flatMap((name) => {
+        const m = meta.find((p) => p.name === name);
+        return m === undefined ? [] : [{ name, coin: m.assetId - 10_000 === 0 ? name : `@${m.assetId - 10_000}`, sz_decimals: m.szDecimals }];
+      }),
+      open_orders: v?.openOrders ?? [],
+      hl_network: this.d.settings.hlNetwork,
+    };
+  }
+
+  /** Fresh, fully verified active rule set of a bot (null = none or refused). */
+  async loadRules(id: string): Promise<ConfirmedRules | null> {
+    const b = this.registry.get(id);
+    if (b === undefined) return null;
+    const legacy = this.registry.legacyV1();
+    const r = await this.d.store.loadBot(b, this.d.confirmCtx, { legacyV1Hash: legacy?.bot_id === b.id ? legacy.hash : null });
+    return r.status === "ok" ? r.confirmed : null;
+  }
+
+  /** Stored rule sets of a bot, oldest first (informational). */
+  rulesHistory(id: string): ReturnType<RulesStore["history"]> {
+    const b = this.registry.get(id);
+    if (b === undefined) return [];
+    const mine = new Set(b.hashes.flatMap((h) => (h.hash === null ? [] : [h.hash])));
+    // Rule sets from before bots existed have no owner on record; they were the first bot's.
+    return this.d.store.history((hash) => mine.has(hash) || (id === DEFAULT_BOT_ID && this.registry.hashOwner(hash) === undefined));
+  }
+
+  botHistory(id: string, range: Range): { range: Range; bucket_ms: number; points: Omit<HistoryPoint, "pos" | "equity">[] } {
+    const b = this.botOrThrow(id);
+    const r = this.history.read(id, range, { createdAtMs: b.created_at_ms });
+    return {
+      range,
+      bucket_ms: r.bucket_ms,
+      points: r.points.map((p) => ({ t: p.t, pnl: p.pnl, lo: p.lo, hi: p.hi, today: p.today, val: p.val, px: p.px })),
+    };
+  }
+
+  botFills(id: string, q: { cursor?: string | null; limit?: number; fromMs?: number }): { fills: BotFill[]; next_cursor: string | null } {
+    this.botOrThrow(id);
+    return this.journal.page(id, q);
+  }
+
+  botMetrics(id: string, range: Range): BotMetrics {
+    const b = this.botOrThrow(id);
+    const now = this.now();
+    const win = RANGE_MS[range];
+    const fromMs = win !== null ? now - win : Math.max(0, b.created_at_ms);
+    const pts = this.history.read(id, range, { createdAtMs: b.created_at_ms }).points;
+    return computeMetrics({ range, nowMs: now, createdAtMs: b.created_at_ms, fills: this.journal.readAll(id), points: pts, orders: this.countOrders(id, fromMs) });
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -600,7 +1162,7 @@ export class TradingService {
   // -------------------------------------------------------------------------------------------------------------------
 
   isPerpHalted(): boolean {
-    return this.state.halt?.reason === "PERP_POSITION_DETECTED";
+    return this.state.account.halt?.reason === "PERP_POSITION_DETECTED";
   }
 
   /**
@@ -625,8 +1187,11 @@ export class TradingService {
     }
   }
 
-  /** A new rule set was confirmed and stored: lift the halt, start the baseline if needed, and run a tick so `state` is real. */
-  async activated(env: ConfirmedRules): Promise<TradingState> {
+  /**
+   * A rule set was confirmed for `botId` and stored: lift that bot's halt and the account halt (other bots stay halted until each
+   * is confirmed), start the baseline if needed, and run a tick so `state` is real.
+   */
+  async activated(env: ConfirmedRules, botId: string = env.bot_id ?? DEFAULT_BOT_ID): Promise<TradingState> {
     if (this.startMs === undefined) {
       this.startMs = env.confirmed_at_ms;
       try {
@@ -635,78 +1200,204 @@ export class TradingService {
         /* non-fatal */
       }
     }
-    const had = this.state.halt !== null;
-    this.mutate(clearHalt);
-    this.appendLog([{ at_ms: this.now(), kind: "state", detail: `rules ${env.hash.slice(0, 16)} confirmed by ${env.account_id}${had ? "; halt cleared" : ""}` }]);
+    const had = this.state.account.halt !== null || this.state.bots[botId]?.halt != null;
+    this.mutate((st) => clearHalt(st, botId));
+    this.appendLog([{ at_ms: this.now(), kind: "state", bot_id: botId, detail: `rules ${env.hash.slice(0, 16)} confirmed by ${env.account_id}${had ? "; halt cleared" : ""}` }]);
     await this.tickFresh();
     return this.status().state;
   }
 
-  /**
-   * Kill switch. Halts for good (until a new signed rule set), cancels every spot order and sets the dead-man switch to
-   * fire within seconds. Both HL steps are attempted whatever the other one does.
-   */
-  async kill(reason?: string): Promise<KillResult> {
-    const s = this.d.settings;
-    const at = this.now();
-    const why = reason ? reason.replace(/\p{Cc}/gu, " ").slice(0, MAX_REASON_CHARS) : "";
-    // Synchronous, before the first await: from here on a running tick cannot place an order or move the dead-man switch.
-    this.killEpoch += 1;
-    this.mutate((st) => haltState(st, at, "KILLED", why ? `kill switch: ${why}` : "kill switch"));
-    this.appendLog([{ at_ms: at, kind: "state", detail: `KILL SWITCH${why ? `: ${why}` : ""}` }]);
-
-    // Wait (bounded) for the tick that is running: after it ends nothing else can create an order, so the cancel below
-    // sees every order and our scheduleCancel is the last one.
-    let tickWait: "ok" | "timeout" = "ok";
+  /** Waits (bounded) for the tick in flight; after it ends nothing else can create an order. */
+  private async waitTick(): Promise<"ok" | "timeout"> {
     const running = this.inflight;
-    if (running) {
-      let timer: NodeJS.Timeout | undefined;
-      const timeout = new Promise<"timeout">((resolve) => {
-        timer = setTimeout(() => {
-          resolve("timeout");
-        }, KILL_WAIT_TICK_MS);
-      });
-      const r = await Promise.race([running.then(() => "ok" as const, () => "ok" as const), timeout]);
-      if (timer) clearTimeout(timer);
-      tickWait = r;
-    }
+    if (!running) return "ok";
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => {
+        resolve("timeout");
+      }, KILL_WAIT_TICK_MS);
+    });
+    const r = await Promise.race([running.then(() => "ok" as const, () => "ok" as const), timeout]);
+    if (timer) clearTimeout(timer);
+    return r;
+  }
 
-    let cancelled = 0;
-    let cancelAll: "ok" | "failed" = "ok";
+  /** Cancels the open spot orders that `pick` selects. `failed` also covers orders whose pair cannot be resolved. */
+  private async cancelWhere(pick: (cloid: string | null) => boolean): Promise<{ cancelled: number; ok: boolean }> {
     try {
-      const [orders, pairs] = await Promise.all([this.hl.getOpenOrders(s.account), this.hl.getSpotPairs()]);
+      const [orders, pairs] = await Promise.all([this.hl.getOpenOrders(this.d.settings.account), this.hl.getSpotPairs()]);
       const byName = new Map(pairs.map((p) => [p.name, p.assetId]));
-      const spot = orders.filter((o) => o.market === "spot");
       const targets: { assetId: number; oid: number }[] = [];
       let unresolved = 0;
-      for (const o of spot) {
+      for (const o of orders.filter((x) => x.market === "spot" && pick(x.cloid))) {
         const id = byName.get(o.pair);
         if (id === undefined || id < 10_000) unresolved += 1;
         else targets.push({ assetId: id, oid: o.oid });
       }
       if (targets.length > 0) await this.hl.cancelOrders(targets);
-      cancelled = targets.length;
-      if (unresolved > 0) cancelAll = "failed";
+      return { cancelled: targets.length, ok: unresolved === 0 };
     } catch {
-      cancelAll = "failed";
+      return { cancelled: 0, ok: false };
     }
+  }
+
+  /** True for a cloid that carries one of the bot's prefixes. */
+  private ownsCloid(botId: string): (cloid: string | null) => boolean {
+    return (cloid) => {
+      const b = this.registry.get(botId);
+      if (b === undefined || cloid === null || cloid.length < 18) return false;
+      const p = cloid.slice(0, 18).toLowerCase();
+      return b.hashes.some((h) => h.prefix === p);
+    };
+  }
+
+  /**
+   * Kill switch (kill all). Halts the account and every bot for good (until a new signed rule set for each bot), cancels every
+   * spot order and sets the dead-man switch to fire within seconds. Both HL steps are attempted whatever the other one does.
+   */
+  async kill(reason?: string): Promise<KillResult> {
+    const at = this.now();
+    const why = reason ? reason.replace(/\p{Cc}/gu, " ").slice(0, MAX_REASON_CHARS) : "";
+    // Synchronous, before the first await: from here on a running tick cannot place an order or move the dead-man switch.
+    this.killEpoch += 1;
+    const killDetail = why ? `kill switch: ${why}` : "kill switch";
+    this.mutate((st) => haltAll(st, at, "KILLED", killDetail, this.registry.live().map((b) => b.id)));
+    // State file unusable: it is not touched; the halt goes to the marker file and is applied by the next start that can read it.
+    const markerOk = this.fatal !== null ? this.writeHaltMarker(null, at, "KILLED", killDetail) : true;
+    this.appendLog([{ at_ms: at, kind: "state", detail: `KILL SWITCH${why ? `: ${why}` : ""}` }]);
+
+    // Wait (bounded) for the tick that is running: after it ends nothing else can create an order, so the cancel below
+    // sees every order and our scheduleCancel is the last one.
+    const tickWait = await this.waitTick();
+
+    const c = await this.cancelWhere(() => true);
+    const cancelAll: "ok" | "failed" = c.ok ? "ok" : "failed";
     let sched: "ok" | "failed" = "ok";
     const fireAt = this.now() + KILL_SCHEDULE_CANCEL_MS;
     try {
       await this.hl.scheduleCancel(fireAt);
-      this.mutate((st) => ({ ...st, deadManAtMs: fireAt }));
+      this.mutate((st) => ({ ...st, account: { ...st.account, deadManAtMs: fireAt } }));
     } catch {
       sched = "failed";
     }
-    const saved = this.persistState(); // final write: also retries a halt that could not be saved at the start
+    const saved = this.fatal !== null ? markerOk : this.persistState(); // final write: also retries a halt that could not be saved at the start
     this.appendLog([
-      { at_ms: this.now(), kind: "cancel", detail: `kill: cancel_all ${cancelAll} (${cancelled} order(s)), schedule_cancel ${sched}, state_saved ${saved ? "ok" : "failed"}, tick_wait ${tickWait}` },
+      { at_ms: this.now(), kind: "cancel", detail: `kill: cancel_all ${cancelAll} (${c.cancelled} order(s)), schedule_cancel ${sched}, state_saved ${saved ? "ok" : "failed"}, tick_wait ${tickWait}` },
     ]);
     return {
       state: "halted",
-      cancelled_orders: cancelled,
+      cancelled_orders: c.cancelled,
       steps: { cancel_all: cancelAll, schedule_cancel: sched, state_saved: saved ? "ok" : "failed", tick_wait: tickWait },
     };
+  }
+
+  /**
+   * Kills ONE bot (ADR-0006): it halts for good (until a new signed rule set for it), its resting orders are cancelled (only
+   * orders with its cloid prefixes), the other bots and the dead-man switch are untouched.
+   */
+  async killBot(id: string, reason?: string): Promise<BotKillResult> {
+    const b = this.botOrThrow(id);
+    const at = this.now();
+    const why = reason ? reason.replace(/\p{Cc}/gu, " ").slice(0, MAX_REASON_CHARS) : "";
+    this.botEpoch.set(id, (this.botEpoch.get(id) ?? 0) + 1);
+    const killDetail = why ? `kill switch: ${why}` : "kill switch";
+    this.mutate((st) => haltBot(st, id, at, "KILLED", killDetail));
+    const markerOk = this.fatal !== null ? this.writeHaltMarker(id, at, "KILLED", killDetail) : true;
+    this.appendLog([{ at_ms: at, kind: "state", bot_id: id, detail: `KILL SWITCH (bot ${id})${why ? `: ${why}` : ""}` }]);
+    await this.waitTick();
+    const c = await this.cancelWhere(this.ownsCloid(b.id));
+    const saved = this.fatal !== null ? markerOk : this.persistState();
+    this.appendLog([{ at_ms: this.now(), kind: "cancel", bot_id: id, detail: `kill bot ${id}: cancel ${c.ok ? "ok" : "failed"} (${c.cancelled} order(s)), state_saved ${saved ? "ok" : "failed"}` }]);
+    return { bot_id: id, state: "halted", cancelled_orders: c.cancelled, steps: { cancel: c.ok ? "ok" : "failed", state_saved: saved ? "ok" : "failed" } };
+  }
+
+  rename(id: string, name: string): BotSummary {
+    this.assertWritable();
+    this.botOrThrow(id);
+    try {
+      return this.botSummary(this.registry.rename(id, name), true);
+    } catch (e) {
+      if (e instanceof RegistryError) throw new ServiceError(e.status === 404 ? 404 : 400, e.code, e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * Position guard of `archive`: refuses (409) while the bot holds at least 10 USDC of coins (the HL minimum order). It needs
+   * evidence: a priced view and a mid for every pair with a positive size, otherwise the position is UNKNOWN and the archive is
+   * refused (a bot cannot slip through just because prices were missing). A bot whose fill history is incomplete cannot derive
+   * its position at all; that case is archivable but reported in `warning`.
+   */
+  private assertArchivable(id: string): void {
+    const sb = this.state.bots[id];
+    if (sb === undefined || !sb.agg.totalComplete) return;
+    const held = Object.entries(positionOf(sb.agg.total)).filter(([, q]) => q > 0n);
+    if (held.length === 0) return;
+    const v = this.last?.bots[id];
+    const unknown = (): ServiceError => new ServiceError(409, "POSITION_UNKNOWN", "The bot's position value is not known (no priced tick yet, or a coin it holds has no current price); try again after the next tick");
+    if (v === undefined || !v.priced) throw unknown();
+    for (const [pair] of held) {
+      const p = v.positions.find((x) => x.pair === pair);
+      if (p === undefined || fx(p.mid) <= 0n) throw unknown();
+    }
+    if (fx(v.positionUsdc) >= ARCHIVE_MAX_POSITION)
+      throw new ServiceError(409, "BOT_HOLDS_POSITION", `This bot still holds about ${v.positionUsdc} USDC of coins. Sell its position first (at least ${fxStr(ARCHIVE_MAX_POSITION)} USDC is needed to archive).`);
+  }
+
+  /**
+   * Archives a bot: cancels its orders and drops its rule set. Order of events (no window in which the bot can trade):
+   *  1. position guard on what is known now (refusal changes nothing);
+   *  2. the bot is HALTED (persisted) and its epoch bumped, so neither the running tick nor any later one can place an order;
+   *  3. wait for the running tick, cancel the bot's orders, run one fresh tick (fills of cancelled/partly filled orders are
+   *     folded in) and check the position AGAIN on that fresh view;
+   *  4. only then the registry marks it archived. Any refusal in 3-4 restores the bot's previous halt state.
+   */
+  async archive(id: string): Promise<ArchiveResult> {
+    this.assertWritable();
+    const b = this.botOrThrow(id);
+    if (b.archived_at_ms !== null) return { bot: this.botSummary(b, true), cancelled_orders: 0 };
+    this.assertArchivable(id);
+
+    const at = this.now();
+    const prevHalt = this.state.bots[id]?.halt ?? null;
+    this.botEpoch.set(id, (this.botEpoch.get(id) ?? 0) + 1);
+    const restore = (): void => {
+      this.mutate((st) => {
+        const cur = st.bots[id];
+        return cur?.halt?.reason === "KILLED" && cur.halt.atMs === at ? { ...st, bots: { ...st.bots, [id]: { ...cur, halt: prevHalt } } } : st;
+      });
+    };
+    if (!this.mutate((st) => haltBot(st, id, at, "KILLED", "archiving"))) {
+      restore();
+      throw new ServiceError(409, "STATE_WRITE_FAILED", "The engine state cannot be written, so the bot cannot be stopped safely; nothing was changed");
+    }
+    try {
+      if ((await this.waitTick()) === "timeout") throw new ServiceError(409, "TICK_BUSY", "A trading tick is still running; try again in a minute (the bot was not archived)");
+      const c = await this.cancelWhere(this.ownsCloid(id));
+      // Any bot that ever had a rule set may have a fill the engine has not folded in yet (an order placed by the tick we just
+      // waited for, or a partial fill of a cancelled one): one fresh tick, and the position is checked on ITS view.
+      if (b.hashes.length > 0) {
+        const seq = this.viewSeq;
+        await this.tickFresh();
+        if (this.viewSeq === seq) throw new ServiceError(409, "POSITION_UNKNOWN", "The bot's fills could not be refreshed (the tick failed); try again after the next tick");
+      }
+      this.assertArchivable(id);
+      let bot: Bot;
+      try {
+        bot = this.registry.archive(id, this.now());
+      } catch (e) {
+        if (e instanceof RegistryError) throw new ServiceError(e.status === 404 ? 404 : 400, e.code, e.message);
+        throw e;
+      }
+      this.appendLog([{ at_ms: this.now(), kind: "state", bot_id: id, detail: `bot ${id} archived (${c.cancelled} order(s) cancelled${c.ok ? "" : ", cancel incomplete"})` }]);
+      const warnings: string[] = [];
+      if (this.state.bots[id]?.agg.totalComplete === false) warnings.push("the bot's fill history is incomplete, so its position could not be verified; check Hyperliquid for coins it may still hold");
+      if (!c.ok) warnings.push("some of its orders could not be cancelled; check open orders on Hyperliquid");
+      return { bot: this.botSummary(bot, true), cancelled_orders: c.cancelled, ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}) };
+    } catch (e) {
+      restore();
+      throw e;
+    }
   }
 
   /** New API wallet (the old key is deleted). Orders of the old key are cancelled first, best effort. */
@@ -748,7 +1439,7 @@ export class TradingService {
       throw new ServiceError(400, "ROTATE_REFUSED", errMsg(e));
     }
     if (this.d.createHl) this.hl = this.d.createHl(this.d.wallet.load());
-    this.mutate((st) => ({ ...st, deadManAtMs: null }));
+    this.mutate((st) => ({ ...st, account: { ...st.account, deadManAtMs: null } }));
     this.appendLog([{ at_ms: this.now(), kind: "state", detail: `API wallet rotated; new address ${address}` }]);
     return address;
   }

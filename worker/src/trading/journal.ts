@@ -242,6 +242,11 @@ export class FillsJournal {
     return this.load(botId).fills.filter((f) => f.time_ms >= fromMs && f.time_ms <= toMs);
   }
 
+  /** True when a fill with this identity is already in the journal (the service skips it instead of applying it twice). */
+  has(botId: string, f: Pick<JournalFill, "tid" | "oid" | "time_ms" | "side" | "px" | "sz">): boolean {
+    return this.load(botId).keys.has(journalKey(f));
+  }
+
   lastFillMs(botId: string): number | null {
     const all = this.load(botId).fills;
     const last = all[all.length - 1];

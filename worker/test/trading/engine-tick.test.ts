@@ -2,18 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DAY_MS } from "../../src/trading/engine/pnl.js";
 import { cloidPrefix } from "../../src/trading/engine/risk.js";
 import { FillsTruncatedError } from "../../src/trading/hl/pagination.js";
-import {
-  type ActiveRules,
-  type EngineState,
-  MAX_RECENT,
-  type TickConfig,
-  type TickResult,
-  type VaultView,
-  clearHalt,
-  haltState,
-  initialEngineState,
-  runTick,
-} from "../../src/trading/engine/tick.js";
+import { type ActiveRules, MAX_RECENT, type TickConfig, type VaultView } from "../../src/trading/engine/tick.js";
+import { type EngineState, type TickResult, clearHalt, haltState, initialEngineState, runTick } from "./legacy.js";
 import type {
   HardLimits,
   HlApprovedAgent,
@@ -521,10 +511,20 @@ describe("risk rejections (reject, never resize)", () => {
     const sell = buyRule("exit", { action: { side: "sell", size: { position_pct: "100" }, order: { type: "ioc" } } });
     const r = await tick(T0, active([sell]));
     expect(hl.placed).toHaveLength(0);
-    expect(r.entries.find((e) => e.kind === "skip")?.detail).toContain("SIZE_ZERO");
+    // A bot sells only what its own fills bought (ADR-0006): none here, so the order is refused before it is sized.
+    expect(r.entries.find((e) => e.kind === "skip")?.detail).toContain("INSUFFICIENT_BOT_BASE");
   });
-  it("sell 100% of the free base: price at the lower band edge, size rounded down", async () => {
+  it("coins held by hand are never sold by a bot", async () => {
     hl.balances = [{ coin: "USDC", total: "10", hold: "0" }, { coin: "HYPE", total: "0.499", hold: "0" }];
+    const sell = buyRule("exit", { action: { side: "sell", size: { position_pct: "100" }, order: { type: "ioc" } } });
+    const r = await tick(T0, active([sell]));
+    expect(hl.placed).toHaveLength(0);
+    expect(r.entries.find((e) => e.kind === "skip")?.detail).toContain("INSUFFICIENT_BOT_BASE");
+  });
+  it("sell 100% of the bot's own base: price at the lower band edge, size rounded down", async () => {
+    hl.balances = [{ coin: "USDC", total: "10", hold: "0" }, { coin: "HYPE", total: "0.499", hold: "0" }];
+    // The bot bought these coins itself (a fill with its cloid prefix, before the first tick's day snapshot).
+    hl.fills = [{ oid: 70, tid: 70, cloid: `${cloidPrefix(HASH)}0000000000000001`, pair: "HYPE/USDC", side: "buy", price: "40", size: "0.499", feeUsdc: "0", timeMs: T0 - 1000 }];
     const sell = buyRule("exit", { action: { side: "sell", size: { position_pct: "100" }, order: { type: "ioc" } } });
     await tick(T0, active([sell]));
     expect(hl.placed[0]).toMatchObject({ isBuy: false, size: "0.49", price: "39.6", tif: "Ioc" });
@@ -788,7 +788,7 @@ describe("loss stop and day rollover", () => {
     r = await tick(T0 + 20 * 60_000, rs(), r.state);
     expect(r.tradingState).toBe("running");
     expect(r.status.limits.today.loss_usdc).toBe("0");
-    expect(r.status.warnings.some((w) => w.includes("2 spot fill(s) since start are not from the bot"))).toBe(true);
+    expect(r.status.warnings.some((w) => w.includes("2 spot fill(s) since start are not from any bot"))).toBe(true);
   });
 
   it("T10: a wash trade with a foreign cloid that loses value is caught by the equity backstop (EQUITY_DROP)", async () => {
@@ -1037,14 +1037,6 @@ describe("fills window, unpriced coins and attribution (review 2026-11-03)", () 
     expect(r.state.botPrefixes).toEqual(expect.arrayContaining([cloidPrefix(oldHash), third, cloidPrefix(HASH)]));
   });
 
-  it("warns when more than 64 prefixes were remembered and the oldest were dropped", async () => {
-    const many = Array.from({ length: 64 }, (_, i) => "0x" + i.toString(16).padStart(16, "0"));
-    const r = await tick(T0, quiet(), { ...initialEngineState(), botPrefixes: many });
-    expect(r.state.botPrefixes).toHaveLength(64);
-    expect(r.state.prefixesDropped).toBe(1);
-    expect(r.status.warnings.some((w) => w.includes("old rule-set prefix"))).toBe(true);
-  });
-
   it("the state log repeats its entry on a new UTC day and /status exposes the repeat count", async () => {
     hl.perp = { positions: [], openPerpOrders: 0, accountValueUsdc: "0" };
     hl.agents = []; // awaiting_api_wallet
@@ -1237,8 +1229,12 @@ describe("re-review fixes 2026-11-03 (loss stop only errs toward stopping)", () 
       const hash2 = "cd".repeat(32);
       const later: ActiveRules = { ...active([tp()], {}, hash2), confirmedAtMs: T0 + 30_000 };
       hl.fills = [botFill(T0 + 40_000, { price: "30", size: "0.5", cloid: `${cloidPrefix(hash2)}0000000000000001`, oid: 2 })];
-      await tick(T0 + 120_000, later, r.state);
-      expect(hl.placed).toHaveLength(1);
+      const r2 = await tick(T0 + 120_000, later, r.state);
+      // The cost basis is complete again (no COST_BASIS_PARTIAL), but the bot's POSITION is still unknown after a gap
+      // (ADR-0006 section 3): it sells nothing until the strategy is re-created.
+      expect(r2.entries.some((e) => e.kind === "skip" && e.detail.startsWith("COST_BASIS_PARTIAL"))).toBe(false);
+      expect(r2.entries.some((e) => e.kind === "skip" && e.detail.startsWith("BOT_POSITION_UNKNOWN"))).toBe(true);
+      expect(hl.placed).toHaveLength(0);
     });
     it("the fallback itself still fails closed when even today's window is truncated", async () => {
       let r = await tick(T0, quiet());

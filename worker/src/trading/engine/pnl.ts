@@ -61,7 +61,7 @@
  * appears as `untrackedDelta`.
  */
 import type { Dec, HlFill, HlLedgerEntry, HlSpotBalance } from "../types.js";
-import { type AggMap, type PairAggFx, aggFx, isBotFill } from "./fills.js";
+import { type AggMap, type PairAggFx, aggFx } from "./fills.js";
 import { type Fx, SCALE, fx, fxMax, fxMin, fxMul, fxStr } from "./risk.js";
 
 export const DAY_MS = 86_400_000;
@@ -187,11 +187,6 @@ export function rollDay(
   return { day, rolled: true };
 }
 
-/** Fills placed by the bot: cloid prefix of a rule set it activated, or an oid it placed. */
-export function botFills(fills: readonly HlFill[], prefixes: readonly string[], oids: ReadonlySet<number> = new Set()): HlFill[] {
-  return fills.filter((f) => isBotFill(f, prefixes, oids));
-}
-
 export interface TradingPnl {
   /** cash + mark-to-market - fees with a pair that has no mid valued at 0 (the figure the stop uses). Positive = profit. */
   pnl: Fx;
@@ -313,6 +308,39 @@ export interface PnlSummary {
   unpriced: string[];
 }
 
+/** One bot's inputs: its own aggregated fills and the position it held at the day snapshot (ADR-0006 section 3). */
+export interface BotPnlInput {
+  todayAgg: AggMap;
+  totalAgg: AggMap;
+  /** The bot's OWN start-of-day holdings (not the account's): the stop marks only what the bot itself holds. */
+  startPositions: Readonly<Record<string, { size: Dec; mid: Dec }>>;
+}
+
+export interface BotPnl {
+  /** Display valuation, positive = profit. */
+  today: Fx;
+  total: Fx;
+  /** -(stop valuation of today's P&L). Positive = loss. */
+  lossToday: Fx;
+  fees: Fx;
+  unpriced: string[];
+}
+
+export interface PnlMultiInput {
+  day: DaySnapshot;
+  /** All-coin equity, display only (untrackedDelta). */
+  equityNow: Fx;
+  /** `backstopEquity` now; defaults to `equityNow` (tests). */
+  equityBackstopNow?: Fx;
+  /** Size of every coin held now by pair (balances); caps a bot's start holding in the stop. Absent = no cap. */
+  held?: Readonly<Record<string, Fx>>;
+  ledger: readonly HlLedgerEntry[];
+  fundedSinceMs: number;
+  bots: Readonly<Record<string, BotPnlInput>>;
+  mids: Readonly<Record<string, Dec | undefined>>;
+  topups?: readonly VaultTopup[];
+}
+
 export interface PnlInput {
   day: DaySnapshot;
   /** All-coin equity, display only (untrackedDelta). */
@@ -353,9 +381,24 @@ export function equityDrop(day: DaySnapshot, equityNow: Fx, ledger: readonly HlL
   return fx(day.startBackstop ?? day.startEquity) + inflow - outflow - equityNow - allowance;
 }
 
-export function pnlSummary(i: PnlInput): PnlSummary {
-  const today = tradingPnl(aggFx(i.todayAgg), i.day.startPositions ?? {}, i.mids, i.held);
-  const total = tradingPnl(aggFx(i.totalAgg), {}, i.mids);
+/** Account P&L and flows for any number of bots. `today`/`total` are sums of the bots' display values, `lossToday` the signed sum of their stop values. */
+export function pnlSummaryMulti(i: PnlMultiInput): PnlSummary & { bots: Record<string, BotPnl> } {
+  const bots: Record<string, BotPnl> = {};
+  let today = 0n;
+  let total = 0n;
+  let loss = 0n;
+  let fees = 0n;
+  const unpriced = new Set<string>();
+  for (const [id, b] of Object.entries(i.bots)) {
+    const t = tradingPnl(aggFx(b.todayAgg), b.startPositions, i.mids, i.held);
+    const a = tradingPnl(aggFx(b.totalAgg), {}, i.mids);
+    bots[id] = { today: t.pnlDisplay, total: a.pnlDisplay, lossToday: -t.pnl, fees: a.fees, unpriced: [...new Set([...t.unpriced, ...a.unpriced])] };
+    today += t.pnlDisplay;
+    total += a.pnlDisplay;
+    loss += -t.pnl;
+    fees += a.fees;
+    for (const u of bots[id].unpriced) unpriced.add(u);
+  }
   const inWindow = i.ledger.filter((e) => e.timeMs >= i.fundedSinceMs);
   const netFunded = netFlow(inWindow, () => true);
   const inflow = netFlow(inWindow, () => true, false);
@@ -363,20 +406,37 @@ export function pnlSummary(i: PnlInput): PnlSummary {
   const fundedByVault = matchVaultInflows(inWindow, i.topups ?? []);
   const outflowToday = netFlow(inWindow, (t) => t >= i.day.snapshotAtMs, true) - netFlow(inWindow, (t) => t >= i.day.snapshotAtMs, false);
   return {
-    today: today.pnlDisplay,
-    total: total.pnlDisplay,
+    today,
+    total,
     netFunded,
     dayStartEquity: fx(i.day.startEquity),
-    lossToday: -today.pnl,
+    lossToday: loss,
     equityDrop: equityDrop(i.day, i.equityBackstopNow ?? i.equityNow, i.ledger, i.fundedSinceMs),
     fundedByVault,
     externalInflow: inflow - fundedByVault,
     externalOutflow,
     outflowToday: -outflowToday,
-    fees: total.fees,
-    untrackedDelta: i.equityNow - netFunded - total.pnlDisplay,
-    unpriced: [...new Set([...today.unpriced, ...total.unpriced])],
+    fees,
+    untrackedDelta: i.equityNow - netFunded - total,
+    unpriced: [...unpriced],
+    bots,
   };
+}
+
+/** Single-bot form (the account's start holdings are the bot's): kept for the pure P&L tests and one-bot callers. */
+export function pnlSummary(i: PnlInput): PnlSummary {
+  const full = pnlSummaryMulti({
+    day: i.day,
+    equityNow: i.equityNow,
+    ...(i.equityBackstopNow !== undefined ? { equityBackstopNow: i.equityBackstopNow } : {}),
+    ...(i.held !== undefined ? { held: i.held } : {}),
+    ledger: i.ledger,
+    fundedSinceMs: i.fundedSinceMs,
+    bots: { _: { todayAgg: i.todayAgg, totalAgg: i.totalAgg, startPositions: i.day.startPositions ?? {} } },
+    mids: i.mids,
+    ...(i.topups !== undefined ? { topups: i.topups } : {}),
+  });
+  return full;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

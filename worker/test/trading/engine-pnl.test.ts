@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DAY_MS, backstopEquity, botFills, computeEquity, matchVaultInflows, netFlow, pnlSummary, rollDay, tradingPnl, utcDayIndex } from "../../src/trading/engine/pnl.js";
-import { aggFromFills, aggFx, applyFills, emptyTracker } from "../../src/trading/engine/fills.js";
+import { DAY_MS, backstopEquity, computeEquity, matchVaultInflows, netFlow, pnlSummary, rollDay, tradingPnl, utcDayIndex } from "../../src/trading/engine/pnl.js";
+import { aggFromFills, aggFx, applyFills, emptyBotAgg, emptyCursor, resolveBot } from "../../src/trading/engine/fills.js";
 import { ACTIVATION_FEE_USDC, equityDrop } from "../../src/trading/engine/pnl.js";
 import { fx, fxStr } from "../../src/trading/engine/risk.js";
 import type { HlFill, HlLedgerEntry } from "../../src/trading/types.js";
@@ -69,10 +69,11 @@ describe("netFlow", () => {
   });
 });
 
-describe("botFills", () => {
+describe("resolveBot", () => {
   it("keeps only fills whose cloid carries a bot prefix", () => {
     const f = [fill(1, "buy", "40", "1"), fill(2, "buy", "40", "1", "0", null), fill(3, "buy", "40", "1", "0", "0x" + "11".repeat(16))];
-    expect(botFills(f, [PRE])).toHaveLength(1);
+    const map = new Map([[PRE, "a"]]);
+    expect(f.filter((x) => resolveBot(x, map, {}) !== null)).toHaveLength(1);
   });
 });
 
@@ -125,7 +126,9 @@ describe("pnlSummary: accounting 2026-11-03", () => {
   const funded = DAY0 - 1000;
   /** Windows as the engine builds them: tracker.total since funding, tracker.today since the snapshot. */
   const win = (fills: HlFill[]) => {
-    const t = applyFills(emptyTracker(funded, day.snapshotAtMs, true), fills, { prefixes: [PRE], oids: new Set(), fundedSinceMs: funded });
+    const map = new Map([[PRE, "a"]]);
+    const r = applyFills(emptyCursor(funded, day.snapshotAtMs, true), { a: emptyBotAgg() }, fills, { fundedSinceMs: funded, resolve: (f) => resolveBot(f, map, {}) });
+    const t = r.aggs["a"] ?? emptyBotAgg();
     return { todayAgg: t.today, totalAgg: t.total };
   };
   const base = { day, fundedSinceMs: funded, mids: MIDS, ...win([]) };

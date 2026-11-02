@@ -231,6 +231,10 @@ export const RISK_CODES = [
   "POSITION_CAP",
   "INSUFFICIENT_USDC",
   "INSUFFICIENT_BASE",
+  "INSUFFICIENT_BOT_BASE",
+  "BOT_POSITION_UNKNOWN",
+  "ACCOUNT_POSITION_CAP",
+  "ACCOUNT_MAX_ORDERS_PER_DAY",
   "BAD_ORDER",
   "LIMIT_NEEDS_DEADMAN",
 ] as const;
@@ -268,6 +272,25 @@ export interface RiskContext {
   openBuyValue: Fx;
   lastFiredAtMs: number | undefined;
   cooldownMs: number | undefined;
+  /**
+   * Multi-bot (ADR-0006). `limits`, `ordersToday`, `positionValue` and `openBuyValue` above are then the BOT's own; this block is
+   * the account side, checked after the bot's. Absent = single-bot callers (the account is the bot).
+   */
+  account?: {
+    maxPosition: Fx;
+    maxOrdersPerDay: number;
+    /** Order attempts today of all bots, including earlier ones in this tick. */
+    ordersToday: number;
+    /** Held base of all allowed pairs valued at mid (bots and by hand). */
+    positionValue: Fx;
+    /** Sum of price*size of ALL open buy orders of the account. */
+    openBuyValue: Fx;
+  };
+  /**
+   * What a SELL may still take from THIS bot in this pair: its own position (fills, net of base-token fees) minus its open sells.
+   * `null` = unknown (history incomplete): every sell is refused. Absent = no per-bot cap (single-bot callers).
+   */
+  botBase?: Fx | null;
 }
 
 export type RiskResult = { ok: true; notional: Fx } | { ok: false; code: RiskCode; reason: string };
@@ -303,15 +326,27 @@ export function checkOrder(o: OrderCandidate, c: RiskContext): RiskResult {
   if (notional > c.limits.maxOrder) return no("MAX_ORDER", `notional ${fxStr(notional)} USDC is above max order ${fxStr(c.limits.maxOrder)}`);
   if (c.ordersToday >= c.limits.maxOrdersPerDay)
     return no("MAX_ORDERS_PER_DAY", `${c.ordersToday} orders already attempted today (limit ${c.limits.maxOrdersPerDay})`);
+  const acc = c.account;
+  if (acc !== undefined && acc.ordersToday >= acc.maxOrdersPerDay)
+    return no("ACCOUNT_MAX_ORDERS_PER_DAY", `${acc.ordersToday} orders already attempted today by all bots (account limit ${acc.maxOrdersPerDay})`);
 
   if (o.side === "buy") {
     // Position cap counts what is held at mid PLUS every open buy order, so resting orders cannot stack past it.
     const after = c.positionValue + c.openBuyValue + notional;
     if (after > c.limits.maxPosition)
       return no("POSITION_CAP", `position ${fxStr(c.positionValue)} + open buys ${fxStr(c.openBuyValue)} + order ${fxStr(notional)} exceeds max position ${fxStr(c.limits.maxPosition)}`);
+    if (acc !== undefined) {
+      // Account cap: everything the account holds (all bots and coins held by hand) plus every open buy, whoever placed it.
+      const accAfter = acc.positionValue + acc.openBuyValue + notional;
+      if (accAfter > acc.maxPosition)
+        return no("ACCOUNT_POSITION_CAP", `account position ${fxStr(acc.positionValue)} + open buys ${fxStr(acc.openBuyValue)} + order ${fxStr(notional)} exceeds the account cap ${fxStr(acc.maxPosition)}`);
+    }
     if (notional > c.freeUsdc) return no("INSUFFICIENT_USDC", `needs ${fxStr(notional)} USDC, free ${fxStr(c.freeUsdc)}`);
-  } else if (o.size > c.freeBase) {
-    return no("INSUFFICIENT_BASE", `needs ${fxStr(o.size, 8)} base, free ${fxStr(c.freeBase, 8)}`);
+  } else {
+    if (c.botBase === null) return no("BOT_POSITION_UNKNOWN", "this bot's position cannot be derived from its fills (history before today is incomplete), so it sells nothing");
+    if (o.size > c.freeBase) return no("INSUFFICIENT_BASE", `needs ${fxStr(o.size, 8)} base, free ${fxStr(c.freeBase, 8)}`);
+    if (c.botBase !== undefined && o.size > c.botBase)
+      return no("INSUFFICIENT_BOT_BASE", `needs ${fxStr(o.size, 8)} base, this bot owns ${fxStr(c.botBase, 8)} (minus its open sells); it never sells another bot's or the owner's coins`);
   }
   return { ok: true, notional };
 }

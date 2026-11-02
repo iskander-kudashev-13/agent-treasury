@@ -85,6 +85,8 @@ const baseEnvShape = z.object({
     TRADING_HARD_MAX_ORDER_USDC: decString("20"),
     TRADING_HARD_DAILY_LOSS_USDC: decString("10"),
     TRADING_HARD_MAX_ORDERS_PER_DAY: z.coerce.number().int().min(1).max(50).default(20),
+    /** Bots that are not archived (docs/adr/0006); the TRADING_HARD_* caps stay account totals whatever this is. */
+    TRADING_MAX_BOTS: z.coerce.number().int().min(1).max(5).default(3),
     TRADING_PRICE_BAND_BPS: z.coerce.number().int().min(10).max(200).default(100),
     TRADING_DEADMAN_SEC: z.coerce.number().int().min(45).max(3600).default(180),
     TRADING_TOPUP_ENABLED: boolFlag(true),

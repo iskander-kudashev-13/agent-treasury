@@ -110,6 +110,69 @@ export const TRADING_STATES = [
 ] as const;
 export type TradingState = (typeof TRADING_STATES)[number];
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Bots (ADR-0006)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Bot id: lower-case, unique, never reused (also not after archive). The migrated first bot is `default`. */
+export const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,15}$/;
+export const DEFAULT_BOT_ID = "default";
+export const MAX_BOTS_HARD = 5;
+export const MAX_RULE_SETS_PER_BOT = 64;
+export const BOT_NAME_MAX = 60;
+
+export interface BotHashEntry {
+  /** `0x` + 16 hex: the cloid prefix. Permanent: fills carrying it belong to this bot for ever. */
+  prefix: string;
+  /** Rule-set hash; null only for a prefix recovered from a pre-multi-bot engine state. */
+  hash: string | null;
+  activated_at_ms: number;
+}
+
+export interface Bot {
+  id: string;
+  /** 1..60 chars, display only, owner can rename (not signed). */
+  name: string;
+  created_at_ms: number;
+  archived_at_ms: number | null;
+  /** Confirmed rule set in force; null = draft or archived. */
+  active_hash: string | null;
+  hashes: BotHashEntry[];
+}
+
+export const BOT_STATES = ["draft", "running", "stopped_today", "halted", "archived", "blocked"] as const;
+export type BotState = (typeof BOT_STATES)[number];
+
+/** `GET /trading/bots` item. The public list only carries id, name, state and pair; the rest needs the owner session. */
+export interface BotSummary {
+  id: string;
+  name: string;
+  state: BotState;
+  state_reason: string | null;
+  pairs: string[];
+  pnl_today_usdc?: SDec;
+  pnl_total_usdc?: SDec;
+  position_usdc?: Dec;
+  /** 24 hourly pnl_total closes, oldest first. */
+  spark?: SDec[];
+  created_at_ms: number;
+  archived_at_ms: number | null;
+  last_fill_ms?: number | null;
+}
+
+export interface BotDetail {
+  bot: BotSummary;
+  rules: ConfirmedRules | null;
+  rules_history: { hash: string; name: string; confirmed_at_ms: number; superseded_at_ms: number | null }[];
+  limits: { bot: RuleLimits | null; account: RuleLimits & { price_band_bps: number } };
+  today: { orders: number; loss_usdc: Dec };
+  positions: { pair: string; size: Dec; avg_cost: Dec | null; mid: Dec; value_usdc: Dec }[];
+  /** `coin` is the HL coin name ("@107") the dashboard passes to `candleSnapshot`. */
+  pairs: { name: string; coin: string; sz_decimals: number }[];
+  open_orders: TradingStatus["open_orders"];
+  hl_network: "mainnet" | "testnet";
+}
+
 /** Why the engine is `halted` (goes into `state_reason`). */
 export const HALT_REASONS = ["PERP_POSITION_DETECTED", "KILLED"] as const;
 export type HaltReason = (typeof HALT_REASONS)[number];
@@ -190,6 +253,13 @@ export interface HlFill {
   size: Dec;
   /** Fee in USDC (or base token for buys; the adapter converts to USDC). */
   feeUsdc: Dec;
+  /**
+   * Raw HL fee fields (ADR-0006 section 3): the token the fee was charged in ("USDC", or the base token on a spot buy) and the
+   * amount in that token. A buy that pays its fee in the base token receives `size - feeAmount`, which a per-bot position needs.
+   * Absent (older fixtures) = the fee was charged in USDC and equals `feeUsdc`.
+   */
+  feeToken?: string;
+  feeAmount?: Dec;
   timeMs: number;
 }
 
@@ -257,6 +327,11 @@ export interface HlPort {
 // ---------------------------------------------------------------------------------------------------------------------
 
 export interface ConfirmedRules {
+  /**
+   * Bot this rule set was signed for (ADR-0006). ABSENT only in envelopes written before multi-bot support; those belong to the
+   * migrated bot `default` and carry the v1 confirmation message (no `bot:` line).
+   */
+  bot_id?: string;
   rules: RuleSetV1;
   hash: string;
   /** The exact NEP-413 message that was signed. */
@@ -314,6 +389,8 @@ export interface TradingStatus {
   };
   limits: {
     effective: RuleLimits & { price_band_bps: number };
+    /** Bot whose rule set `effective` shows (the default bot, else the first active one); null = none, hard caps only. Per-bot limits: `/bots/:id`. */
+    effective_bot_id?: string | null;
     today: { orders: number; loss_usdc: Dec };
     position_usdc: Dec;
     vault: {
@@ -334,8 +411,15 @@ export interface TradingStatus {
     size: Dec;
     placed_at_ms: number;
     rule_id: string | null;
+    /** Bot whose cloid prefix the order carries (ADR-0006); null for an order no bot owns. */
+    bot_id?: string | null;
   }[];
+  /** DEPRECATED (ADR-0006): the rule set of bot `default` while it exists. Use `bots` / `GET /trading/bots`. */
   active_rules: { hash: string; name: string; confirmed_at_ms: number; confirmed_by: string } | null;
+  /** Bots that are not archived (ADR-0006 section 8, additive). Public view: id, name, state only. */
+  bots: { id: string; name: string; state: BotState }[];
+  /** `TRADING_MAX_BOTS`. */
+  max_bots: number;
   dead_man: {
     cancel_at_ms: number | null;
     /** False while HL refuses scheduleCancel for volume (DEADMAN_VOLUME_GATED): the engine places IOC orders only. */
@@ -361,6 +445,8 @@ export interface TradingRulesProposal {
   summary: string;
   rules: RuleSetV1;
   hash: string;
+  /** The bot the rules are for, filled by the worker from the request (never by the model): ADR-0006 section 8. */
+  bot: { id: string; name: string; is_new: boolean };
   validation: { ok: boolean; errors: string[]; warnings: string[] };
   confirm: { kind: "nep413"; challenge: "/trading/rules/challenge"; endpoint: "/trading/rules/confirm" };
 }

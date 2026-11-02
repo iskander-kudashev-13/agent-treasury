@@ -152,9 +152,12 @@ describe("account state", () => {
     const f = await hl.getUserFills(MASTER, 4);
     expect(info.userFillsByTime).toHaveBeenCalledWith({ user: MASTER.toLowerCase(), startTime: 4 });
     expect(f).toHaveLength(3);
-    expect(f[0]).toEqual({ oid: 1, cloid: CLOID, pair: "HYPE/USDC", side: "buy", price: "84", size: "0.5", feeUsdc: "0.0252", timeMs: 5 });
-    expect(f[1]).toMatchObject({ side: "sell", feeUsdc: "0.02", cloid: null });
+    expect(f[0]).toMatchObject({ oid: 1, cloid: CLOID, pair: "HYPE/USDC", side: "buy", price: "84", size: "0.5", feeUsdc: "0.0252", timeMs: 5 });
+    // ADR-0006: the raw fee fields travel with the converted one (a base-token fee shrinks what a buy delivers)
+    expect(f[0]).toMatchObject({ feeToken: "HYPE", feeAmount: "0.0003" });
+    expect(f[1]).toMatchObject({ side: "sell", feeUsdc: "0.02", cloid: null, feeToken: "USDC", feeAmount: "0.02" });
     expect(f[2]?.feeUsdc).toBe("0");
+    expect(f[2]?.feeAmount).toBe("0"); // a rebate is not a fee
   });
   it("fails closed on a full page of fills that comes back newest first", async () => {
     const rows = Array.from({ length: 2000 }, (_, i) => ({ coin: "@107", px: "84", sz: "1", side: "B", time: 9000 - i, oid: i, tid: i, fee: "0", feeToken: "USDC" }));

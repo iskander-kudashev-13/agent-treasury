@@ -143,6 +143,10 @@ interface PendingRecipient {
 
 /** State shared by the tools of one assistant turn (a "what the batch will look like" overlay on chain state). */
 export class TurnState {
+  constructor(
+    /** Target of `propose_trading_rules`, from the request (`trading_bot`): a bot id, "new", or absent (legacy clients). */
+    readonly tradingBot?: string,
+  ) {}
   readonly proposals: Proposal[] = [];
   /** Rejected `propose_trading_rules` attempts in this turn (bounds the fix-and-retry loop). */
   tradingFailures = 0;

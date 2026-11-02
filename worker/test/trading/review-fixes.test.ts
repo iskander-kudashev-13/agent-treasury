@@ -81,7 +81,7 @@ describe("review fix 6/7: write-ahead and failed state writes", () => {
     rmSync(file, { recursive: true });
     const k2 = await h.service.kill();
     expect(k2.steps.state_saved).toBe("ok");
-    expect(JSON.parse(readFileSync(file, "utf8")).halt.reason).toBe("KILLED");
+    expect(JSON.parse(readFileSync(file, "utf8")).account.halt.reason).toBe("KILLED");
   });
 
   it("counters reach the disk before the order is placed", async () => {
@@ -89,7 +89,7 @@ describe("review fix 6/7: write-ahead and failed state writes", () => {
     const seen: unknown[] = [];
     const orig = h.hl.placeSpotOrder.bind(h.hl);
     h.hl.placeSpotOrder = (o) => {
-      seen.push(JSON.parse(readFileSync(join(h.dir, "engine-state.json"), "utf8")).orderCounter);
+      seen.push(JSON.parse(readFileSync(join(h.dir, "engine-state.json"), "utf8")).account.orderCounter);
       return orig(o);
     };
     await h.confirmDirect(dcaRules());

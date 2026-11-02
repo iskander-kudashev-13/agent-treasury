@@ -8,8 +8,8 @@
  * max_position_usdc by up to one order.
  */
 import { describe, expect, it } from "vitest";
-import { initialEngineState, runTick } from "../../src/trading/engine/tick.js";
 import type { ActiveRules, TickConfig, VaultView } from "../../src/trading/engine/tick.js";
+import { initialEngineState, runTick } from "./legacy.js";
 import { FakeHl } from "../../src/trading/hl/fake.js";
 import { addDec, cmpDec, mulDec, subDec } from "../../src/trading/hl/format.js";
 import type { HardLimits, RuleSetV1 } from "../../src/trading/types.js";

@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { OVERLAP_MS, applyFills, basisOf, completeFrom, emptyTracker, readFrom, rollToday } from "../../src/trading/engine/fills.js";
+import {
+  type BotAgg,
+  type FillCursor,
+  OVERLAP_MS,
+  applyFills as applyMulti,
+  basisOf,
+  emptyBotAgg,
+  emptyCursor,
+  positionOf,
+  readFrom,
+  resolveBot,
+  rollBotToday,
+  rollCursorToday,
+} from "../../src/trading/engine/fills.js";
 import { FakeHl, HYPE_PAIR } from "../../src/trading/hl/fake.js";
 import { FillsTruncatedError, fillKey, readAllFills } from "../../src/trading/hl/pagination.js";
 import type { HlFill } from "../../src/trading/types.js";
@@ -90,8 +103,27 @@ describe("getUserFills pagination (HL caps: page 2000, retention 10000)", () => 
   });
 });
 
+/** One bot "a" owns the prefix PRE (and the oids in `oids`); everything else is foreign. */
+interface Track extends FillCursor, BotAgg {}
+const emptyTracker = (cursorMs: number, todayFromMs: number | null, complete: boolean): Track => ({ ...emptyCursor(cursorMs, todayFromMs, complete), ...emptyBotAgg(complete) });
+const ctxOf = (oids: Set<number> = new Set()) => ({
+  prefixToBot: new Map([[PRE, "a"]]),
+  oidBot: Object.fromEntries([...oids].map((o) => [String(o), "a"])),
+  fundedSinceMs: 0,
+});
+function applyFills(t: Track, fills: HlFill[], c: ReturnType<typeof ctxOf>): Track {
+  const { botFillsToday, botOidsToday, total, today, basis, totalComplete, ...cursor } = t;
+  const r = applyMulti(cursor, { a: { botFillsToday, botOidsToday, total, today, basis, totalComplete } }, fills, { fundedSinceMs: c.fundedSinceMs, resolve: (f) => resolveBot(f, c.prefixToBot, c.oidBot) });
+  return { ...r.cursor, ...(r.aggs["a"] as BotAgg) };
+}
+const rollToday = (t: Track, snapshotAtMs: number): Track => {
+  const { botFillsToday, botOidsToday, total, today, basis, totalComplete, ...cursor } = t;
+  return { ...rollCursorToday(cursor, snapshotAtMs), ...rollBotToday({ botFillsToday, botOidsToday, total, today, basis, totalComplete }) };
+};
+const completeFrom = (t: Track): number => t.completeFromMs;
+
 describe("fill tracker", () => {
-  const ctx = { prefixes: [PRE], oids: new Set<number>(), fundedSinceMs: 0 };
+  const ctx = ctxOf();
   it("sums the bot's fills once, however often they are read again", () => {
     let t = emptyTracker(0, 0, true);
     const f = [fill(10), fill(20, { side: "sell", price: "41" })];
@@ -108,11 +140,18 @@ describe("fill tracker", () => {
     t = applyFills(t, [seen, fill(990_000)], ctx);
     expect(t.total["HYPE/USDC"]?.dq).toBe("2");
   });
-  it("matches on cloid OR oid; anything else is foreign and only counted", () => {
+  it("matches on cloid prefix OR remembered oid; anything else is foreign and only counted", () => {
     let t = emptyTracker(0, 0, true);
-    t = applyFills(t, [fill(10, { cloid: null, oid: 77 }), fill(11, { cloid: "0x" + "11".repeat(16), oid: 78 }), fill(12, { cloid: null, oid: 79 })], { ...ctx, oids: new Set([77]) });
+    t = applyFills(t, [fill(10, { cloid: null, oid: 77 }), fill(11, { cloid: "0x" + "11".repeat(16), oid: 78 }), fill(12, { cloid: null, oid: 79 })], ctxOf(new Set([77])));
     expect(t.botFillsToday).toBe(1);
     expect(t.foreignFills).toBe(2);
+  });
+  it("the cloid prefix wins over the remembered oid (permanent registry first)", () => {
+    const map = new Map([["0xaaaaaaaaaaaaaaaa", "x"], ["0xbbbbbbbbbbbbbbbb", "y"]]);
+    expect(resolveBot(fill(1, { cloid: "0xaaaaaaaaaaaaaaaa0000000000000001", oid: 5 }), map, { "5": "y" })).toBe("x");
+    expect(resolveBot(fill(1, { cloid: null, oid: 5 }), map, { "5": "y" })).toBe("y");
+    expect(resolveBot(fill(1, { cloid: "0xcccccccccccccccc0000000000000001", oid: 6 }), map, { "5": "y" })).toBeNull();
+    expect(resolveBot(fill(1, { cloid: "0xAAAAAAAAAAAAAAAA0000000000000001", oid: 7 }), map, {})).toBe("x");
   });
   it("rollToday restarts only today's sum", () => {
     let t = applyFills(emptyTracker(0, 0, true), [fill(10)], ctx);
@@ -130,21 +169,27 @@ describe("fill tracker", () => {
     t = applyFills(t, [fill(10 + 10 * OVERLAP_MS, { tid: tid })], ctx);
     expect(t.total["HYPE/USDC"]?.dq).toBe("2");
   });
+  it("does not mutate the sums it was given", () => {
+    const t = emptyTracker(0, 0, true);
+    const before = JSON.stringify(t);
+    applyFills(t, [fill(10)], ctx);
+    expect(JSON.stringify(t)).toBe(before);
+  });
 });
 
 describe("fill tracker cursor", () => {
   it("never moves past the latest fill time (HL clock), also when nothing new arrives", () => {
-    const empty = applyFills(emptyTracker(1_000_000, 0, true), [], { prefixes: [PRE], oids: new Set(), fundedSinceMs: 0 });
+    const empty = applyFills(emptyTracker(1_000_000, 0, true), [], ctxOf());
     expect(readFrom(empty)).toBe(1_000_000 - OVERLAP_MS);
-    const t = applyFills(empty, [fill(1_500_000)], { prefixes: [PRE], oids: new Set(), fundedSinceMs: 0 });
+    const t = applyFills(empty, [fill(1_500_000)], ctxOf());
     expect(readFrom(t)).toBe(1_500_000 - OVERLAP_MS);
     // a later read with no new fill does not move it either
-    expect(readFrom(applyFills(t, [], { prefixes: [PRE], oids: new Set(), fundedSinceMs: 0 }))).toBe(1_500_000 - OVERLAP_MS);
+    expect(readFrom(applyFills(t, [], ctxOf()))).toBe(1_500_000 - OVERLAP_MS);
   });
 });
 
 describe("fill tracker: attribution oids and cost basis (re-review H4, H5)", () => {
-  const ctx = { prefixes: [PRE], oids: new Set<number>(), fundedSinceMs: 0 };
+  const ctx = ctxOf();
   it("records the distinct order ids of today's bot fills and resets them with the day", () => {
     let t = applyFills(emptyTracker(0, 0, true), [fill(10, { oid: 5 }), fill(11, { oid: 5 }), fill(12, { oid: 6 }), fill(13, { oid: 9, cloid: null })], ctx);
     expect(t.botOidsToday).toEqual([5, 6]);
@@ -161,16 +206,35 @@ describe("fill tracker: attribution oids and cost basis (re-review H4, H5)", () 
     expect(basisOf(t, "0x" + "cd".repeat(8), "HYPE/USDC")).toEqual({ size: 0n, avgCost: 0n });
   });
   it("fills attributed by oid only (no cloid) have no rule-set prefix and are not in a cost basis", () => {
-    const t = applyFills(emptyTracker(0, 0, true), [fill(10, { cloid: null, oid: 77 })], { ...ctx, oids: new Set([77]) });
+    const t = applyFills(emptyTracker(0, 0, true), [fill(10, { cloid: null, oid: 77 })], ctxOf(new Set([77])));
     expect(t.botFillsToday).toBe(1);
     expect(basisOf(t, PRE, "HYPE/USDC").size).toBe(0n);
   });
-  it("completeFrom: 0 for a complete history, the restart point for a partial one, infinity for an old file", () => {
+  it("completeFrom: 0 for a complete history, the restart point for a partial one", () => {
     expect(completeFrom(emptyTracker(500, 0, true))).toBe(0);
     expect(completeFrom(emptyTracker(500, 0, false))).toBe(500);
-    const legacy = emptyTracker(500, 0, false);
-    delete legacy.completeFromMs;
-    expect(completeFrom(legacy)).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe("a bot's position is what its fills delivered, net of base-token fees (ADR-0006 section 3)", () => {
+  it("a buy that pays its fee in the base token holds size minus the fee; a sell removes the sold size", () => {
+    const ctx = ctxOf();
+    let t = applyFills(emptyTracker(0, 0, true), [fill(10, { size: "3", feeToken: "HYPE", feeAmount: "0.0021", feeUsdc: "0.084" })], ctx);
+    expect(positionOf(t.total)["HYPE/USDC"]).toBe(2_997_900_000_000n);
+    expect(t.total["HYPE/USDC"]).toMatchObject({ dq: "3", fees: "0.084", feeBase: "0.0021" }); // dq stays gross for the P&L
+    t = applyFills(t, [fill(11, { side: "sell", size: "1", feeToken: "USDC", feeAmount: "0.04", feeUsdc: "0.04" })], ctx);
+    expect(positionOf(t.total)["HYPE/USDC"]).toBe(1_997_900_000_000n);
+  });
+  it("two bots keep separate positions in one pair", () => {
+    const map = new Map([["0xaaaaaaaaaaaaaaaa", "x"], ["0xbbbbbbbbbbbbbbbb", "y"]]);
+    const cur = emptyCursor(0, 0, true);
+    const r = applyMulti(cur, { x: emptyBotAgg(), y: emptyBotAgg() }, [
+      fill(10, { cloid: "0xaaaaaaaaaaaaaaaa0000000000000001", size: "3", oid: 1 }),
+      fill(11, { cloid: "0xbbbbbbbbbbbbbbbb0000000000000002", size: "2", oid: 2 }),
+    ], { fundedSinceMs: 0, resolve: (f) => resolveBot(f, map, {}) });
+    expect(positionOf((r.aggs["x"] as BotAgg).total)["HYPE/USDC"]).toBe(3_000_000_000_000n);
+    expect(positionOf((r.aggs["y"] as BotAgg).total)["HYPE/USDC"]).toBe(2_000_000_000_000n);
+    expect(r.attributed.map((a) => a.botId)).toEqual(["x", "y"]);
   });
 });
 

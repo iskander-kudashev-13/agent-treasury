@@ -291,6 +291,8 @@ export class NktkasHl implements HlPort {
             price: normalizeDec(f.px),
             size: normalizeDec(f.sz),
             feeUsdc: feeInUsdc(f.fee, f.feeToken, f.px),
+            feeToken: f.feeToken,
+            feeAmount: rawFeeAmount(f.fee),
             timeMs: f.time,
           })),
       };
@@ -467,6 +469,11 @@ function flowKind(me: string, from: string, to: string): "transfer_in" | "transf
   if (to.toLowerCase() === me) return "transfer_in";
   if (from.toLowerCase() === me) return "transfer_out";
   return null;
+}
+
+/** The fee as HL charged it, in its own token. A rebate (negative) or malformed value counts as 0, like `feeInUsdc`. */
+function rawFeeAmount(fee: string): Dec {
+  return fee.startsWith("-") || !isDecimal(fee) ? "0" : normalizeDec(fee);
 }
 
 /** Fee in USDC: buys pay the fee in the base token, so convert at the fill price. Rebates (negative) count as 0. */

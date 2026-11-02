@@ -55,6 +55,8 @@ const bodySchema = z.object({
   messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })).min(1),
   vault: z.string().min(1).max(64),
   owner_account: z.string().min(1).max(64),
+  // ADR-0006: the bot the owner is working on ("new" = a new strategy). Only used when trading is enabled.
+  trading_bot: z.string().regex(/^[a-z0-9][a-z0-9-]{0,15}$/).optional(),
 });
 
 const sessionBodySchema = z.object({
@@ -185,7 +187,7 @@ export function createAiRouter(d: AiDeps): Hono {
           return;
         }
         const events = runChat(
-          { model: { baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model }, view: d.view, tools, vault: cfg.vault, network: cfg.network, now, usdcAsset: d.usdcAsset },
+          { model: { baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model }, view: d.view, tools, vault: cfg.vault, network: cfg.network, now, usdcAsset: d.usdcAsset, tradingBot: body.trading_bot },
           body.messages,
           body.owner_account,
           abort.signal,

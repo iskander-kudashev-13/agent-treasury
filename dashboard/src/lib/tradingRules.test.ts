@@ -3,9 +3,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { canonicalize, confirmationMessage, describeBlocks, describeRules, hashRuleSet, parseRuleSet, sha256Hex, type RuleSetV1 } from "./tradingRules";
 
+interface MsgVector {
+  input: { vault: string; agentId: string; hlNetwork: "mainnet" | "testnet"; hlAccount: string; rulesSha256: string; botId?: string };
+  message: string;
+}
 interface Vectors {
   valid: Array<{ name: string; input: unknown; canonical: string; sha256: string; describe: string[] }>;
   invalid: Array<{ name: string; layer: "schema" | "limits"; input: unknown; errors: string[] }>;
+  messages: { v2: MsgVector[]; v1_legacy: MsgVector[] };
 }
 const vectors = JSON.parse(readFileSync(fileURLToPath(new URL("../../../docs/trading-rules-vectors.json", import.meta.url)), "utf8")) as Vectors;
 
@@ -70,5 +75,11 @@ describe("confirmationMessage", () => {
     expect(confirmationMessage({ vault: "v.testnet", agentId: "hl-trader", hlNetwork: "testnet", hlAccount: "0xABCDEF0123456789abcdef0123456789ABCDEF01", rulesSha256: "a".repeat(64) })).toBe(
       ["Agent Treasury: activate trading rules", "vault: v.testnet", "agent: hl-trader", "hl_network: testnet", "hl_account: 0xabcdef0123456789abcdef0123456789abcdef01", `rules_sha256: ${"a".repeat(64)}`].join("\n"),
     );
+  });
+  it("matches the shared v2 vectors (bot line)", () => {
+    for (const v of vectors.messages.v2) expect(confirmationMessage(v.input)).toBe(v.message);
+  });
+  it("matches the shared v1_legacy vectors (no bot line)", () => {
+    for (const v of vectors.messages.v1_legacy) expect(confirmationMessage(v.input)).toBe(v.message);
   });
 });

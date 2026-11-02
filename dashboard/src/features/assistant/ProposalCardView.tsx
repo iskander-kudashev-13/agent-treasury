@@ -146,7 +146,7 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
     setBusy(true);
     setError(null);
     try {
-      const r = await confirmTradingRules(p.rules, { accountId, signMessage, trustedHlAccount: trusted });
+      const r = await confirmTradingRules(p.rules, { accountId, signMessage, trustedHlAccount: trusted, botId: p.bot?.id ?? "default", ...(p.bot?.is_new ? { botName: p.bot.name } : {}) });
       void qc.invalidateQueries({ queryKey: tradingKeys.all });
       onConfirmed(r.active?.confirmed_at_ms ?? Date.now());
     } catch (e) {

@@ -8,6 +8,7 @@ import type { HistoryPoint } from "@/lib/tradingClient";
 import { candleInterval, RANGES, type HistoryRange } from "@/lib/tradingMetrics";
 import type { PriceMode } from "@/features/trading/bot/Charts";
 import { BotStatePill, PnlValue } from "@/features/trading/BotRows";
+import { BotManage } from "@/features/trading/bot/BotManage";
 import { Metrics } from "@/features/trading/bot/Metrics";
 import { Settings } from "@/features/trading/bot/Settings";
 import { StopButton } from "@/features/trading/bot/StopButton";
@@ -137,7 +138,10 @@ export function TradingBotPage() {
             ))}
           </div>
         </div>
-        <StopButton ctx={ctx} id={bot.id} disabled={!stoppable} />
+        <div className="flex flex-col items-end gap-2">
+          <StopButton ctx={ctx} id={bot.id} disabled={!stoppable} />
+          {ctx.mode === "bots" && <BotManage id={bot.id} name={bot.name} archived={bot.state === "archived"} />}
+        </div>
       </Card>
 
       <Tabs value={range} onChange={setRange} label={t("trading.bot.rangeAria")} items={RANGES.map((r) => ({ value: r, label: t(`trading.bot.range.${r}`) }))} />

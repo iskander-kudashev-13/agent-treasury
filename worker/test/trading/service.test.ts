@@ -231,17 +231,19 @@ describe("service: persistence across restart", () => {
     expect(h.hl.placed).toHaveLength(1);
   });
 
-  it.each([
-    ["a malformed bot prefix", { botPrefixes: ["not-a-prefix"] }],
-    ["an upper-case bot prefix", { botPrefixes: ["0xABABABABABABABAB"] }],
-    ["bot oids that are not numbers", { botOids: ["x"] }],
-    ["a fill tracker of the wrong shape", { fills: { cursorMs: "now" } }],
+  it.each<[string, (good: Record<string, unknown>) => Record<string, unknown>]>([
+    ["a bot state of the wrong shape", (g) => ({ ...g, bots: { default: { agg: 5 } } })],
+    ["order ids that are not bot ids", (g) => ({ ...g, oidBot: { "5": 7 } })],
+    ["a fill cursor of the wrong shape", (g) => ({ ...g, account: { ...(g["account"] as object), fillCursor: { cursorMs: "now" } } })],
+    ["an unknown version", (g) => ({ ...g, version: 3 })],
+    ["a v1 file with a malformed bot prefix", () => ({ version: 1, halt: null, orderCounter: 0, firedAt: {}, orders: {}, recent: [], botPrefixes: ["not-a-prefix"] })],
+    ["a v1 file with bot oids that are not numbers", () => ({ version: 1, halt: null, orderCounter: 0, firedAt: {}, orders: {}, recent: [], botOids: ["x"] })],
   ])("engine-state.json with %s is refused (fail closed)", async (_label, patch) => {
     const h = harness();
     await h.confirmDirect(dcaRules());
     const file = join(h.dir, "engine-state.json");
     const good = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-    writeFileSync(file, JSON.stringify({ ...good, ...patch }));
+    writeFileSync(file, JSON.stringify(patch(good)));
     const s2 = new TradingService(restartDeps(h));
     h.clock.t += 2 * 3_600_000;
     await s2.tick();
@@ -249,13 +251,15 @@ describe("service: persistence across restart", () => {
     expect(h.hl.placed).toHaveLength(1);
   });
 
-  it("a persisted state with valid botPrefixes and fill tracker loads", async () => {
+  it("a persisted v2 state loads: the permanent prefixes live in bots.json, the cursor in the engine state", async () => {
     const h = harness();
     await h.confirmDirect(dcaRules());
     const s2 = new TradingService(restartDeps(h));
-    const saved = JSON.parse(readFileSync(join(h.dir, "engine-state.json"), "utf8")) as { botPrefixes: string[]; fills: { cursorMs: number } };
-    expect(saved.botPrefixes.length).toBeGreaterThan(0);
-    expect(typeof saved.fills.cursorMs).toBe("number");
+    const saved = JSON.parse(readFileSync(join(h.dir, "engine-state.json"), "utf8")) as { version: number; account: { fillCursor: { cursorMs: number } } };
+    const bots = JSON.parse(readFileSync(join(h.dir, "bots.json"), "utf8")) as { bots: { id: string; hashes: unknown[] }[] };
+    expect(saved.version).toBe(2);
+    expect(bots.bots[0]?.hashes.length).toBeGreaterThan(0);
+    expect(typeof saved.account.fillCursor.cursorMs).toBe("number");
     h.clock.t += 2 * 3_600_000;
     await s2.tick();
     expect(s2.status().state_reason).not.toBe("STATE_CORRUPT");
@@ -304,7 +308,7 @@ describe("service: kill sequence", () => {
     expect(st.state).toBe("halted");
     expect(st.state_reason).toBe("KILLED");
     expect(st.state_detail).toContain("panic");
-    expect(JSON.parse(readFileSync(join(h.dir, "engine-state.json"), "utf8")).halt.reason).toBe("KILLED");
+    expect(JSON.parse(readFileSync(join(h.dir, "engine-state.json"), "utf8")).account.halt.reason).toBe("KILLED");
   });
 
   it("reports each step on its own: cancel fails, schedule still attempted", async () => {

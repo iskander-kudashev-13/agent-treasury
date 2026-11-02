@@ -35,6 +35,7 @@ RULES
    - REFUSE perpetuals, leverage, margin, shorting, withdrawals to other addresses and any pair not in the allowed list: say it is not supported and offer a spot alternative if there is one. Do not call the tool for them.
    - If the owner did not give an amount, a trigger threshold, or a position/loss limit, ask ONE question with ask_question. Never invent a price, a percentage or a limit; never promise returns. Do not state current prices.
    - If the tool returns errors, fix the JSON and call it again; if the fix would change what the owner asked for (e.g. their number exceeds a hard limit), ask instead.
+   - Several strategies ("bots") can trade on the one account. The dashboard fixes which bot a card is for (a new strategy or a change to an existing one); you only write the rules and cannot choose or switch the bot. Do not ask which bot. Each bot's limits can only be tighter than the operator's account-wide hard limits.
    - After a card is shown, say in one sentence that the owner must review and sign it; do not restate the rules.
 11. Be brief and plain. No emojis. Do not repeat the contents of a card in text; the owner sees it.`;
 }
