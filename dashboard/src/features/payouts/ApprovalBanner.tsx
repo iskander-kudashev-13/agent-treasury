@@ -7,6 +7,7 @@ import { Button, Icons } from "@/kit";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { ApproveModal } from "./ApproveModal";
 import { RejectModal } from "./RejectModal";
+import { payoutLabel } from "@/lib/payoutView";
 
 export const recipientLabel = (recipients: RecipientView[], id: number | null): string =>
   id === null ? "ad-hoc payment" : (recipients.find((r) => r.id === id)?.label ?? `recipient #${id}`);
@@ -28,7 +29,7 @@ export function ApprovalBanner({ pending, recipients, agents }: { pending: Payou
         </h2>
       </div>
       {rows.map((p) => {
-        const label = recipientLabel(recipients, p.recipient_id);
+        const label = payoutLabel(p, recipients, agents);
         const agent = agentLabel(agents, p.agent_id);
         const overdue = p.approval_reason === "OVERDUE_NEEDS_APPROVAL";
         return (
@@ -58,8 +59,8 @@ export function ApprovalBanner({ pending, recipients, agents }: { pending: Payou
           </div>
         );
       })}
-      {current && review?.mode === "approve" && <ApproveModal payout={current} label={recipientLabel(recipients, current.recipient_id)} agentName={agentLabel(agents, current.agent_id)} onClose={() => setReview(null)} />}
-      {current && review?.mode === "reject" && <RejectModal payout={current} label={recipientLabel(recipients, current.recipient_id)} onClose={() => setReview(null)} />}
+      {current && review?.mode === "approve" && <ApproveModal payout={current} label={payoutLabel(current, recipients, agents)} agentName={agentLabel(agents, current.agent_id)} onClose={() => setReview(null)} />}
+      {current && review?.mode === "reject" && <RejectModal payout={current} label={payoutLabel(current, recipients, agents)} onClose={() => setReview(null)} />}
     </section>
   );
 }

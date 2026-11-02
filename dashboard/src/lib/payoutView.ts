@@ -4,7 +4,7 @@ import { formatUsdc } from "./amount";
 import { explorerAddressUrl, ONECLICK_SIMULATED } from "./config";
 import { isSimulatedPayout } from "./oneclickStatus";
 import { shortId } from "@/kit/tokens";
-import type { AgentView, Payout, PayoutStatus } from "./types";
+import type { AgentView, Payout, PayoutStatus, RecipientView } from "./types";
 
 /* ───────────── filters ───────────── */
 
@@ -173,4 +173,20 @@ export function timelineSummary(steps: TimelineItem[], status: PayoutStatus): { 
   if (status === "Rejected") return { text: "Rejected", tone: "neutral" };
   const active = steps.findIndex((x) => x.state === "active");
   return { text: `In progress · step ${(active === -1 ? steps.length : active) + 1} of ${steps.length}`, tone: "warn" };
+}
+
+const sameDest = (chain: string, a: string, b: string): boolean =>
+  /^0x/i.test(a) && /^0x/i.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b;
+
+/**
+ * Display name for a payout's destination: the vault recipient, else (on-demand payouts) the label from the requesting
+ * agent's allowlist or a vault recipient with the same chain and address, else the short address. Untrusted text.
+ */
+export function payoutLabel(p: Pick<Payout, "recipient_id" | "agent_id" | "chain" | "address">, recipients: RecipientView[], agents: AgentView[]): string {
+  if (p.recipient_id !== null) return recipients.find((r) => r.id === p.recipient_id)?.label ?? `recipient #${p.recipient_id}`;
+  const listed = agents.find((a) => a.id === p.agent_id)?.mandate.allowlist.find((d) => d.chain === p.chain && sameDest(d.chain, d.address, p.address));
+  if (listed?.label) return listed.label;
+  const known = recipients.find((r) => r.destination_chain === p.chain && sameDest(r.destination_chain, r.destination_address, p.address));
+  if (known) return known.label;
+  return p.address ? shortId(p.address, 6, 4) : "ad-hoc payment";
 }

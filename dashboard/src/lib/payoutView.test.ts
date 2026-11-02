@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTimeline, destinationTxUrl, filterPayouts, intentsTrackUrl, NO_FILTER, timelineSummary } from "./payoutView";
+import { buildTimeline, destinationTxUrl, filterPayouts, intentsTrackUrl, NO_FILTER, payoutLabel, timelineSummary } from "./payoutView";
 import type { AgentView, Payout } from "./types";
 
 const base: Payout = {
@@ -98,5 +98,22 @@ describe("buildTimeline: agent-reported simulated- hash outside simulated mode",
     const final = buildTimeline(x, undefined, { simulated: false })[4];
     expect(final?.links.some((l) => l.label === "Track on Intents explorer")).toBe(true);
     expect(final?.lines.join(" ")).not.toMatch(/Simulated 1Click/);
+  });
+});
+
+describe("payoutLabel", () => {
+  const agents = [
+    { id: "claudeagent", mandate: { allowlist: [{ chain: "base", address: "0x0000000000000000000000000000000000000a11", label: "Priya" }] } },
+  ] as unknown as AgentView[];
+  const recipients = [{ id: 3, label: "Alex (test)", destination_chain: "sol", destination_address: "1nc1nerator11111111111111111111111111111111" }] as unknown as import("./types").RecipientView[];
+  it("uses the vault recipient for scheduled payouts", () => {
+    expect(payoutLabel({ recipient_id: 3, agent_id: "x", chain: "sol", address: "a" }, recipients, agents)).toBe("Alex (test)");
+  });
+  it("uses the agent's allowlist label for on-demand payouts (EVM case-insensitive)", () => {
+    expect(payoutLabel({ recipient_id: null, agent_id: "claudeagent", chain: "base", address: "0x0000000000000000000000000000000000000A11" }, recipients, agents)).toBe("Priya");
+  });
+  it("falls back to a vault recipient with the same destination, then to the short address", () => {
+    expect(payoutLabel({ recipient_id: null, agent_id: "claudeagent", chain: "sol", address: "1nc1nerator11111111111111111111111111111111" }, recipients, agents)).toBe("Alex (test)");
+    expect(payoutLabel({ recipient_id: null, agent_id: "claudeagent", chain: "base", address: "0x000000000000000000000000000000000000beef" }, recipients, agents)).toMatch(/^0x0000…beef$/);
   });
 });

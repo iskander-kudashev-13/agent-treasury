@@ -4,11 +4,11 @@ import { agoText } from "@/lib/dates";
 import { ONECLICK_SIMULATED } from "@/lib/config";
 import { isSimulatedPayout } from "@/lib/oneclickStatus";
 import { usdcGrouped } from "@/lib/amount";
-import { intentsTrackUrl, payoutSource } from "@/lib/payoutView";
+import { intentsTrackUrl, payoutLabel, payoutSource } from "@/lib/payoutView";
 import { payoutStatusInfo, toneAccent } from "@/lib/status";
 import type { AgentView, Payout, RecipientView } from "@/lib/types";
 import { Button, Card, CardHeader, ChainBadge, EmptyState, Pill, SourceTag } from "@/kit";
-import { agentLabel, recipientLabel } from "./ApprovalBanner";
+import { agentLabel } from "./ApprovalBanner";
 
 /** One payout row: desktop = columns, mobile = two stacked lines. Labels, memos and names are untrusted text. */
 function Row({ p, recipients, agents, now }: { p: Payout; recipients: RecipientView[]; agents: AgentView[]; now: number }) {
@@ -24,7 +24,7 @@ function Row({ p, recipients, agents, now }: { p: Payout; recipients: RecipientV
         <span className="ml-auto text-xs text-ink-muted md:hidden">{agoText(p.updated_at_ms, now)}</span>
       </div>
       <div className="min-w-0">
-        <div className="truncate font-medium">{recipientLabel(recipients, p.recipient_id)}</div>
+        <div className="truncate font-medium">{payoutLabel(p, recipients, agents)}</div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
           <span>{agentLabel(agents, p.agent_id)}</span>
           <SourceTag source={payoutSource(p)} />

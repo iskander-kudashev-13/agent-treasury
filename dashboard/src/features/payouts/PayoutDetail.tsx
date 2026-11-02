@@ -12,10 +12,10 @@ import type { AgentView, Payout, RecipientView } from "@/lib/types";
 import { Button, Card, ChainBadge, Hash, Icons, Input, Pill, SourceTag, Timeline, type TimelineStep } from "@/kit";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { ApproveModal } from "./ApproveModal";
-import { agentLabel, recipientLabel } from "./ApprovalBanner";
+import { agentLabel } from "./ApprovalBanner";
 import { RejectModal } from "./RejectModal";
 import { TwoPhaseAction } from "./TwoPhaseAction";
-import { payoutSource } from "@/lib/payoutView";
+import { payoutLabel, payoutSource } from "@/lib/payoutView";
 
 const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19);
 
@@ -62,7 +62,7 @@ export function PayoutDetail({ payout: p, recipients, agents }: { payout: Payout
   const agent = agents.find((a) => a.id === p.agent_id);
   const steps = buildTimeline(p, agent);
   const sum = timelineSummary(steps, p.status);
-  const label = recipientLabel(recipients, p.recipient_id);
+  const label = payoutLabel(p, recipients, agents);
   const kitSteps: TimelineStep[] = steps.map((s) => ({
     state: s.state,
     title: (
