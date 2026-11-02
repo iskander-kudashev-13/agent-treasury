@@ -42,7 +42,6 @@ function PolicyFormInner({ policy }: { policy: PolicyView | null }) {
           )}
         </Field>
       </div>
-      <p className="m-0 text-xs text-ink-subtle">{t("pol.perAgentNote")}</p>
       <div className="flex flex-wrap items-center gap-3">
         {busy && <SigningHint />}
         <Button variant="primary" disabled={!canAct || busy || !policy || next === null || pristine} onClick={() => next && void act("set_policy", { policy: next })} title={t("pol.oneYocto")}>

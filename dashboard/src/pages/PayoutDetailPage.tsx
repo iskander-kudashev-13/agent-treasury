@@ -20,7 +20,7 @@ export function PayoutDetailPage() {
       ) : payout ? (
         <PayoutDetail payout={payout} recipients={recipients.data} agents={agents.data} />
       ) : (
-        <ComingSoon title={valid ? t("page.payoutNotFound", { id }) : t("page.invalidPayoutId")} action={<Link to="/payouts">{t("page.backToPayouts")}</Link>}>
+        <ComingSoon title={valid ? t("page.payoutNotFound", { id }) : t("page.invalidPayoutId")} action={<Link to="/payments?tab=history">{t("page.backToPayouts")}</Link>}>
           {error ?? t("page.mayNotExist")}
         </ComingSoon>
       )}

@@ -109,7 +109,7 @@ describe("plurals", () => {
     expect(translate("en", "treasury.missed", { count: 3 })).toBe("Missed 3 scheduled payments");
   });
   it("payments counter agrees in Russian", () => {
-    expect([1, 3, 7].map((n) => translate("ru", "upcoming.paymentsCount", { count: n }))).toEqual(["1 платёж", "3 платежа", "7 платежей"]);
+    expect([1, 3, 7].map((n) => translate("ru", "home.paymentsCount", { count: n }))).toEqual(["1 платёж", "3 платежа", "7 платежей"]);
   });
 });
 

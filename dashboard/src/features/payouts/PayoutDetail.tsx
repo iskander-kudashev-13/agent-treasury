@@ -95,7 +95,7 @@ export function PayoutDetail({ payout: p, recipients, agents }: { payout: Payout
 
   return (
     <div className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
-      <Link to="/payouts" className="text-[13px]">
+      <Link to="/payments?tab=history" className="text-[13px]">
         {t("page.backToPayouts")}
       </Link>
       <Card padding="none" className={p.status === "Confirmed" ? "shadow-[0_0_0_1px_#2ECC71,0_0_22px_rgba(46,204,113,0.35)]" : ""}>

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { isAccountId, measurementLabel, parseMeasurements, parsePpids } from "@/lib/trustAnchors";
 import type { ContractInfo } from "@/lib/types";
 import { useApprovedMeasurements, useApprovedPpids, useLocalWhitelist } from "@/lib/useTrust";
-import { Banner, Button, Card, CardHeader, EmptyState, Field, Icons, Input, Pill, Textarea } from "@/kit";
+import { Button, Card, CardHeader, EmptyState, Field, Input, Pill, Textarea } from "@/kit";
 import { useOwner } from "@/features/owner/OwnerProvider";
 
 const HOUR_MS = 3_600_000;
@@ -42,19 +42,13 @@ export function TrustAnchors({ info }: { info: ContractInfo | null }) {
   const hoursOk = hours.trim() !== "" && Number.isFinite(hoursNum) && hoursNum >= 1;
   return (
     <>
-      {local && (
-        <Banner accent="danger" icon={<Icons.AlertTriangle size={14} />}>
-          {t("ta.insecure")}
-        </Banner>
-      )}
       <Card aria-labelledby="tee-title" className="flex flex-col gap-4">
         <CardHeader id="tee-title" title={t("ta.title")} badge={info && <Pill accent={info.requires_tee ? "ok" : "danger"}>{info.requires_tee ? t("ta.teeRequired") : t("ta.localMode")}</Pill>} />
-        <p className="m-0 text-[13px] text-ink-muted">{t("ta.intro")}</p>
 
         <section aria-label={t("ta.measAria")} className="flex flex-col gap-2">
           <h3 className="m-0 text-sm font-semibold">{t("ta.measTitle", { n: meas.data.length })}</h3>
           {meas.data.length === 0 ? (
-            <EmptyState title={t("ta.noMeas")}>{t("ta.noMeasHint")}</EmptyState>
+            <EmptyState title={t("ta.noMeas")} />
           ) : (
             <ul className="m-0 list-none p-0">
               {meas.data.map((x, i) => (
@@ -110,8 +104,7 @@ export function TrustAnchors({ info }: { info: ContractInfo | null }) {
         {local && (
           <section aria-label={t("ta.wlAria")} className="flex flex-col gap-2">
             <h3 className="m-0 text-sm font-semibold">{t("ta.wlTitle", { n: wl.data.length })}</h3>
-            <p className="m-0 text-[13px] text-ink-muted">{t("ta.wlHint")}</p>
-            {wl.data.length > 0 && (
+                        {wl.data.length > 0 && (
               <ul className="m-0 list-none p-0">
                 {wl.data.map((acc) => (
                   <Row key={acc} label={acc} disabled={off} onRemove={() => void act("remove_agent_from_whitelist_for_local", { account_id: acc })} />

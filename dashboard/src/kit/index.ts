@@ -6,4 +6,5 @@ export * from "./controls";
 export * from "./overlays";
 export * from "./assistant";
 export * from "./layout";
+export * from "./charts";
 export * as Icons from "./icons";

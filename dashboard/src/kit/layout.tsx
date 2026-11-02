@@ -24,6 +24,7 @@ export function AppHeader({
   onAssistant,
   actions,
   banner,
+  badge,
 }: {
   vaultId: string;
   network: "testnet" | "mainnet";
@@ -35,6 +36,8 @@ export function AppHeader({
   actions?: ReactNode;
   /** e.g. <Banner>Agent paused — …</Banner> */
   banner?: ReactNode;
+  /** Small status badge next to the network pill (e.g. "Test mode"). */
+  badge?: ReactNode;
 }) {
   const t = useT();
   return (
@@ -48,6 +51,7 @@ export function AppHeader({
           <Hash value={vaultId} short={false} className="[&>span:first-child]:text-xs" />
         </span>
         {network === "testnet" ? <Pill accent="warn">testnet</Pill> : <Pill accent="ok">mainnet</Pill>}
+        {badge}
         <nav aria-label={t("nav.main")} className="order-last flex w-full gap-1 overflow-x-auto md:order-none md:ml-2 md:w-auto">
           {nav.map((n) => (
             <a

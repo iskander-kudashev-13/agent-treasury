@@ -3,57 +3,41 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { useWallet } from "@/features/wallet/WalletProvider";
 import { NETWORK, VAULT_ID, AI_ENABLED } from "@/lib/config";
-import { usePolicy } from "@/lib/useVault";
+import { useContractInfo, usePolicy } from "@/lib/useVault";
 import type { MessageKey } from "@/i18n";
 import { LanguageSwitcher, useT } from "@/i18n";
-import { AppHeader, Banner, Button, Callout, cx, Dot, Icons, Modal, Page, type NavItem } from "@/kit";
+import { AppHeader, Banner, Button, Callout, cx, Dot, Icons, Modal, Page, Pill, type NavItem } from "@/kit";
 import { useAssistantPanel } from "./AssistantContext";
 import { AssistantPanel } from "./AssistantPanel";
+import { Onboarding } from "@/features/onboarding/Onboarding";
 import { PauseAll } from "./PauseAll";
 
-/** Single source of truth for navigation (desktop header + mobile tabs). `mobile: false` = overflow menu on mobile. */
+/** Single source of truth for navigation (desktop header + mobile tabs). `also` = other path prefixes that keep the tab highlighted. */
 export const NAV = [
-  { label: "nav.treasury", to: "/", mobile: true },
-  { label: "nav.agents", to: "/agents", mobile: true },
-  { label: "nav.payments", to: "/payments", mobile: true },
-  { label: "nav.payouts", to: "/payouts", mobile: true },
-  { label: "nav.trading", to: "/trading", mobile: false },
-  { label: "nav.policy", to: "/policy", mobile: false },
-] as const satisfies readonly { label: MessageKey; to: string; mobile: boolean }[];
+  { label: "nav.overview", to: "/", also: [] },
+  { label: "nav.agents", to: "/agents", also: [] },
+  { label: "nav.payments", to: "/payments", also: ["/payouts"] },
+  { label: "nav.settings", to: "/settings", also: [] },
+] as const satisfies readonly { label: MessageKey; to: string; also: readonly string[] }[];
 
-const isActive = (pathname: string, to: string) => (to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`));
+const under = (pathname: string, to: string) => pathname === to || pathname.startsWith(`${to}/`);
+const isActive = (pathname: string, n: { to: string; also: readonly string[] }) => (n.to === "/" ? pathname === "/" : under(pathname, n.to) || n.also.some((p) => under(pathname, p)));
 
 function MobileNav() {
   const t = useT();
   const { pathname } = useLocation();
-  const [more, setMore] = useState(false);
-  const policyActive = NAV.some((n) => !n.mobile && isActive(pathname, n.to)); // "More" is bold when one of its items is open
   return (
     <nav aria-label={t("nav.mainMobile")} className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-bg/95 backdrop-blur md:hidden">
-      {NAV.filter((n) => n.mobile).map((n) => (
+      {NAV.map((n) => (
         <Link
           key={n.to}
           to={n.to}
-          aria-current={isActive(pathname, n.to) ? "page" : undefined}
-          className={cx("flex-1 py-3 text-center text-xs no-underline hover:no-underline", isActive(pathname, n.to) ? "font-semibold text-ink" : "text-ink-muted")}
+          aria-current={isActive(pathname, n) ? "page" : undefined}
+          className={cx("flex-1 py-3 text-center text-xs no-underline hover:no-underline", isActive(pathname, n) ? "font-semibold text-ink" : "text-ink-muted")}
         >
           {t(n.label)}
         </Link>
       ))}
-      <div className="relative flex-1">
-        <button type="button" aria-expanded={more} onClick={() => setMore((v) => !v)} className={cx("w-full cursor-pointer py-3 text-xs", policyActive ? "font-semibold text-ink" : "text-ink-muted")}>
-          {t("nav.more")}
-        </button>
-        {more && (
-          <div className="absolute right-2 bottom-full mb-2 min-w-32 rounded-tile border border-line bg-surface-raised p-1">
-            {NAV.filter((n) => !n.mobile).map((n) => (
-              <Link key={n.to} to={n.to} onClick={() => setMore(false)} className="block rounded-input px-3 py-2 text-sm text-ink no-underline hover:bg-surface-hover hover:no-underline">
-                {t(n.label)}
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
     </nav>
   );
 }
@@ -107,10 +91,11 @@ export function AppLayout() {
   const { accountId, signIn, ready } = useWallet();
   const { canAct, ownerId } = useOwner();
   const { data: policy } = usePolicy();
+  const { data: info } = useContractInfo();
   const assistant = useAssistantPanel();
   const [accountOpen, setAccountOpen] = useState(false);
 
-  const nav: NavItem[] = NAV.map((n) => ({ label: t(n.label), href: `#${n.to}`, active: isActive(pathname, n.to) }));
+  const nav: NavItem[] = NAV.map((n) => ({ label: t(n.label), href: `#${n.to}`, active: isActive(pathname, n) }));
   const guest = accountId !== null && ownerId !== null && !canAct;
 
   return (
@@ -123,6 +108,7 @@ export function AppLayout() {
           account={accountId}
           onAccountClick={() => (accountId ? setAccountOpen(true) : ready && signIn())}
           onAssistant={AI_ENABLED ? assistant.toggle : undefined}
+          badge={info && !info.requires_tee ? <Pill accent="warn" title={t("layout.testModeHint")}>{t("layout.testMode")}</Pill> : undefined}
           actions={
             <>
               <LanguageSwitcher />
@@ -160,6 +146,7 @@ export function AppLayout() {
           <Icons.Sparkles size={20} />
         </button>
       )}
+      {VAULT_ID && <Onboarding />}
       <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} />
     </div>
   );

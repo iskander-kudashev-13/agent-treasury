@@ -11,11 +11,10 @@ import { AgentNewPage } from "@/pages/AgentNewPage";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { PaymentsPage } from "@/pages/PaymentsPage";
 import { PayoutDetailPage } from "@/pages/PayoutDetailPage";
-import { PayoutsPage } from "@/pages/PayoutsPage";
-import { PolicyPage } from "@/pages/PolicyPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { TradingGuidePage } from "@/pages/TradingGuidePage";
 import { TradingPage } from "@/pages/TradingPage";
-import { TreasuryPage } from "@/pages/TreasuryPage";
+import { HomePage } from "@/pages/HomePage";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
 
@@ -34,17 +33,19 @@ export function App() {
               <HashRouter>
                 <Routes>
                   <Route element={<AppLayout />}>
-                    <Route index element={<TreasuryPage />} />
+                    <Route index element={<HomePage />} />
                     <Route path="agents" element={<AgentsPage />} />
                     <Route path="agents/new" element={<AgentNewPage />} />
                     <Route path="agents/:id" element={<AgentDetailPage />} />
                     <Route path="payments" element={<PaymentsPage />} />
                     <Route path="recipients" element={<Navigate to="/payments?tab=recipients" replace />} />
-                    <Route path="payouts" element={<PayoutsPage />} />
+                    <Route path="payouts" element={<Navigate to="/payments?tab=history" replace />} />
+                    <Route path="treasury" element={<Navigate to="/" replace />} />
                     <Route path="payouts/:id" element={<PayoutDetailPage />} />
                     <Route path="trading" element={<TradingPage />} />
                     <Route path="trading/guide" element={<TradingGuidePage />} />
-                    <Route path="policy" element={<PolicyPage />} />
+                    <Route path="settings" element={<SettingsPage />} />
+                    <Route path="policy" element={<Navigate to="/settings" replace />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Route>
                 </Routes>

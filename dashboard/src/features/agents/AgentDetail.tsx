@@ -79,7 +79,7 @@ export function AgentDetail({ id }: { id: string }) {
     <>
       <AgentHeader agent={agent} vaultPaused={vaultPaused} />
       {agent.status === "Paused" && <Callout accent="warn">{t("ag.pausedCallout", { name: agent.name })}</Callout>}
-      {agent.open_approvals > 0 && <Callout accent="warn" icon={<Icons.Clock size={15} />} action={<Link to="/payouts">{t("ag.review")}</Link>}>{t("ag.waitingApproval", { count: agent.open_approvals })}</Callout>}
+      {agent.open_approvals > 0 && <Callout accent="warn" icon={<Icons.Clock size={15} />} action={<Link to="/payments?tab=approvals">{t("ag.review")}</Link>}>{t("ag.waitingApproval", { count: agent.open_approvals })}</Callout>}
       {missed.missed.length > 0 && (
         <Callout accent="warn" action={<Link to="/payments?tab=scheduled">{t("ag.viewSchedule")}</Link>}>
           {t("ag.missedDetail", { count: missed.missed.length, name: agent.name })}

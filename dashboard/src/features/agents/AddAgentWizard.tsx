@@ -190,7 +190,7 @@ export function AddAgentWizard() {
               {rich("wiz.done1", { agentId: <span className="mono">AGENT_ID={done.id}</span>, vaultId: <span className="mono">VAULT_CONTRACT_ID={VAULT_ID}</span> })}
             </li>
             <li>
-              {rich("wiz.done2", { policy: <Link to="/policy">{t("nav.policy")}</Link> })}
+              {rich("wiz.done2", { policy: <Link to="/settings?tab=advanced">{t("nav.settings")}</Link> })}
             </li>
             <li>
               {rich("wiz.done3", { pin: <strong>{t("ag.pinAccount")}</strong> })}
@@ -279,7 +279,7 @@ export function AddAgentWizard() {
             {(a11y) => <Input {...a11y} mono value={pinned} placeholder={t("wiz.pinPlaceholder")} state={pinErr ? "error" : "default"} onChange={(e) => setPinned(e.target.value.trim().toLowerCase())} />}
           </Field>
           <Callout accent="info">
-            {rich("wiz.teeUnpinnedInfo", { policy: <Link to="/policy">{t("nav.policy")}</Link> })}
+            {rich("wiz.teeUnpinnedInfo", { policy: <Link to="/settings?tab=advanced">{t("nav.settings")}</Link> })}
           </Callout>
         </Card>
       )}

@@ -123,11 +123,11 @@ export function parseNumber(p: unknown): NumberData | null {
 export const SOURCE_ROUTE: Record<NumberSource, string> = {
   balance: "/",
   upcoming: "/payments?tab=scheduled",
-  payouts: "/payouts",
+  payouts: "/payments?tab=history",
   schedules: "/payments?tab=scheduled",
   agents: "/agents",
-  policy: "/policy",
-  rejections: "/payouts",
+  policy: "/settings",
+  rejections: "/agents",
 };
 
 export interface UpcomingData {
