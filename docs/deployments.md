@@ -29,3 +29,23 @@ Owner funding arrived through NEAR Intents 1Click: 22 USDC on Arbitrum (tx
 `0xc762fe9b36b088bd91285be2da3a0f4e7c9c8e77191cbe7e4bfa5d2f4a0914fb`) → 21.993669 USDC on NEAR to `agenthack.near`
 (tx `XzyqfEnvkaZnAdj7Fgy8er5YDDkLPx9Bj4SLCa8KnPn`).
 Explorer: https://nearblocks.io/address/vault.agenthack.near
+
+### Mainnet trading session, 2026-11-03 (observed)
+
+- Key agent `hl-trader.agenthack.near` (pubkey `ed25519:EB79tsJTx5zLrdmNkzpKb22v5i8hpUPzs6G5pRt3dKgk`): Allowlist `hypercore`
+  `0x072994Aa1Bdb9886Ce04f6D42c6ee513fA92ab0d`, 20 USDC/day and per payment, 1/day, threshold 0, expires 2026-11-05 12:25 UTC.
+- HL API wallet `0xCEB4d3978251633EBA50fE4FA233edc94c1A1E49`, approved with the plain name `agent-treasury` (owner's choice:
+  HL set 90 days); removed by the owner after the session (`extraAgents` → `[]`).
+- Top-up payout 0: 20 USDC vault → 1Click → **19.68086 USDC** on Hyperliquid in ~80 s (NEAR tx
+  `APgBkRE9VRSohcrBPGSJRAGyp2kzcanHvdtYEP29dQz5`, HL tx `0x16bd4eb2de1649b377ec40411d83b4055e7286f570b3c5370f917dd41c390249`).
+  Audit M3 answered: the landing is an HL `userNonFundingLedgerUpdates` entry of type **`send`** (spot USDC from 1Click's HL
+  account `0x6b9e773128f453f5c2c60935ee2de2cbc5390a24`); the worker counted it as `external_inflow`, `net_funded_usdc` =
+  19.68086. The vault payout stayed `Sent` (nobody reports the terminal status on a `requires_tee` vault without a TEE worker).
+- AI-agent bot `claude-hype` (ADR-0007, HYPE/USDC, order 12 / position 25 / loss 2 / 10 a day) over MCP: buy 0.12 HYPE @ 85.932
+  filled (cloid `0xa277ef4740ed65b4…0001`); sell 100% refused `MIN_NOTIONAL` (fee taken in HYPE leaves 0.1199 → 0.11 lot,
+  9.37 USDC < 10); buy 100 USDC refused `MAX_ORDER`; PURR (prompt injection) refused `PAIR_NOT_ALLOWED`; Stop → token
+  revoked → `AGENT_UNAUTHORIZED`.
+- Rules bot `hype-daily` (rules compiled by NEAR AI from plain words): buy 0.12 HYPE @ 85.69 at confirm (cloid
+  `0x8d0b7dea3634814f…0002`).
+- Kill all: both bots `halted` (`KILLED`), `hl-trader` `Paused` on the vault, 0 open orders. Left on HL: 0.2398 HYPE + 0.46 USDC
+  (owner's account); vault 1.90 USDC.
