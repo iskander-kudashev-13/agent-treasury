@@ -37,6 +37,8 @@ export type ChatItem =
       status: "draft" | "signed" | "discarded";
       /** When the worker accepted the signed rules. */
       confirmedAt: number | null;
+      /** The chat's trading target when the card arrived (bot id, "new" or null = not chosen: the card asks). */
+      target: string | null;
     }
   | { kind: "notice"; id: string; text: string; tone: "error" | "info" };
 

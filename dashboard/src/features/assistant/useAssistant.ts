@@ -95,7 +95,7 @@ export function useAssistant() {
         }
         case "trading_rules": {
           const id = cardId(myTurn, ev.proposal.id);
-          update((cur) => (cur.some((i) => i.id === id) ? cur : [...closeStreaming(cur), { kind: "trading_rules", id, proposal: ev.proposal, status: "draft", confirmedAt: null }]));
+          update((cur) => (cur.some((i) => i.id === id) ? cur : [...closeStreaming(cur), { kind: "trading_rules", id, proposal: ev.proposal, status: "draft", confirmedAt: null, target: botRef.current }]));
           return;
         }
         case "malformed_proposal":

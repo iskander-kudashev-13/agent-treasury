@@ -1,7 +1,9 @@
 import { useT, rich, t } from "@/i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Button, Callout, cx, Hash, Icons, ProposalActions, ProposalCard, SigningHint } from "@/kit";
+import { useBots } from "@/features/trading/useBots";
+import { needsBotChoice, resolveBotTarget, type BotChoice } from "./botTarget";
+import { Button, Callout, cx, Hash, Icons, Input, ProposalActions, ProposalCard, SigningHint } from "@/kit";
 import { explorerTxUrl } from "@/lib/config";
 import { proposalRows, type RowLookups } from "@/lib/proposals";
 import { confirmTradingRules } from "@/lib/tradingClient";
@@ -125,6 +127,11 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const p = item.proposal;
+  const { data: botsLoad } = useBots();
+  const choose = needsBotChoice(item.target);
+  const [choice, setChoice] = useState<BotChoice | null>(null);
+  const [newName, setNewName] = useState(p.rules.name);
+  const target = resolveBotTarget({ chatTarget: item.target, choice, proposed: p.bot, newName, takenIds: botsLoad?.bots.map((b) => b.id) ?? [] });
 
   useEffect(() => {
     let live = true;
@@ -139,14 +146,14 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
   const mismatch = localHash !== null && localHash !== p.hash;
   const live = status?.enabled ? status : null;
   const signed = item.status === "signed";
-  const blocked = !p.validation.ok || mismatch || localHash === null || live === null || trust?.kind !== "ok" || !canSign || accountId === null;
+  const blocked = !p.validation.ok || mismatch || localHash === null || live === null || trust?.kind !== "ok" || !canSign || accountId === null || target === null;
 
   const confirm = async () => {
-    if (accountId === null || busy) return;
+    if (accountId === null || busy || target === null) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await confirmTradingRules(p.rules, { accountId, signMessage, trustedHlAccount: trusted, botId: p.bot?.id ?? "default", ...(p.bot?.is_new ? { botName: p.bot.name } : {}) });
+      const r = await confirmTradingRules(p.rules, { accountId, signMessage, trustedHlAccount: trusted, botId: target.botId, ...(target.botName ? { botName: target.botName } : {}) });
       void qc.invalidateQueries({ queryKey: tradingKeys.all });
       onConfirmed(r.active?.confirmed_at_ms ?? Date.now());
     } catch (e) {
@@ -165,10 +172,28 @@ export function TradingRulesCardView({ item, canSign, onConfirmed, onDiscard }: 
           {signed ? tr("as.rulesActive") : tr("kit.propDraft")}
         </span>
       </header>
-      {p.bot && (
-        <p className="m-0 text-xs text-ink-muted">
-          {tr("as.rulesForBot")} <strong className="font-semibold text-ink">{p.bot.is_new ? tr("as.rulesNewStrategy", { name: p.bot.name }) : p.bot.name}</strong>
+      {!choose && p.bot && (
+        <p className="m-0 flex items-center gap-2 rounded-card border border-line-strong bg-surface-sunken px-3 py-2 text-sm font-semibold text-ink">
+          <Icons.TrendingUp size={16} />
+          <span>
+            {tr("as.rulesForBot")} {p.bot.is_new ? tr("as.rulesNewStrategy", { name: p.bot.name }) : p.bot.name}
+          </span>
         </p>
+      )}
+      {choose && !signed && (
+        <fieldset className="m-0 flex flex-col gap-2 rounded-card border border-line-strong p-3">
+          <legend className="px-1 text-sm font-semibold text-ink">{tr("as.chooseTitle")}</legend>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input type="radio" name={`bot-${item.id}`} checked={choice === "update"} onChange={() => setChoice("update")} disabled={busy} />
+            {tr("as.chooseUpdate", { name: p.bot?.name ?? "default" })}
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input type="radio" name={`bot-${item.id}`} checked={choice === "new"} onChange={() => setChoice("new")} disabled={busy} />
+            {tr("as.chooseNew")}
+          </label>
+          {choice === "new" && <Input aria-label={tr("as.chooseNewName")} placeholder={tr("as.chooseNewName")} value={newName} maxLength={60} onChange={(e) => setNewName(e.target.value)} disabled={busy} />}
+          {choice === null && <p className="m-0 text-xs text-ink-subtle">{tr("as.chooseFirst")}</p>}
+        </fieldset>
       )}
       <RulesView rules={p.rules} hash={localHash ?? undefined} {...(live ? { mids: midsOf(live) } : {})} />
       <p className="m-0 text-xs text-ink-subtle">{tr("as.rulesShown")}</p>

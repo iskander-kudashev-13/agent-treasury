@@ -4,6 +4,7 @@ import { AI_ENABLED } from "@/lib/config";
 import { IconButton, Icons } from "@/kit";
 import { AssistantContent } from "@/features/assistant/AssistantContent";
 import { AssistantPrivacyBadge } from "@/features/assistant/PrivacyBadge";
+import { useBots } from "@/features/trading/useBots";
 import { useAssistant } from "@/features/assistant/useAssistant";
 import { useAssistantPanel } from "./AssistantContext";
 
@@ -19,7 +20,9 @@ export function AssistantPanel() {
 
 function Panel() {
   const t = useT();
-  const { open, setOpen, inputRef, prefill, clearPrefill } = useAssistantPanel();
+  const { open, setOpen, inputRef, prefill, clearPrefill, tradingBot, clearTradingBot } = useAssistantPanel();
+  const { data: bots } = useBots();
+  const botName = tradingBot === null ? null : tradingBot === "new" ? t("as.rulesNewShort") : (bots?.bots.find((b) => b.id === tradingBot)?.name ?? tradingBot);
   const assistant = useAssistant();
 
   useEffect(() => {
@@ -55,6 +58,17 @@ function Panel() {
           <Icons.X size={16} />
         </IconButton>
       </div>
+      {botName !== null && (
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2">
+          <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-line-strong bg-surface px-2.5 py-0.5 text-xs">
+            <Icons.TrendingUp size={12} />
+            <span className="truncate">{t("as.agentChip", { name: botName })}</span>
+            <button type="button" aria-label={t("as.agentChipClear")} className="inline-flex cursor-pointer border-0 bg-transparent p-0 text-ink-muted hover:text-ink" onClick={clearTradingBot}>
+              <Icons.X size={12} />
+            </button>
+          </span>
+        </div>
+      )}
       <AssistantContent assistant={assistant} inputRef={inputRef} />
     </aside>
   );

@@ -28,6 +28,7 @@ interface AssistantCtx {
   openWith: (text: string, tradingBot?: string) => void;
   /** Trading agent the next chat is about: a bot id, "new" for a new strategy, or null (ADR-0006 §9). Sent as `trading_bot`. */
   tradingBot: string | null;
+  clearTradingBot: () => void;
   /** Pending prefill text, consumed by the panel. */
   prefill: string | null;
   clearPrefill: () => void;
@@ -74,7 +75,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [open]);
 
   const value = useMemo(
-    () => ({ open, setOpen, toggle, inputRef, openWith, tradingBot, prefill, clearPrefill: () => setPrefill(null) }),
+    () => ({ open, setOpen, toggle, inputRef, openWith, tradingBot, clearTradingBot: () => setTradingBot(null), prefill, clearPrefill: () => setPrefill(null) }),
     [open, setOpen, toggle, openWith, tradingBot, prefill],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
