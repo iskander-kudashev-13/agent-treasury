@@ -27,4 +27,4 @@ dist/
 .playwright-mcp/
 
 # trading module state (API wallet key, rules, engine state, log) - never commit
-.trading/
+.trading*/
