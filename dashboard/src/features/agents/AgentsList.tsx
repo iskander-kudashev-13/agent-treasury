@@ -6,9 +6,8 @@ import { BotRow, BotRowsSkeleton, ConnectHlRow, useTradingRows } from "@/feature
 import { sortAgents } from "@/lib/agentView";
 import type { AgentView } from "@/lib/types";
 import { useAgents, usePolicy, useRejections } from "@/lib/useVault";
-import { AI_ENABLED } from "@/lib/config";
+import { TRADING_NEW_PATH } from "@/lib/agentKind";
 import { TRADER_AGENT_ID } from "@/lib/tradingClient";
-import { useAssistantPanel } from "@/features/layout/AssistantContext";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { AgentRow } from "./AgentRow";
 import { useMissedByAgent } from "./useAgentData";
@@ -42,7 +41,6 @@ export function AgentsList() {
   const nowMs = useNow();
   const list = sortAgents(agents.data as AgentView[]);
   const trading = useTradingRows();
-  const { openWith } = useAssistantPanel();
   const [params, setParams] = useSearchParams();
   const raw = params.get("kind") ?? "all";
   const kind: Kind = KINDS.includes(raw) ? (raw as Kind) : "all";
@@ -68,9 +66,9 @@ export function AgentsList() {
       ]}
     />
   );
-  const canCreate = AI_ENABLED && !trading.showConnect && !trading.loading;
+  const canCreate = !trading.showConnect && !trading.loading;
   const newStrategy = canCreate && (
-    <Button size="sm" variant="assistant" icon={<Icons.Sparkles size={14} />} disabled={!canAct} onClick={() => openWith(t("trading.bots.newStrategyPrefill"), "new")}>
+    <Button size="sm" variant="secondary" icon={<Icons.Plus size={14} />} disabled={!canAct} onClick={() => navigate(TRADING_NEW_PATH)}>
       {t("trading.bots.newStrategy")}
     </Button>
   );

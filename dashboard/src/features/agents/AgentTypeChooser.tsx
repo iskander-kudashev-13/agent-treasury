@@ -2,9 +2,7 @@ import { useT } from "@/i18n";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { cx, Icons } from "@/kit";
-import { AI_ENABLED } from "@/lib/config";
-import { TRADING_CONNECT_PATH, TRADING_LIST_PATH } from "@/lib/agentKind";
-import { useAssistantPanel } from "@/features/layout/AssistantContext";
+import { TRADING_CONNECT_PATH, TRADING_NEW_PATH } from "@/lib/agentKind";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { useTradingRows } from "@/features/trading/BotRows";
 
@@ -32,24 +30,22 @@ function KindCard({ icon, title, desc, note, disabled, onClick }: { icon: ReactN
 
 /**
  * `/agents/new` first step: what the agent will do. Payments opens the vault-agent wizard (`?type=payments`). Trading
- * strategies are worker-side bots (ADR-0006) written in the assistant chat, so that card opens the chat with the
- * "new strategy" target, or sends the owner to connect Hyperliquid first.
+ * strategies are worker-side bots (ADR-0006): that card opens the strategy wizard (`/trading/new`), or sends the owner to
+ * connect Hyperliquid first.
  */
 export function AgentTypeChooser() {
   const t = useT();
   const navigate = useNavigate();
   const { canAct } = useOwner();
   const trading = useTradingRows();
-  const { openWith } = useAssistantPanel();
-  const tradingOn = AI_ENABLED && trading.active;
+  const tradingOn = trading.active;
   const needsConnect = tradingOn && trading.showConnect;
   const startTrading = () => {
     if (needsConnect) {
       navigate(TRADING_CONNECT_PATH);
       return;
     }
-    openWith(t("trading.bots.newStrategyPrefill"), "new");
-    navigate(TRADING_LIST_PATH);
+    navigate(TRADING_NEW_PATH);
   };
   const tradingNote = !tradingOn ? t("ag.type.trading.unavailable") : needsConnect ? t("ag.type.trading.connect") : t("ag.type.trading.next");
   return (

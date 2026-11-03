@@ -6,7 +6,7 @@
 import { t } from "@/i18n";
 import { clearSession, loadSession, signInWithWallet, type AiSession, type SignMessageFn } from "./assistantClient";
 import { NETWORK, VAULT_ID, WORKER_URL } from "./config";
-import { confirmationMessage, hashRuleSet, parseRuleSet, type RuleSetV1 } from "./tradingRules";
+import { confirmationMessage, hashRuleSet, parseRuleSet, type Rule, type RuleSetV1 } from "./tradingRules";
 import type { HistoryRange } from "./tradingMetrics";
 
 export const TRADER_AGENT_ID = "hl-trader";
@@ -401,6 +401,34 @@ export async function withOwnerSession<T>(accountId: string, signMessage: SignMe
     const fresh = await signInWithWallet(signMessage, accountId);
     return fn(fresh.token);
   }
+}
+
+/* ───────────── rules from plain words (no signing) ───────────── */
+
+/** Room wide enough that only the rule's own structure is checked when a proposed rule is validated alone. */
+const LOOSE_LIMITS = { max_position_usdc: "1000000000", max_order_usdc: "1000000000", daily_loss_stop_usdc: "1", max_orders_per_day: 50 } as const;
+
+/**
+ * The `rules[]` of a proposed rule set, each checked on its own with the strict parser (a rule that does not parse is dropped,
+ * so nothing the dashboard cannot render reaches the list). Name and limits of the proposal are ignored: the wizard owns them.
+ */
+export function parseProposedRules(raw: unknown): Rule[] {
+  const rs = obj(obj(raw).rules);
+  return arr(rs.rules, 20).flatMap((r) => {
+    const pair = isObj(r) && typeof r.pair === "string" ? r.pair : "";
+    const one = parseRuleSet({ version: 1, name: "x", pairs: [pair], limits: { ...LOOSE_LIMITS }, rules: [r] });
+    return one.ok && one.rules.rules[0] ? [one.rules.rules[0]] : [];
+  });
+}
+
+/**
+ * `POST /trading/rules/propose`: the worker's model turns a sentence into rules (10-30 s). Nothing is signed or placed. The
+ * rules come back as untrusted data: parsed by `parseProposedRules`, rendered by the dashboard's own renderer.
+ */
+export async function proposeTradingRules(token: string, text: string, signal?: AbortSignal): Promise<{ rules: Rule[]; warnings: string[] }> {
+  const j = await request("/rules/propose", { method: "POST", token, body: { text: text.slice(0, 2000) }, ...(signal ? { signal } : {}) });
+  const v = obj(obj(j).validation);
+  return { rules: parseProposedRules(j), warnings: arr(v.warnings, 20).flatMap((e) => (typeof e === "string" ? [e.slice(0, 300)] : [])) };
 }
 
 /* ───────────── rules confirmation (NEP-413) ───────────── */
