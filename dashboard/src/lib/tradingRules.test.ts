@@ -169,8 +169,9 @@ describe("confirmationMessage v3 (agent mode)", () => {
     expect(confirmationMessage({ ...p, mode: "agent" })).not.toBe(confirmationMessage(p));
     expect(() => confirmationMessage({ vault: p.vault, agentId: p.agentId, hlNetwork: p.hlNetwork, hlAccount: p.hlAccount, rulesSha256: p.rulesSha256, mode: "agent" })).toThrow();
   });
-  it("matches the shared v3 vectors when the worker side has added them", () => {
-    const v3 = (vectors.messages as unknown as Record<string, MsgVector[] | undefined>).v3 ?? [];
+  it("matches the shared v3_agent vectors", () => {
+    const v3 = (vectors.messages as unknown as Record<string, MsgVector[] | undefined>).v3_agent ?? [];
+    expect(v3.length).toBeGreaterThan(0);
     for (const v of v3) expect(confirmationMessage(v.input as Parameters<typeof confirmationMessage>[0])).toBe(v.message);
   });
 });
