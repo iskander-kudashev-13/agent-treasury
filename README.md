@@ -131,6 +131,10 @@ Requirements (versions used): Rust stable (1.99.1) with `cargo`, Node.js ≥ 22 
 NEAR account, no keys and send no transactions (D2, E and F2 send testnet transactions from your own accounts; nothing
 needs mainnet). Path F (trading agent) is in the section "Trading agent (Hyperliquid)".
 
+```bash
+git clone https://github.com/iskander-kudashev-13/agent-treasury.git && cd agent-treasury
+```
+
 ### A. Run all tests offline
 
 Contract (first run from a clean clone: about 1 min to compile clippy, 1 min to compile the tests, 50 s to run them):
