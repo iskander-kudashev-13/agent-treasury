@@ -48,6 +48,8 @@ interface Case {
   setup?: (hl: FakeHlT, hard: HardLimits) => void;
   state?: (s: EngineState, botId: string) => void;
   expectCode: string | null;
+  /** Audit AL4: the agent path refuses an off-mandate / not-allowed pair BEFORE `checkOrder` (same code, same text). */
+  agentPairFirst?: true;
 }
 
 const ioc = (side: "buy" | "sell", size: Action["size"]): Action => ({ side, size, order: { type: "ioc" } });
@@ -67,7 +69,7 @@ const cases: Case[] = [
     expectCode: "ACCOUNT_POSITION_CAP",
   },
   { name: "below the HL minimum", action: ioc("buy", { usdc: "10" }), expectCode: "MIN_NOTIONAL" },
-  { name: "pair outside the signed pairs", action: ioc("buy", { usdc: "12" }), pairs: ["PURR/USDC"], pair: "HYPE/USDC", expectCode: "PAIR_NOT_IN_RULES" },
+  { name: "pair outside the signed pairs", action: ioc("buy", { usdc: "12" }), pairs: ["PURR/USDC"], pair: "HYPE/USDC", expectCode: "PAIR_NOT_IN_RULES", agentPairFirst: true },
   { name: "the bot's own position cap", action: ioc("buy", { usdc: "12" }), limits: { max_position_usdc: "11" }, expectCode: "POSITION_CAP" },
   { name: "sell with no own coins", action: ioc("sell", { usdc: "12" }), setup: (hl) => { hl.setBalances(ACCOUNT, [{ coin: "USDC", total: "100", hold: "0" }, { coin: "HYPE", total: "1", hold: "0" }]); }, expectCode: "INSUFFICIENT_BOT_BASE" },
 ];
@@ -121,6 +123,15 @@ describe("same path: DSL rule vs agent intent", () => {
     it(c.name, async () => {
       const a = await run(c, "rules");
       const b = await run(c, "agent");
+      if (c.agentPairFirst === true) {
+        expect(a.calls.length).toBe(1);
+        expect(a.calls[0]?.code).toBe(c.expectCode);
+        expect(b.calls).toHaveLength(0); // refused before the book read and the gate
+        expect(b.skip).toBe(a.skip);
+        expect(b.placed).toBe(0);
+        expect(a.placed).toBe(0);
+        return;
+      }
       expect(b.calls.length).toBe(a.calls.length);
       for (let i = 0; i < a.calls.length; i++) {
         const x = a.calls[i] as (typeof calls)[number];

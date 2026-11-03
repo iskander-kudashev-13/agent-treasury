@@ -15,7 +15,7 @@ import { z } from "zod";
 import { clientKey } from "../ai/route.js";
 import { RateLimiter } from "../ai/ratelimit.js";
 import { verifyToken } from "../ai/session.js";
-import { AGENT_BODY_MAX_BYTES, agentOrderBody, canonicalBody, intentOf, rejected, sanitizeNote, verifyAgentToken } from "./agent.js";
+import { AGENT_BODY_MAX_BYTES, OUTCOME_UNKNOWN, OUTCOME_UNKNOWN_MESSAGE, agentOrderBody, canonicalBody, intentOf, rejected, sanitizeNote, verifyAgentToken } from "./agent.js";
 import { ConfirmError } from "./confirm.js";
 import type { ConfirmBody, RulesConfirmer } from "./confirm.js";
 import { ProposeError } from "./propose.js";
@@ -414,6 +414,29 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
 type Fail = (c: Context, status: ErrStatus, code: string, message: string) => Response;
 
 /**
+ * Reads the request body as UTF-8, at most `max` bytes, while it streams (audit AL9): a chunked body without Content-Length is
+ * cut off at the limit instead of being read whole. Null = too large.
+ */
+async function readBounded(c: Context, max: number): Promise<string | null> {
+  const stream = c.req.raw.body;
+  if (stream === null) return "";
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
  * `/agent/state` and `/agent/order` (ADR-0007 sections 3, 4, 9). Auth = the agent token; there is no bot id parameter anywhere.
  * A gate refusal of an order is a 200 with `status: "rejected"`; HTTP errors are only for the request itself.
  */
@@ -443,8 +466,8 @@ function mountAgentRoutes(app: Hono, d: TradingRouteDeps, h: { fail: Fail; throt
     if (t) return t;
     const len = Number(c.req.header("content-length") ?? 0);
     if (len > AGENT_BODY_MAX_BYTES) return fail(c, 413, "BODY_TOO_LARGE", "Request body too large (2 KB at most)");
-    const raw = await c.req.text();
-    if (Buffer.byteLength(raw, "utf8") > AGENT_BODY_MAX_BYTES) return fail(c, 413, "BODY_TOO_LARGE", "Request body too large (2 KB at most)");
+    const raw = await readBounded(c, AGENT_BODY_MAX_BYTES);
+    if (raw === null) return fail(c, 413, "BODY_TOO_LARGE", "Request body too large (2 KB at most)");
     const a = auth(c);
     if (a instanceof Response) return a;
     let value: unknown;
@@ -463,18 +486,40 @@ function mountAgentRoutes(app: Hono, d: TradingRouteDeps, h: { fail: Fail; throt
     const canon = canonicalBody(body);
     const g = d.service.agentGate.begin(a.botId, a.tokenId, key, canon);
     if (g.kind === "replay") return c.json(g.response);
+    if (g.kind === "wait") {
+      // Same key and body as a request that is still running: its answer, once (review M3 / audit AL2).
+      const first = await g.result;
+      if (first !== null) return c.json(first);
+      // The first request ended without an answer (its token was revoked or replaced meanwhile): authenticate again.
+      const again = auth(c);
+      if (again instanceof Response) return again;
+      return fail(c, 409, "ORDER_IN_FLIGHT", "The first request with this idempotency_key ended without a result; read the bot state before trying again");
+    }
     if (g.kind === "error") {
       if (g.retryAfterS !== undefined) c.header("Retry-After", String(g.retryAfterS));
       return fail(c, g.status, g.code, g.message);
     }
     try {
-      const res = await d.service.agentOrder(a.botId, intentOf(body), sanitizeNote(body.reason));
-      g.release(key, canon, res);
+      const res = await d.service.agentOrder(a.botId, a.tokenId, intentOf(body), sanitizeNote(body.reason));
+      g.release(res);
       return c.json(res);
-    } catch {
-      // agentOrder does not throw (the tick maps its own failures); fail closed anyway, without caching the answer.
-      g.abort();
-      return c.json(rejected("INTERNAL_ERROR", "The worker failed while handling this order; its outcome is unknown, so read the bot state before trying again", d.service.agentRemaining(a.botId)));
+    } catch (e) {
+      // The token was revoked, replaced or expired while the request waited for the slot (audit AL3): nothing ran.
+      if (e instanceof ServiceError && e.status === 401) {
+        g.abort();
+        return fail(c, 401, e.code, e.message);
+      }
+      // agentOrder maps the tick's own failures; anything else may have happened after placement. Fail closed with a FINAL
+      // code (review M1/L5): never a transient one whose retry could place a second order.
+      let remaining = { orders: 0, loss_usdc: "0" };
+      try {
+        remaining = d.service.agentRemaining(a.botId);
+      } catch {
+        /* keep the zero answer */
+      }
+      const res = rejected(OUTCOME_UNKNOWN, OUTCOME_UNKNOWN_MESSAGE, remaining);
+      g.release(res);
+      return c.json(res);
     }
   });
 }

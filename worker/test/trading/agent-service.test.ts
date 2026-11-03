@@ -235,26 +235,30 @@ describe("agent routes", () => {
     expect(log.entries.find((e: any) => e.source === "agent").note).toBe("a b c d e");
   });
 
-  it("Stop blocks without a tick (BOT_HALTED); state keeps working; Resume gives a new token that trades", async () => {
+  it("Stop = full cut-off: the token is dead at once (401, no tick); Resume (re-sign) gives a new token that trades; kill-all kills it too", async () => {
     const h = harness({ agent: AGENT });
     const { token } = await connect(h);
     await h.service.killBot("hype-agent");
+    expect(h.service.registry.get("hype-agent")?.agent).toBeNull();
     const before = h.hl.midsCalls;
-    const r = await json(await order(h, token, { pair: "HYPE/USDC", side: "buy", usdc: "12" }));
-    expect(r).toMatchObject({ status: "rejected", code: "BOT_HALTED", final: true });
+    const r = await order(h, token, { pair: "HYPE/USDC", side: "buy", usdc: "12" });
+    expect(r.status).toBe(401);
+    expect((await json(r)).code).toBe("AGENT_UNAUTHORIZED");
     expect(h.hl.midsCalls).toBe(before);
     expect(h.hl.placed).toHaveLength(0);
-    const s = await json(await state(h, token));
-    expect(s.can_trade).toBe(false);
-    expect(s.bot.state).toBe("halted");
-    const { token: t2 } = await connect(h);
     expect((await state(h, token)).status).toBe(401);
+    // The bot itself is halted (the owner sees it), and the halt still blocks if the revoke had failed.
+    const d = await json(await h.app.request("/trading/bots/hype-agent", { headers: h.authed() }));
+    expect(d.bot.state).toBe("halted");
+    expect(d.agent.connected).toBe(false);
+    const { token: t2 } = await connect(h);
     later(h);
     expect((await json(await order(h, t2, { pair: "HYPE/USDC", side: "buy", usdc: "12" }))).status).toBe("filled");
-    // kill all: KILLED
+    // kill all: that token is dead too
     await h.service.kill();
     later(h);
-    expect((await json(await order(h, t2, { pair: "HYPE/USDC", side: "buy", usdc: "12" }))).code).toBe("KILLED");
+    expect((await order(h, t2, { pair: "HYPE/USDC", side: "buy", usdc: "12" })).status).toBe(401);
+    expect(h.hl.placed).toHaveLength(1);
   });
 
   it("archive revokes the token", async () => {

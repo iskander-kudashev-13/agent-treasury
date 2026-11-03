@@ -188,7 +188,16 @@ export interface TickInput {
  */
 export type AttemptOutcome =
   | { placed: false; code: string; reason: string; killed?: true }
-  | { placed: true; cloid: string; price: Fx; size: Fx; notional: Fx; result: HlOrderResult };
+  | {
+      placed: true;
+      cloid: string;
+      price: Fx;
+      size: Fx;
+      notional: Fx;
+      result: HlOrderResult;
+      /** The order call threw (network error, timeout): HL may or may not have the order. The service answers OUTCOME_UNKNOWN. */
+      outcomeUnknown?: true;
+    };
 
 /** The part of `TradingStatus` the engine knows. The service adds enabled/network/account/vault/agent/active_rules/bots. */
 export type StatusPieces = Omit<TradingStatus, "enabled" | "hl_network" | "hl_account" | "vault" | "agent_id" | "active_rules" | "bots" | "max_bots" | "agent_trading">;
@@ -992,6 +1001,13 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
      */
     const attempt = async (ctx: BotCtx, cand: Candidate): Promise<AttemptOutcome | TickResult> => {
       const { bot, active1, rules, s, botEff } = ctx;
+      // Audit AL4: an agent may name ANY pair, so for agent orders the pair checks of `checkOrder` run first (same codes, same
+      // text): an off-mandate request costs no HL read and gets the code the owner expects. DSL rules are always on mandate
+      // pairs, so their path is unchanged (checkOrder still runs both checks below for every order).
+      if (cand.source === "agent") {
+        if (!cfg.hard.allowedPairs.includes(cand.pair)) return refuse(bot.id, s, cand, "PAIR_NOT_ALLOWED", `${cand.pair} is not in TRADING_ALLOWED_PAIRS`);
+        if (!rules.pairs.includes(cand.pair)) return refuse(bot.id, s, cand, "PAIR_NOT_IN_RULES", `${cand.pair} is not in the active rule set's pairs`);
+      }
       const info = pairMap.get(cand.pair);
       const midStr = midsRead.mids[cand.pair];
       if (info === undefined || midStr === undefined) return refuse(bot.id, s, cand, "NO_MARKET", `no spot pair or mid for ${cand.pair}`);
@@ -1079,6 +1095,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       }
       placed += 1;
       let result: HlOrderResult;
+      let outcomeUnknown = false;
       try {
         result = await hl.placeSpotOrder({
           assetId: info.assetId,
@@ -1089,7 +1106,9 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
           cloid,
         });
       } catch (e) {
+        // A throw (not an HL error status, see hl/nktkas.ts) leaves the outcome unknown; fills/open orders reconcile it later.
         result = { status: "rejected", error: errMsg(e) };
+        outcomeUnknown = true;
       }
       s.cloidRule = Object.fromEntries(Object.entries({ ...(s.cloidRule ?? {}), [cloid]: cand.ruleId }).slice(-MAX_CLOID_RULES));
       if (cand.note !== null) s.cloidNote = Object.fromEntries(Object.entries({ ...(s.cloidNote ?? {}), [cloid]: cand.note }).slice(-MAX_CLOID_RULES));
@@ -1107,7 +1126,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
         cloid,
         ...("oid" in result ? { oid: result.oid } : {}),
         ...(cand.source === "agent"
-          ? { source: "agent" as const, ...(result.status === "rejected" ? { code: "HL_REJECTED" } : {}), ...(cand.note !== null ? { note: cand.note } : {}) }
+          ? { source: "agent" as const, ...(result.status === "rejected" ? { code: outcomeUnknown ? "OUTCOME_UNKNOWN" : "HL_REJECTED" } : {}), ...(cand.note !== null ? { note: cand.note } : {}) }
           : {}),
       });
       if (result.status === "resting") {
@@ -1122,7 +1141,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
         freeBase.set(cand.pair, fxMax(0n, accountFree - sized.size));
         ctx.ownOpenSell.set(cand.pair, (ctx.ownOpenSell.get(cand.pair) ?? 0n) + sized.size);
       }
-      return { placed: true, cloid, price: sized.price, size: sized.size, notional: verdict.notional, result };
+      return { placed: true, cloid, price: sized.price, size: sized.size, notional: verdict.notional, result, ...(outcomeUnknown ? { outcomeUnknown: true as const } : {}) };
     };
 
     // ADR-0007 agent tick: no DSL rule of any bot is evaluated; the one intent goes through `attempt()`.

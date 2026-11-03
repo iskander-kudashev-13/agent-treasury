@@ -21,7 +21,7 @@ import { formatUsdc } from "agent-treasury-sdk";
 import { z } from "zod";
 import { addDec } from "./hl/format.js";
 import { BotRegistry, RegistryError, botKind, openRegistry } from "./bots.js";
-import { AgentGate, hlErrorText, rejected, responseMessage } from "./agent.js";
+import { AgentGate, OUTCOME_UNKNOWN, OUTCOME_UNKNOWN_MESSAGE, hlErrorText, plainText, rejected, responseMessage } from "./agent.js";
 import type { RemainingToday } from "./agent.js";
 import type { BotsFile } from "./bots.js";
 import { clearHalt, haltAll, haltBot, initialEngineState, runTick } from "./engine/tick.js";
@@ -110,7 +110,7 @@ export interface TradingServiceDeps {
 /** Service-level failure with an HTTP status the route maps one to one. */
 export class ServiceError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 502,
+    readonly status: 400 | 401 | 404 | 409 | 502,
     readonly code: string,
     message: string,
   ) {
@@ -559,7 +559,7 @@ export class TradingService {
         migratedFromV1: false,
       };
     } catch (e) {
-      this.fatal = `engine-state.json is unreadable (${errMsg(e)}); fix or delete it after checking that no halt was recorded`;
+      this.fatal = `engine-state.json is unreadable (${errMsg(e)}); fix or delete it after checking that no halt was recorded (and revoke every agent token first)`;
       return { state: initialEngineState(), prefixes: [], migratedFromV1: false };
     }
   }
@@ -697,7 +697,7 @@ export class TradingService {
    * One engine tick. `agent` (ADR-0007) makes it an agent tick: the same reads, gates and write-ahead, but in step 7 only that
    * intent is tried. Returns the tick result, or null when the tick did not run (an error status was set instead).
    */
-  private async runOnce(agent?: TickInput["agent"]): Promise<TickResult | null> {
+  private async runOnce(agent?: TickInput["agent"], probe?: { reached: boolean }): Promise<TickResult | null> {
     const now = this.now();
     const s = this.d.settings;
     const epoch = this.killEpoch;
@@ -793,6 +793,7 @@ export class TradingService {
               this.extraWarnings.set("persist", `engine state could not be saved: ${errMsg(e)}`);
               throw e;
             }
+            if (probe !== undefined) probe.reached = true; // the order call comes next (agent ticks: review M1)
           },
         },
         { nowMs: now, bots: botsIn, state: this.state, ...(agent !== undefined ? { agent } : {}) },
@@ -1346,6 +1347,9 @@ export class TradingService {
     // State file unusable: it is not touched; the halt goes to the marker file and is applied by the next start that can read it.
     const markerOk = this.fatal !== null ? this.writeHaltMarker(null, at, "KILLED", killDetail) : false;
     this.appendLog([{ at_ms: at, kind: "state", detail: `KILL SWITCH${why ? `: ${why}` : ""}` }]);
+    // Owner decision "Stop = full cut-off" (audit AM1): every stopped agent bot loses its token, so the cut-off does not depend on
+    // engine-state.json surviving. Best effort: the halt above already happened whatever this does.
+    this.revokeOnStop(this.registry.live().map((b) => b.id));
 
     // Wait (bounded) for the tick that is running: after it ends nothing else can create an order, so the cancel below
     // sees every order and our scheduleCancel is the last one.
@@ -1387,6 +1391,7 @@ export class TradingService {
     this.mutate((st) => haltBot(st, id, at, "KILLED", killDetail));
     const markerOk = this.fatal !== null ? this.writeHaltMarker(id, at, "KILLED", killDetail) : false;
     this.appendLog([{ at_ms: at, kind: "state", bot_id: id, detail: `KILL SWITCH (bot ${id})${why ? `: ${why}` : ""}` }]);
+    this.revokeOnStop([id]); // audit AM1: Stop also kills the agent token (best effort, after the halt)
     await this.waitTick();
     const c = await this.cancelWhere(this.ownsCloid(b.id));
     const saved = this.fatal !== null ? markerOk : this.persistState();
@@ -1398,6 +1403,36 @@ export class TradingService {
   // -------------------------------------------------------------------------------------------------------------------
   // Agent-driven trading (ADR-0007)
   // -------------------------------------------------------------------------------------------------------------------
+
+  /**
+   * Stop = full cut-off (owner decision, audit AM1): revokes the agent token of each listed agent bot that has one. Synchronous
+   * (bots.json commit), so an order that authenticated before the Stop and still waits for the slot fails its token re-check.
+   * Errors are logged, never thrown: the halt must not depend on the bots.json write.
+   */
+  private revokeOnStop(ids: readonly string[]): void {
+    for (const id of ids) {
+      const b = this.registry.get(id);
+      if (b === undefined || botKind(b) !== "agent" || b.agent == null) continue;
+      try {
+        if (this.registry.revokeAgentToken(id)) {
+          this.agentLastUsed.delete(id);
+          this.appendLog([{ at_ms: this.now(), kind: "state", bot_id: id, detail: "agent token revoked by the Stop" }]);
+        }
+      } catch (e) {
+        this.appendLog([{ at_ms: this.now(), kind: "state", bot_id: id, detail: `agent token revoke on Stop FAILED (the bot is halted; revoke it by hand): ${publicText(errMsg(e)) ?? ""}` }]);
+      }
+    }
+  }
+
+  /**
+   * Audit AL3 / review M2: the token that authenticated the request must still be the bot's current, unexpired token. Checked
+   * before the wait for the single-flight slot and again right after it (a revoke, Stop or re-sign may have happened meanwhile).
+   */
+  private assertAgentToken(botId: string, tokenId: string): void {
+    const rec = this.registry.get(botId)?.agent ?? null;
+    if (rec === null || rec.token_id !== tokenId) throw new ServiceError(401, "AGENT_UNAUTHORIZED", "Missing or invalid agent token");
+    if (this.now() >= rec.expires_at_ms) throw new ServiceError(401, "AGENT_TOKEN_EXPIRED", "The agent token has expired; ask the owner for a new one");
+  }
 
   /** Remembers the last authenticated agent request (memory only). */
   noteAgentUse(botId: string): void {
@@ -1458,15 +1493,19 @@ export class TradingService {
    * One agent order (ADR-0007 sections 4-5): cheap pre-check, then ONE engine tick that carries the intent, in the single-flight
    * slot (it waits for a running tick first). The engine decides; this only maps its outcome to the frozen response.
    */
-  async agentOrder(botId: string, intent: AgentIntent, note: string | null): Promise<AgentOrderResponse> {
+  async agentOrder(botId: string, tokenId: string, intent: AgentIntent, note: string | null): Promise<AgentOrderResponse> {
+    this.assertAgentToken(botId, tokenId);
     const pre = this.agentPrecheck(botId);
     if (pre !== null) {
       this.logAgentRefusal(botId, pre.code, pre.message, note);
       return rejected(pre.code, pre.message, this.agentRemaining(botId));
     }
     while (this.inflight) await this.inflight;
+    // Re-checked after the wait, synchronously before the slot is claimed (throws 401: nothing ran, nothing is cached).
+    this.assertAgentToken(botId, tokenId);
     // Claimed synchronously after the last check: no other tick can start in between.
-    const run = this.runOnce({ botId, intent, note });
+    const probe = { reached: false };
+    const run = this.runOnce({ botId, intent, note }, probe);
     const slot = run.then(
       () => undefined,
       () => undefined,
@@ -1483,6 +1522,12 @@ export class TradingService {
       }
     }
     const remaining = this.agentRemaining(botId);
+    // Review M1: the write-ahead succeeded, so the order call was about to run or ran, but no clean outcome came back (a throw
+    // after it in the tick or in the service). Final, and the agent must read the state first.
+    if (probe.reached && (r === null || r.agent === undefined || !r.agent.placed)) {
+      this.logAgentRefusal(botId, OUTCOME_UNKNOWN, OUTCOME_UNKNOWN_MESSAGE, note);
+      return rejected(OUTCOME_UNKNOWN, OUTCOME_UNKNOWN_MESSAGE, remaining);
+    }
     if (r === null || r.agent === undefined) {
       // The tick ended before step 7 (or did not run): the account state says why. No order was placed.
       const pieces = r?.status ?? this.last?.pieces;
@@ -1498,6 +1543,7 @@ export class TradingService {
     const order = { pair: intent.pair, side: intent.side, price_limit: fxStr(out.price, 8), size: fxStr(out.size, 8), notional_usdc: fxStr(out.notional), cloid: out.cloid };
     const base = { order, remaining_today: remaining, replayed: false, request_id: out.cloid };
     const res = out.result;
+    if (out.outcomeUnknown === true) return rejected(OUTCOME_UNKNOWN, OUTCOME_UNKNOWN_MESSAGE, remaining, order, out.cloid);
     switch (res.status) {
       case "rejected":
         return { ...rejected("HL_REJECTED", `Hyperliquid refused the order: ${hlErrorText(res.error)}`, remaining, order, out.cloid) };
@@ -1554,7 +1600,8 @@ export class TradingService {
       .slice(0, 10)
       .map((e) => ({ at_ms: e.at_ms, status: e.kind === "order" ? ("placed" as const) : ("rejected" as const), code: e.code ?? null }));
     return {
-      bot: { id: b.id, name: b.name, state: bst.state, state_reason: bst.reason },
+      // Audit AL5: the owner-session rename is a text channel to the agent; it gets the same plain-text treatment as a note.
+      bot: { id: b.id, name: plainText(b.name, 60) ?? b.id, state: bst.state, state_reason: bst.reason },
       can_trade: bst.state === "running" && st.state === "running",
       account: { state: st.state, state_reason: st.state_reason },
       mandate: {

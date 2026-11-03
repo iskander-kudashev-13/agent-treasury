@@ -133,20 +133,19 @@ describe("every refusing state, through the service mapping (final, no HL order)
     expect(h.hl.placed).toHaveLength(0);
   });
 
-  it("archived bot, called on the service directly (the route already gives 401): BOT_NOT_ACTIVE, no tick", async () => {
+  it("archived bot, called on the service directly (the route already gives 401): the token re-check refuses it, no tick", async () => {
     const h = harness({ agent: AGENT });
     await connect(h);
+    const tokenId = h.service.registry.get("hype-agent")?.agent?.token_id as string;
     await h.service.archive("hype-agent");
     const calls = h.hl.midsCalls;
-    const r = await h.service.agentOrder("hype-agent", { pair: "HYPE/USDC", side: "buy", size: { usdc: "12" } }, null);
-    expect(r).toMatchObject({ status: "rejected", code: "BOT_NOT_ACTIVE", final: true });
+    await expect(h.service.agentOrder("hype-agent", tokenId, { pair: "HYPE/USDC", side: "buy", size: { usdc: "12" } }, null)).rejects.toMatchObject({ status: 401, code: "AGENT_UNAUTHORIZED" });
     expect(h.hl.midsCalls).toBe(calls);
     expect(h.hl.placed).toHaveLength(0);
-    // And a DSL bot cannot be driven through the service either.
+    // And a DSL bot cannot be driven through the service either (it has no token record).
     await h.confirmOverHttp(dcaRules(), { botId: "dca", botName: "DCA" });
     const n = h.hl.placed.length;
-    const r2 = await h.service.agentOrder("dca", { pair: "HYPE/USDC", side: "buy", size: { usdc: "12" } }, null);
-    expect(r2).toMatchObject({ status: "rejected", code: "NOT_AGENT_BOT", final: true });
+    await expect(h.service.agentOrder("dca", tokenId, { pair: "HYPE/USDC", side: "buy", size: { usdc: "12" } }, null)).rejects.toMatchObject({ status: 401 });
     expect(h.hl.placed).toHaveLength(n);
   });
 
@@ -176,11 +175,12 @@ describe("concurrency: agent order + scheduled tick + owner actions", () => {
     await settle();
     open();
     await t;
-    const r = await json(await o);
+    const res = await o;
+    const r = await json(res);
     const kr = await k;
-    expect(r.status).toBe("rejected");
-    expect(r.final).toBe(true);
-    expect(["KILLED", "BOT_HALTED"]).toContain(r.code);
+    // Stop = full cut-off: the kill revoked the token, so the queued order fails its token re-check after the wait.
+    expect(res.status).toBe(401);
+    expect(r.code).toBe("AGENT_UNAUTHORIZED");
     expect(h.hl.placed).toHaveLength(0);
     expect(kr.steps.tick_wait).toBe("ok");
   });
@@ -237,13 +237,10 @@ describe("concurrency: agent order + scheduled tick + owner actions", () => {
     expect(h.hl.placed).toHaveLength(0);
   });
 
-  // BUG (ADR-0007 section 3 "Stop does not revoke; it blocks ... once a Stop happens, the old token can never place another
-  // order"). The token is verified once, in route.ts `auth()` (src/trading/route.ts:421-427), BEFORE
-  // `service.agentOrder` waits for the single-flight slot (src/trading/service.ts:1467 `while (this.inflight) await
-  // this.inflight;`). A Stop followed by a re-sign while the order waits clears the halt (`activated` -> `clearHalt`,
-  // service.ts ~1284) and rotates the token, yet the queued old-token order still runs its tick and reaches HL. Nothing
-  // re-checks the token (or a per-bot epoch captured at authentication) after the wait.
-  it.fails("BUG: Stop + re-sign while an old-token order waits: the old token must not place an order", async () => {
+  // Fixed (audit AL3 / review M2): the token is verified in route.ts `auth()` and then AGAIN by `service.agentOrder` right after
+  // the wait for the single-flight slot. A Stop (which also revokes, AM1) followed by a re-sign while the order waits rotates
+  // the token, so the queued old-token order is refused 401 and never runs a tick.
+  it("Stop + re-sign while an old-token order waits: the old token places nothing (401)", async () => {
     const h = harness({ agent: AGENT });
     const oldToken = await connect(h);
     const prefix = await prefixOf(h, "hype-agent");
@@ -262,16 +259,18 @@ describe("concurrency: agent order + scheduled tick + owner actions", () => {
     open();
     await t;
     await k;
-    const r = await json(await o);
+    const res = await o;
+    const r = await json(res);
     await resign;
     expect((await stateReq(h, `Bearer ${oldToken}`)).status).toBe(401); // the rotation itself worked
-    expect(r.status).toBe("rejected");
+    expect(res.status).toBe(401);
+    expect(r.code).toBe("AGENT_UNAUTHORIZED");
     expect(agentPlaced(h, prefix)).toBe(0);
   });
 
-  // Same family, lower severity: the owner's Disconnect (revoke, "toward safety") returns `revoked: true` while an order that
-  // authenticated just before it is still queued; that order is then placed (service.ts:1467, no re-check after the wait).
-  it.fails("BUG: revoke while an order waits: the revoked token must not place an order", async () => {
+  // Same family: the owner's Disconnect (revoke) while an order that authenticated just before it is still queued. The re-check
+  // after the wait refuses it.
+  it("revoke while an order waits: the revoked token places nothing (401)", async () => {
     const h = harness({ agent: AGENT });
     const token = await connect(h);
     later(h);
@@ -284,8 +283,9 @@ describe("concurrency: agent order + scheduled tick + owner actions", () => {
     expect(rv.revoked).toBe(true);
     open();
     await t;
-    const r = await json(await o);
-    expect(r.status).toBe("rejected");
+    const res = await o;
+    expect(res.status).toBe(401);
+    expect((await json(res)).code).toBe("AGENT_UNAUTHORIZED");
     expect(h.hl.placed).toHaveLength(0);
   });
 
@@ -410,19 +410,28 @@ describe("token matrix (beyond the existing one)", () => {
 });
 
 describe("idempotency (replay never places a second order)", () => {
-  it("replay after the bot was stopped returns the stored result and places nothing", async () => {
+  it("after a Stop the token is dead: neither a replay nor a new key reaches the cache or the engine (401)", async () => {
     const h = harness({ agent: AGENT });
     const token = await connect(h);
     const body = { ...BUY, idempotency_key: "key-000001" };
     const a = await json(await orderReq(h, token, body));
     expect(a.status).toBe("filled");
     await h.service.killBot("hype-agent");
-    const b = await json(await orderReq(h, token, body));
-    expect(b).toEqual({ ...a, replayed: true });
-    expect(h.hl.placed).toHaveLength(1);
-    // A new key on the stopped bot: refused.
+    const b = await orderReq(h, token, body);
+    expect(b.status).toBe(401);
     later(h);
-    expect((await json(await orderReq(h, token, { ...BUY, idempotency_key: "key-000002" }))).code).toBe("BOT_HALTED");
+    expect((await orderReq(h, token, { ...BUY, idempotency_key: "key-000002" })).status).toBe(401);
+    expect(h.hl.placed).toHaveLength(1);
+  });
+
+  it("replay after a refused order (bot left running) returns the stored result and places nothing", async () => {
+    const h = harness({ agent: AGENT });
+    const token = await connect(h);
+    const body = { ...BUY, idempotency_key: "key-000003" };
+    const a = await json(await orderReq(h, token, body));
+    expect(a.status).toBe("filled");
+    later(h);
+    expect(await json(await orderReq(h, token, body))).toEqual({ ...a, replayed: true });
     expect(h.hl.placed).toHaveLength(1);
   });
 
@@ -454,7 +463,7 @@ describe("idempotency (replay never places a second order)", () => {
     expect(h.hl.placed).toHaveLength(1);
   });
 
-  it("the same key while the first request is still in flight: 409 ORDER_IN_FLIGHT, one HL order; then a replay", async () => {
+  it("the same key while the first request is still in flight: the second waits and gets the first answer (replayed), one HL order", async () => {
     const h = harness({ agent: AGENT });
     const token = await connect(h);
     later(h);
@@ -462,13 +471,58 @@ describe("idempotency (replay never places a second order)", () => {
     const open = hold(h);
     const first = orderReq(h, token, body);
     await settle();
-    const second = await orderReq(h, token, body);
-    expect(second.status).toBe(409);
-    expect((await json(second)).code).toBe("ORDER_IN_FLIGHT");
+    const second = orderReq(h, token, body);
+    await settle();
+    // Another key or body while it runs: still ORDER_IN_FLIGHT / IDEMPOTENCY_KEY_REUSED.
+    const other = await orderReq(h, token, { ...BUY, idempotency_key: "key-flight-2" });
+    expect(other.status).toBe(409);
+    expect((await json(other)).code).toBe("ORDER_IN_FLIGHT");
+    const changed = await orderReq(h, token, { ...body, usdc: "11" });
+    expect(changed.status).toBe(409);
+    expect((await json(changed)).code).toBe("IDEMPOTENCY_KEY_REUSED");
     open();
     const a = await json(await first);
+    const b = await second;
     expect(a.status).toBe("filled");
+    expect(b.status).toBe(200);
+    expect(await json(b)).toEqual({ ...a, replayed: true });
     expect(await json(await orderReq(h, token, body))).toEqual({ ...a, replayed: true });
+    expect(h.hl.placed).toHaveLength(1);
+  });
+
+  it("a waiting duplicate whose first request is refused 401 (revoked meanwhile) also gets 401, and nothing is placed", async () => {
+    const h = harness({ agent: AGENT });
+    const token = await connect(h);
+    later(h);
+    const body = { ...BUY, idempotency_key: "key-flight-3" };
+    const open = hold(h);
+    const t = h.service.tick();
+    await settle();
+    const first = orderReq(h, token, body); // waits behind the scheduled tick
+    await settle();
+    const second = orderReq(h, token, body); // waits on the first
+    await settle();
+    await h.app.request("/trading/bots/hype-agent/agent-token/revoke", { method: "POST", headers: h.authed(), body: "{}" });
+    open();
+    await t;
+    expect((await first).status).toBe(401);
+    expect((await second).status).toBe(401);
+    expect(h.hl.placed).toHaveLength(0);
+  });
+
+  it("AL8: a TRANSIENT refusal is not cached; the same key after retry_after_s runs again", async () => {
+    const h = harness({ agent: AGENT });
+    const token = await connect(h);
+    const body = { ...BUY, idempotency_key: "key-transient" };
+    h.vault.down = true;
+    later(h);
+    const a = await json(await orderReq(h, token, body));
+    expect(a).toMatchObject({ code: "VAULT_STATUS_UNAVAILABLE", final: false, replayed: false });
+    h.vault.down = false;
+    later(h, 61);
+    const b = await json(await orderReq(h, token, body));
+    expect(b).toMatchObject({ status: "filled", replayed: false });
+    expect(await json(await orderReq(h, token, body))).toEqual({ ...b, replayed: true });
     expect(h.hl.placed).toHaveLength(1);
   });
 

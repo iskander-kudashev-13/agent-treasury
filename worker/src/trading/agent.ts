@@ -140,7 +140,10 @@ export const IDEMPOTENCY_TTL_MS = 24 * 3_600_000;
 interface CacheEntry {
   body: string;
   atMs: number;
-  response: AgentOrderResponse;
+  /** null while the first request with this key is still running (`pending` settles with its answer). */
+  response: AgentOrderResponse | null;
+  /** Settles with the first request's answer, or null when it was aborted (no answer, e.g. the token was revoked meanwhile). */
+  pending: Promise<AgentOrderResponse | null> | null;
 }
 
 interface BotGate {
@@ -150,9 +153,14 @@ interface BotGate {
 }
 
 export type GateDecision =
-  | { kind: "go"; release: (key: string | undefined, body: string, response: AgentOrderResponse) => void; abort: () => void }
+  | { kind: "go"; release: (response: AgentOrderResponse) => void; abort: () => void }
   | { kind: "replay"; response: AgentOrderResponse }
+  /** Same key and same body as a request that is still running: wait for its answer and replay it (audit AL2, review M3). */
+  | { kind: "wait"; result: Promise<AgentOrderResponse | null> }
   | { kind: "error"; status: 409 | 429; code: "ORDER_IN_FLIGHT" | "IDEMPOTENCY_KEY_REUSED" | "AGENT_RATE_LIMITED"; message: string; retryAfterS?: number };
+
+/** A refusal that may clear by itself is not cached (audit AL8): a retry with the same key after `retry_after_s` runs again. */
+const cacheable = (r: AgentOrderResponse): boolean => !(r.status === "rejected" && !r.final);
 
 export class AgentGate {
   private readonly bots = new Map<string, BotGate>();
@@ -178,18 +186,20 @@ export class AgentGate {
   }
 
   /**
-   * Order of checks (ADR-0007 section 4): idempotent replay first (it never places anything, so it is not rate limited), then one
-   * request in flight, then the interval (start to start). A `go` must be followed by exactly one `release` or `abort`.
+   * Order of checks (ADR-0007 section 4): idempotency first (a replay, or a wait for the running request with the same key and
+   * body; neither places anything, so neither is rate limited), then one request in flight, then the interval (start to start).
+   * A `go` must be followed by exactly one `release` or `abort`.
    */
   begin(botId: string, tokenId: string, idemKey: string | undefined, body: string): GateDecision {
     const g = this.gate(`${botId}:${tokenId}`);
     const t = this.now();
-    for (const [k, e] of g.cache) if (t - e.atMs > IDEMPOTENCY_TTL_MS) g.cache.delete(k);
+    for (const [k, e] of g.cache) if (e.pending === null && t - e.atMs > IDEMPOTENCY_TTL_MS) g.cache.delete(k);
     if (idemKey !== undefined) {
       const hit = g.cache.get(idemKey);
       if (hit !== undefined) {
         if (hit.body !== body) return { kind: "error", status: 409, code: "IDEMPOTENCY_KEY_REUSED", message: "This idempotency_key was used for a different order" };
-        return { kind: "replay", response: { ...hit.response, replayed: true } };
+        if (hit.response !== null) return { kind: "replay", response: { ...hit.response, replayed: true } };
+        if (hit.pending !== null) return { kind: "wait", result: hit.pending.then((r) => (r === null ? null : { ...r, replayed: true })) };
       }
     }
     if (g.inFlight) return { kind: "error", status: 409, code: "ORDER_IN_FLIGHT", message: "Another order of this bot is being processed; wait for its result" };
@@ -199,27 +209,48 @@ export class AgentGate {
     }
     g.inFlight = true;
     g.lastStartMs = t;
+    let settle: (r: AgentOrderResponse | null) => void = () => undefined;
+    let entry: CacheEntry | null = null;
+    if (idemKey !== undefined) {
+      const pending = new Promise<AgentOrderResponse | null>((resolve) => (settle = resolve));
+      entry = { body, atMs: t, response: null, pending };
+      g.cache.delete(idemKey);
+      g.cache.set(idemKey, entry);
+      this.trim(g);
+    }
     let done = false;
     return {
       kind: "go",
-      release: (key, b, response) => {
+      release: (response) => {
         if (done) return;
         done = true;
         g.inFlight = false;
-        if (key === undefined) return;
-        g.cache.set(key, { body: b, atMs: this.now(), response: { ...response, replayed: false } });
-        while (g.cache.size > IDEMPOTENCY_MAX) {
-          const oldest = g.cache.keys().next().value;
-          if (oldest === undefined) break;
-          g.cache.delete(oldest);
+        const stored = { ...response, replayed: false };
+        if (entry !== null && idemKey !== undefined) {
+          if (cacheable(stored) && g.cache.get(idemKey) === entry) {
+            entry.response = stored;
+            entry.pending = null;
+            entry.atMs = this.now();
+          } else if (g.cache.get(idemKey) === entry) g.cache.delete(idemKey);
         }
+        settle(stored); // a request that waited on this key gets the same answer (also a transient one)
       },
       abort: () => {
         if (done) return;
         done = true;
         g.inFlight = false;
+        if (entry !== null && idemKey !== undefined && g.cache.get(idemKey) === entry) g.cache.delete(idemKey);
+        settle(null);
       },
     };
+  }
+
+  /** Keeps the 100 newest entries; an entry whose request is still running is never evicted. */
+  private trim(g: BotGate): void {
+    for (const [k, e] of g.cache) {
+      if (g.cache.size <= IDEMPOTENCY_MAX) break;
+      if (e.pending === null) g.cache.delete(k);
+    }
   }
 }
 
@@ -254,9 +285,31 @@ export const isFinal = (code: string): boolean => !TRANSIENT.has(code);
 const MESSAGE_MAX = 300;
 const HL_ERROR_MAX = 200;
 
-/** Worker text only, single line, bounded. */
+/**
+ * The public scrub (audit L5, also used by `publicText` for `/status`): no URLs or query strings, since RPC / HL endpoints can
+ * carry keys and host names.
+ */
+export function scrubUrls(s: string): string {
+  return s.replace(/https?:\/\/\S+/gi, "[url]").replace(/\?[A-Za-z0-9_.~%-]+=\S*/g, "");
+}
+
+/** Worker text only, single line, bounded, URLs removed (audit AL7: exception text can name hosts). */
 export function responseMessage(s: string): string {
-  return s.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, " ").replace(/\s+/gu, " ").trim().slice(0, MESSAGE_MAX);
+  return scrubUrls(s).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, " ").replace(/\s+/gu, " ").trim().slice(0, MESSAGE_MAX);
+}
+
+/**
+ * Review M1: the order reached the point of placement but no clean answer came back (a network error or timeout on the order
+ * call, or a failure after it). It may or may not exist on Hyperliquid. FINAL: the agent must read the state before anything else.
+ */
+export const OUTCOME_UNKNOWN = "OUTCOME_UNKNOWN";
+export const OUTCOME_UNKNOWN_MESSAGE =
+  "The order was sent but its outcome is unknown: it may or may not have traded. Call trading_get_state before doing anything else, and do not repeat this order until the state shows what happened";
+
+/** Owner-chosen text shown to the agent (the bot name, audit AL5): the note sanitiser plus a length cap. */
+export function plainText(s: string, max: number): string | null {
+  const flat = sanitizeNote(s);
+  return flat === null ? null : Array.from(flat).slice(0, max).join("").trim() || null;
 }
 
 export function requestId(): string {

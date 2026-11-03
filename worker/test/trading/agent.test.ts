@@ -245,7 +245,7 @@ describe("gate and mapping", () => {
     const a = g.begin("b", "t1", "key-0001", "A");
     expect(a.kind).toBe("go");
     expect(g.begin("b", "t1", undefined, "B")).toMatchObject({ kind: "error", status: 409, code: "ORDER_IN_FLIGHT" });
-    if (a.kind === "go") a.release("key-0001", "A", res());
+    if (a.kind === "go") a.release(res());
     clock.t = 3_000;
     expect(g.begin("b", "t1", undefined, "B")).toMatchObject({ kind: "error", status: 429, code: "AGENT_RATE_LIMITED", retryAfterS: 7 });
     expect(g.begin("b", "t1", "key-0001", "A")).toMatchObject({ kind: "replay", response: { replayed: true, code: "MAX_ORDER" } });
