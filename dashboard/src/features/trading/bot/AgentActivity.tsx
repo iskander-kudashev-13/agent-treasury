@@ -31,7 +31,7 @@ function Row({ d }: { d: AgentDecision }) {
           {fmtLocalTime(d.at_ms, loc)}
         </span>
         <Pill accent={d.placed ? "ok" : "warn"}>{t(d.placed ? "trading.agent.placed" : "trading.agent.refused")}</Pill>
-        {!d.placed && (
+        {(!d.placed || d.code !== null) && (
           <span className="text-ink-secondary" title={d.code ?? undefined}>
             {agentCodeText(d.code)}
           </span>

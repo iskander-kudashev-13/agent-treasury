@@ -51,7 +51,7 @@ export function lastDecisions(log: readonly LogEntry[]): Record<string, LastDeci
 export const AGENT_CODES = [
   "SPOT_ONLY", "PAIR_NOT_ALLOWED", "PAIR_NOT_IN_RULES", "BAD_ORDER", "PRICE_BAND", "MIN_NOTIONAL", "MAX_ORDER", "MAX_ORDERS_PER_DAY",
   "ACCOUNT_MAX_ORDERS_PER_DAY", "POSITION_CAP", "ACCOUNT_POSITION_CAP", "INSUFFICIENT_USDC", "INSUFFICIENT_BASE", "INSUFFICIENT_BOT_BASE",
-  "BOT_POSITION_UNKNOWN", "NO_PRICE", "SIZE_ZERO", "NO_MARKET", "PAIR_LOW_VOLUME", "HL_REJECTED", "BOT_HALTED", "KILLED", "BOT_NOT_ACTIVE",
+  "BOT_POSITION_UNKNOWN", "NO_PRICE", "SIZE_ZERO", "NO_MARKET", "PAIR_LOW_VOLUME", "HL_REJECTED", "OUTCOME_UNKNOWN", "BOT_HALTED", "KILLED", "BOT_NOT_ACTIVE",
   "NOT_AGENT_BOT", "DAILY_LOSS_STOP", "ACCOUNT_LOSS_STOP", "EQUITY_DROP", "VAULT_PAUSED",
 ] as const;
 type AgentCode = (typeof AGENT_CODES)[number];
@@ -84,7 +84,8 @@ export function agentDecisions(log: readonly LogEntry[], max = 20): AgentDecisio
     .map((e) => ({
       at_ms: e.at_ms,
       placed: e.kind === "order",
-      code: e.kind === "order" ? null : (e.code ?? /^([A-Z][A-Z0-9_]+):/.exec(e.detail)?.[1] ?? null),
+      // A sent order carries a code only when it did not trade cleanly (HL_REJECTED, OUTCOME_UNKNOWN).
+      code: e.kind === "order" ? (e.code ?? null) : (e.code ?? /^([A-Z][A-Z0-9_]+):/.exec(e.detail)?.[1] ?? null),
       note: e.note ?? null,
     }));
 }

@@ -1917,6 +1917,7 @@ export const en = {
   "trading.agent.code.NO_MARKET": "No such market",
   "trading.agent.code.PAIR_LOW_VOLUME": "Too little trading on this pair",
   "trading.agent.code.HL_REJECTED": "Hyperliquid refused the order",
+  "trading.agent.code.OUTCOME_UNKNOWN": "Sent, but the result is unknown; check the trades",
   "trading.agent.code.BOT_HALTED": "The bot is stopped",
   "trading.agent.code.KILLED": "All trading is stopped",
   "trading.agent.code.BOT_NOT_ACTIVE": "The bot is not active",

@@ -38,6 +38,11 @@ describe("agent decisions", () => {
     { at_ms: 1, kind: "order", detail: "buy 14 PURR", source: "agent", note: "dip" },
     { at_ms: 0, kind: "skip", detail: "PAIR_NOT_IN_RULES: HYPE", source: "agent" },
   ];
+  it("a sent order without a clean outcome keeps its code (OUTCOME_UNKNOWN), with plain words", () => {
+    const d = agentDecisions([{ at_ms: 5, kind: "order", detail: "buy 1 HYPE: rejected (timeout)", source: "agent", code: "OUTCOME_UNKNOWN" }]);
+    expect(d).toEqual([{ at_ms: 5, placed: true, code: "OUTCOME_UNKNOWN", note: null }]);
+    expect(agentCodeText("OUTCOME_UNKNOWN")).toBe("Sent, but the result is unknown; check the trades");
+  });
   it("keeps only the agent's placed/refused entries, code from the field or the detail prefix", () => {
     expect(agentDecisions(log)).toEqual([
       { at_ms: 3, placed: false, code: "MAX_ORDER", note: "big buy" },

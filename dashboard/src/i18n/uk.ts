@@ -1919,6 +1919,7 @@ export const uk: Messages = {
   "trading.agent.code.NO_MARKET": "Такого ринку немає",
   "trading.agent.code.PAIR_LOW_VOLUME": "Надто мало торгів за цією парою",
   "trading.agent.code.HL_REJECTED": "Hyperliquid відхилив заявку",
+  "trading.agent.code.OUTCOME_UNKNOWN": "Заявку надіслано, але результат невідомий; перевірте угоди",
   "trading.agent.code.BOT_HALTED": "Бота зупинено",
   "trading.agent.code.KILLED": "Усю торгівлю зупинено",
   "trading.agent.code.BOT_NOT_ACTIVE": "Бот не активний",
