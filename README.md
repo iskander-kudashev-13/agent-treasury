@@ -8,7 +8,10 @@ people on different chains on a schedule, without a human signing each payment. 
 agent: the vault funds the owner's own Hyperliquid account, and a deterministic engine runs one or more strategies
 ("bots") whose rules the owner signed (section "Trading agent (Hyperliquid)").
 
-Built for NEAR HACKATHON (Nov 2026). Tracks: `security`, `business`, `realworld`.
+Built for NEAR HACKATHON (Nov 2026). Tracks: `security`, `agents`, `defi`, `business`, `realworld`.
+
+**Verify it yourself (read-only, no keys):** `scripts/verify.sh` — see [`VERIFY.md`](VERIFY.md). Live mainnet demo vault:
+`vault.agenthack.near` (section "Mainnet demo").
 
 ## Problem
 
@@ -156,15 +159,15 @@ for p in sdk mcp worker dashboard; do
 done
 ```
 
-Expected (clean clone of `feat/kit-foundation` at `7b8bc51`, 2026-11-03), no network used by the tests (fake vault, fake
-1Click, fake RPC, fake Hyperliquid, fake model):
+Expected (2026-11-03, `main`), no network used by the tests (fake vault, fake 1Click, fake RPC, fake Hyperliquid, fake
+model). `scripts/verify.sh offline` runs all of this in one go (see `VERIFY.md`):
 
 | Package | `pnpm test` | `pnpm build` output |
 |---|---|---|
 | sdk | `Tests  93 passed (93)` | `sdk/dist/` |
-| mcp | `Tests  17 passed (17)` | `mcp/dist/index.js` |
-| worker | `Tests  955 passed (955)` | `worker/dist/` |
-| dashboard | `Tests  433 passed (433)` | `dashboard/dist/` (`✓ built in …`) |
+| mcp | `Tests  42 passed (42)` | `mcp/dist/index.js` |
+| worker | `Tests  1072 passed (1072)` | `worker/dist/` |
+| dashboard | `Tests  502 passed (502)` | `dashboard/dist/` (`✓ built in …`) |
 
 The worker needs Node.js ≥ 22.12 (`@nktkas/hyperliquid` 0.33.3). The dashboard build also prints `[EVAL] Use of direct eval`
 warnings for `js-sha256` (a wallet dependency) and a chunk-size warning; both are expected and the build succeeds.
@@ -495,7 +498,7 @@ What was run and verified (testnet, 2026-11-01 to 11-03, local mode, simulated 1
 | Trading agent with fakes: chat → proposal → NEP-413 confirm → IOC order → loss stop → kill; two bots, per-bot kill, account caps; top-up to `hypercore` + master | passing (offline) | `worker/test/trading/`, path F1 |
 | Trading on HL testnet (`at-trade-11030006.testnet`, 2026-11-03): rules typed in the assistant (live NEAR AI) → NEP-413 → IOC orders on PURR/USDC | filled: buy 3 @ 4.5795, later sell 4 @ 4.5342 and buy 3 @ 4.5795; fills carry the rules-hash `cloid` | `docs/research/hyperliquid-trading.md` "Live testnet trade"; path F2 |
 | HL `scheduleCancel` on a fresh account | refused ("enough volume traded. Required: $1000000"); engine switched to IOC-only | same |
-| Offline tests from a clean clone | contract 174, sdk 93, mcp 17, worker 955, dashboard 433, all passing (2026-11-03, `7b8bc51`) | path A |
+| Offline tests | contract 174, sdk 93, mcp 42, worker 1072, dashboard 502, all passing (2026-11-03) | path A, `scripts/verify.sh offline` |
 
 "Confirmed" in simulated mode means the worker/MCP reported success after USDC moved on NEAR testnet to a random
 64-hex deposit account. Nothing was delivered on Base, Solana or Arbitrum.

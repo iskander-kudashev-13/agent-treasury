@@ -1,5 +1,8 @@
 # Agent Treasury — NEAR HACKATHON project
 
+> **Reviewing or judging this repo?** Read `VERIFY.md` and run `scripts/verify.sh` (read-only, no keys). The rest of this
+> file is the internal development brief for the coding agent that built the project.
+
 This file is the project brief for the coding agent. Read it fully before touching code. Re-read `https://nearhackathon.com/HACKATHON.md` before any submission step.
 
 Spec files and precedence (later overrides earlier on its topic):

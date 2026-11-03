@@ -21,7 +21,8 @@ export const RPC_URL =
 export const RPC_URLS: readonly string[] = [
   ...new Set([
     RPC_URL,
-    ...(NETWORK === "mainnet" ? ["https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"] : ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"]),
+    // rpc.{mainnet,testnet}.near.org are deprecated and answer -429 to everything (2026-11-03); dRPC serves both networks with CORS.
+    ...(NETWORK === "mainnet" ? ["https://free.rpc.fastnear.com", "https://near.drpc.org"] : ["https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"]),
   ]),
 ];
 
