@@ -42,7 +42,9 @@ export function KillSwitch({ status }: { status: TradingStatus }) {
       // An expired owner session (1 h) is renewed inline: one extra wallet prompt, then the kill is retried once.
       const r = await withOwnerSession(accountId, signMessage, (token) => killTrading(token, "dashboard kill switch"));
       setKilled(r);
-      const failed = [r.steps.cancel_all === "failed" && t("trading.kill.noCancel"), r.steps.schedule_cancel === "failed" && t("trading.kill.noTimer"), r.steps.state_saved === "failed" && t("trading.kill.noSave")].filter(Boolean);
+      const failed = [r.steps.cancel_all === "failed" && t("trading.kill.noCancel"), // The dead-man timer is only a backstop: HL refuses it on accounts with < $1M traded volume (DEADMAN_VOLUME_GATED,
+      // IOC-only), and once cancel_all succeeded every order is already gone. Only a lone timer failure is worth a red step.
+      r.steps.schedule_cancel === "failed" && r.steps.cancel_all !== "ok" && t("trading.kill.noTimer"), r.steps.state_saved === "failed" && t("trading.kill.noSave")].filter(Boolean);
       kill = failed.length === 0 ? { state: "done", detail: t("trading.kill.haltedCancelled", { count: r.cancelled_orders }) } : { state: "failed", detail: t("trading.kill.haltedButFailed", { what: failed.join(t("trading.kill.and")) }) };
     } catch (e) {
       kill = { state: "failed", detail: t("trading.kill.errContinue", { error: e instanceof Error ? e.message : String(e) }) };
