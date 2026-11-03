@@ -276,7 +276,7 @@ Drills (expected results; fill in the "observed" column when run):
 |---|---|---|---|---|
 | 1 | 12 h run | leave the worker running | `/trading/status` `state: "running"`, `last_tick_ms` advances every `TRADING_TICK_SEC`; on a fresh account `dead_man.available: false` (IOC-only); `log.jsonl` has `order` or `skip` entries | partial, 2026-11-03 on `at-trade-11030006.testnet`: IOC buy 3 PURR @ 4.5795 (`cloid 0xbb49a14c0945f933…0001`), later sell 4 @ 4.5342 and buy 3 @ 4.5795 by bot `default`; `scheduleCancel` refused for volume → IOC-only. Overnight 2026-11-03 00:34–09:13 UTC (≈ 8.7 h, worker never restarted): `running` throughout, 1-minute history unbroken; no new orders because every tick skipped with `POSITION_CAP` (position 36.4 + order 13.9 > bot cap 45) or `PAIR_LOW_VOLUME` (night volume 3.5–4.4k < 5000); recovered by itself from HL `502`/timeouts (`HL_READ_FAILED`) and FastNEAR `-429` (`VAULT_STATUS_UNAVAILABLE`). Full 12 h not reached |
 | 2 | Kill all | dashboard `#/trading/connect` → **Stop trading** | `POST /trading/kill` → `{"state":"halted",…,"steps":{"cancel_all":"ok","schedule_cancel":"ok" or "failed",…}}` (`failed` is expected and harmless on a volume-gated account); every bot `halted`; then the wallet asks for `pause_agent`; `openOrders` = `[]`; no new orders | not run yet |
-| 3 | Per-bot stop | bot A page `#/trading/bots/<A>` → **Stop** (needs two running bots, drill 6) | `POST /trading/bots/A/kill` → `{"bot_id":"A","state":"halted",…}`; A `halted`, B still `running` and still places orders; `openOrders` shows no cloid with A's prefix; no `pause_agent` prompt (top-ups stay allowed) | not run yet |
+| 3 | Per-bot stop | bot A page `#/trading/bots/<A>` → **Stop** (needs two running bots, drill 6) | `POST /trading/bots/A/kill` → `{"bot_id":"A","state":"halted",…}`; A `halted`, B still `running` and still places orders; `openOrders` shows no cloid with A's prefix; no `pause_agent` prompt (top-ups stay allowed) | pass, 2026-11-03 12:11 UTC: Stop on agent bot `claude-purr` while rules bot `default` ran: `claude-purr` `halted` (cancel ok, 0 orders, token revoked), `default` still `running`; no `pause_agent` prompt |
 | 4 | `pause_agent` | `near contract call-function as-transaction at-trade-11030006.testnet pause_agent json-args '{"agent_id":"hl-trader"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as at-owner-11012309.testnet network-config testnet sign-with-legacy-keychain send` | next tick: `state: "paused_onchain"`, every bot blocked, orders cancelled; after `resume_agent` (1 yoctoNEAR) the state returns to `running` | pass, 2026-11-03 09:14 UTC: tx `GLstbXSrNwfHDyKLPV5vxdzuaBeyNCd6AAkqq7b6gvyQ`; 14 s later (next tick) `state: "paused_onchain"`, `state_reason: "AGENT_PAUSED"`, bot `default` `blocked`, vault agent `Paused`; `resume_agent` tx `59GsK1nbdBZ5vJQn4qGCeQYpybiGRdknD1wRC3qT3sA8` → `running` again within one tick. No open orders existed to cancel (IOC-only) |
 | 5 | `kill -9` | `kill -9 $(pgrep -f 'node dist/index.js')` | IOC-only: no bot order rests, `openOrders` = `[]` already; with a working dead-man switch resting orders are gone within `TRADING_DEADMAN_SEC`. After restart the state, bots, rules and log are reloaded from `TRADING_STATE_DIR` | pass, 2026-11-03 09:13 UTC: `kill -9` of the worker's node process (it ran with `pnpm dev`, so `pgrep -f 'src/index.ts'`); `openOrders` was `[]` before and after; the `lock` file kept the dead pid and the restart took it over; bot `default`, rules `fc366ee1…`, today's counters (2 orders, loss 0.18) and `running` came back on the first tick |
 | 6 | Two bots ≥ 6 h (ADR-0006 §11) | two bots on PURR/USDC (e.g. DCA + dip buyer), created one at a time | both `running`; each bot's fills only under its own prefix; a bot never sells more than its own fills bought (`INSUFFICIENT_BOT_BASE` otherwise); account caps bind on the sum; `bots/<id>/fills.jsonl` matches HL `userFillsByTime` for that prefix | not run yet |
@@ -532,8 +532,8 @@ to the assistant, run `JSON.parse(sessionStorage.getItem("at.ai.session")).token
   `curl -s localhost:3000/trading/status | jq -r .api_wallet.address`. They must be the same. If they differ, stop
   (audit M7).
 - In https://app.hyperliquid.xyz → API (signed in with the master), add that address with the name
-  `agent-treasury valid_until <ms>`. Whether the HL web app accepts an external address was not verified (ADR V0). If it
-  does not, stop: the fallback D4 (EIP-712 `approveAgent` from the dashboard) is not built.
+  `agent-treasury valid_until <ms>`. The HL testnet web app accepted an external address on 2026-11-02 (ADR V0, testnet
+  only); if the mainnet app does not, stop: the fallback D4 (EIP-712 `approveAgent` from the dashboard) is not built.
 - Check: `extraAgents` for the master lists exactly that address with `validUntil` = `<ms>`;
   `/trading/status` → `api_wallet.approved: true`.
 
@@ -590,8 +590,9 @@ signature that lets an external AI agent trade real money inside the signed limi
 - The Connect step shows the token ONCE (blurred until focused). Do not show this step or the terminal on screen while
   recording (audit AL6). Connect Claude Code (MCP built with `cd mcp && pnpm build`):
   ```bash
-  # leading space: kept out of shell history; the token then lives in ~/.claude.json
-   claude mcp add agent-treasury-trading -e TRADING_WORKER_URL=http://127.0.0.1:3000 -e TRADING_AGENT_TOKEN=<token> -- node /ABSOLUTE/PATH/TO/agent-treasury/mcp/dist/index.js
+  # run from the agent-treasury folder; leading space: kept out of shell history; the token then lives in ~/.claude.json
+  # (the dashboard's Connect step shows this exact command with the token filled in)
+   claude mcp remove agent-treasury-trading -s local 2>/dev/null; claude mcp add agent-treasury-trading -e TRADING_WORKER_URL=http://127.0.0.1:3000 -e TRADING_AGENT_TOKEN=<token> -- node "$(pwd)/mcp/dist/index.js"
   chmod 600 ~/.claude.json
   claude mcp list        # agent-treasury-trading: connected
   ```
