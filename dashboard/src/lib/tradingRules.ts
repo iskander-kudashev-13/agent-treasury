@@ -48,6 +48,11 @@ export interface RuleLimits {
 }
 export interface RuleSetV1 {
   version: 1;
+  /**
+   * ADR-0007: absent = a rules (DSL) bot, exactly as before. "agent" = an AI agent chooses the orders; `rules` must then be [].
+   * The only allowed value is "agent" (a "rules" value would give two canonical forms of the same DSL rule set).
+   */
+  mode?: "agent";
   name: string;
   pairs: string[];
   limits: RuleLimits;
@@ -82,12 +87,28 @@ export async function sha256Hex(text: string): Promise<string> {
 
 export const hashRuleSet = async (rules: RuleSetV1): Promise<string> => sha256Hex(canonicalize(rules));
 
+export const isAgentMode = (rs: RuleSetV1): boolean => rs.mode === "agent";
+
 /**
  * The exact NEP-413 message the owner signs. With `botId` it is the v2 message of ADR-0006 (a `bot:` line after `agent:`), the
  * only format for new confirmations; without it, the v1 message of ADR-0005 (kept for the shared vectors and the legacy bot).
- * `recipient` of the signature is the vault id.
+ * With `mode: "agent"` it is the v3 message of ADR-0007: another header and a `mode:` line, so a rules signature and an
+ * AI-agent signature can never stand in for each other. `recipient` of the signature is the vault id.
  */
-export function confirmationMessage(p: { vault: string; agentId: string; hlNetwork: "mainnet" | "testnet"; hlAccount: string; rulesSha256: string; botId?: string }): string {
+export function confirmationMessage(p: { vault: string; agentId: string; hlNetwork: "mainnet" | "testnet"; hlAccount: string; rulesSha256: string; botId?: string; mode?: "agent" }): string {
+  if (p.mode !== undefined) {
+    if (p.mode !== "agent" || p.botId === undefined) throw new Error("agent mode needs a bot id");
+    return [
+      "Agent Treasury: activate AI agent trading limits",
+      `vault: ${p.vault}`,
+      `agent: ${p.agentId}`,
+      `bot: ${p.botId}`,
+      "mode: agent",
+      `hl_network: ${p.hlNetwork}`,
+      `hl_account: ${p.hlAccount.toLowerCase()}`,
+      `rules_sha256: ${p.rulesSha256}`,
+    ].join("\n");
+  }
   return [
     "Agent Treasury: activate trading rules",
     `vault: ${p.vault}`,
@@ -131,7 +152,10 @@ export type RuleIssueCode =
   | "LOSS_STOP_NOT_POSITIVE"
   | "MAX_POSITION_NOT_POSITIVE"
   | "RULE_SIZE_BELOW_MIN"
-  | "RULE_SIZE_ABOVE_MAX_ORDER";
+  | "RULE_SIZE_ABOVE_MAX_ORDER"
+  | "BAD_MODE"
+  | "AGENT_HAS_RULES"
+  | "LIMIT_AGENT_MAX_ORDERS";
 
 export type ParsedRules = { ok: true; rules: RuleSetV1 } | { ok: false; errors: RuleIssueCode[] };
 
@@ -178,7 +202,10 @@ export function parseRuleSet(input: unknown): ParsedRules {
 
   if (!isObj(input)) return { ok: false, errors: ["SCHEMA"] };
   const root = input;
-  keys(root, ["version", "name", "pairs", "limits", "rules"]);
+  // ADR-0007: the presence of the key (whatever its value) selects the agent-mode shape.
+  const agent = "mode" in root;
+  keys(root, agent ? ["version", "mode", "name", "pairs", "limits", "rules"] : ["version", "name", "pairs", "limits", "rules"]);
+  if (agent && root.mode !== "agent") add("BAD_MODE");
   if (root.version !== 1) add("BAD_VERSION");
   if (typeof root.name !== "string") add("SCHEMA");
   else if (!NAME_RE.test(root.name)) add("BAD_NAME");
@@ -203,7 +230,9 @@ export function parseRuleSet(input: unknown): ParsedRules {
   }
 
   if (!Array.isArray(root.rules)) add("SCHEMA");
-  else {
+  else if (agent) {
+    if (root.rules.length > 0) add("AGENT_HAS_RULES");
+  } else {
     if (root.rules.length < 1) add("NO_RULES");
     if (root.rules.length > 5) add("TOO_MANY_RULES");
     for (const r of root.rules) {
@@ -303,7 +332,7 @@ export function parseRuleSet(input: unknown): ParsedRules {
 }
 
 /** Plain-words explanation for an issue code (the owner never sees raw codes alone). */
-const ISSUE_CODES = ["UNKNOWN_KEY", "BAD_VERSION", "BAD_DECIMAL", "BAD_SIGNED_DECIMAL", "RULE_SIZE_BELOW_MIN", "MAX_ORDER_BELOW_MIN", "RULE_SIZE_ABOVE_MAX_ORDER", "COOLDOWN_REQUIRED", "POSITION_PCT_ON_BUY"] as const;
+const ISSUE_CODES = ["UNKNOWN_KEY", "BAD_VERSION", "BAD_DECIMAL", "BAD_SIGNED_DECIMAL", "RULE_SIZE_BELOW_MIN", "MAX_ORDER_BELOW_MIN", "RULE_SIZE_ABOVE_MAX_ORDER", "COOLDOWN_REQUIRED", "POSITION_PCT_ON_BUY", "BAD_MODE", "AGENT_HAS_RULES"] as const;
 export const issueText = (c: RuleIssueCode): string => ((ISSUE_CODES as readonly string[]).includes(c) ? t(`trading.issue.${c as (typeof ISSUE_CODES)[number]}`) : t("trading.issue.fallback", { code: c }));
 
 /* ───────────── renderer ───────────── */
@@ -361,6 +390,7 @@ export function describeRules(rs: RuleSetV1): string[] {
     t("trading.dsl.dailyLossStop", { n: rs.limits.daily_loss_stop_usdc }),
     t("trading.dsl.maxOrdersDay", { n: rs.limits.max_orders_per_day }),
     ...rs.rules.flatMap(describeRule),
+    ...(isAgentMode(rs) ? [t("trading.dsl.agentOrders")] : []),
   ];
 }
 
@@ -374,6 +404,7 @@ export function describeBlocks(rs: RuleSetV1): { name: string; summary: string[]
       t("trading.dsl.sumMaxOrder", { n: rs.limits.max_order_usdc }),
       t("trading.dsl.sumLossStop", { n: rs.limits.daily_loss_stop_usdc }),
       t("trading.dsl.sumOrders", { count: rs.limits.max_orders_per_day }),
+      ...(isAgentMode(rs) ? [t("trading.dsl.agentOrders")] : []),
     ],
     rules: rs.rules.map((r, i) => {
       const [title = "", ...lines] = describeRule(r, i);

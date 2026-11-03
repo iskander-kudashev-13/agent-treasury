@@ -1,7 +1,7 @@
 import { useT } from "@/i18n";
 import { Hash } from "@/kit";
 import { fireNow, midsOf } from "@/lib/tradingGuide";
-import { alwaysSentence, ruleSentences } from "@/lib/tradingSentences";
+import { agentSentence, alwaysSentence, ruleSentences } from "@/lib/tradingSentences";
 import { describeBlocks, type RuleSetV1 } from "@/lib/tradingRules";
 import type { LastDecision } from "@/lib/tradingSkips";
 import { fmtDec } from "@/lib/tradingView";
@@ -26,6 +26,14 @@ export function RulesView({ rules, hash, mids, decisions }: { rules: RuleSetV1; 
   return (
     <div className="flex flex-col gap-3 text-[13px]">
       <div className="text-[15px] font-semibold break-words">{rules.name}</div>
+      {rules.mode === "agent" && (
+        <div className="rounded-tile border border-tile-line bg-surface-sunken px-3 py-2.5">
+          <div className="text-xs text-ink-muted">{t("trading.agent.pill")}</div>
+          <p className="m-0 mt-1 text-sm leading-relaxed text-ink-secondary">
+            <Sentence segs={agentSentence(rules)} />
+          </p>
+        </div>
+      )}
       <ol className="m-0 flex list-none flex-col gap-2 p-0">
         {sentences.map((s, i) => {
           const fire = fires[i] ?? null;

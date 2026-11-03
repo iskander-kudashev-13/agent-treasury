@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { setLocaleSilently } from "@/i18n/core";
 import { BOT_ID_RE, parseProposedRules, TradingHttpError } from "./tradingClient";
 import { DEFAULT_HARD, MIN_ORDER_USDC } from "./tradingGuide";
-import { parseRuleSet, type Rule } from "./tradingRules";
+import { hashRuleSet, parseRuleSet, type Rule } from "./tradingRules";
 import {
+  agentHardLimits,
+  wizardSteps,
   appendAiRules,
   assembleRuleSet,
   buildRule,
@@ -188,5 +190,38 @@ describe("errors", () => {
     expect(signErrorText(new Error("local check"))).toBe("local check");
     expect(proposeErrorText(new TradingHttpError(400, "NO_PROPOSAL", "model text"))).not.toContain("model text");
     expect(proposeErrorText(new TradingHttpError(429, "RATE_LIMITED", "Too many"))).toBe("Busy right now. Try again in a minute.");
+  });
+});
+
+describe("AI-agent mode (ADR-0007)", () => {
+  const limits = { maxPosition: "25", maxOrder: "12", lossStop: "3", maxOrders: "6" };
+  it("assembles the frozen agent mandate: mode agent, no rules (drafted rules are dropped)", async () => {
+    const drafted = [{ rule: buildRule(defaultFields("dca", 12), "PURR/USDC", "buy-1", 12)!, fields: null }];
+    const rs = assembleRuleSet({ name: " PURR agent ", pair: "PURR/USDC", limits, rules: drafted, mode: "agent" });
+    expect(rs).toEqual({ version: 1, mode: "agent", name: "PURR agent", pairs: ["PURR/USDC"], limits: { max_position_usdc: "25", max_order_usdc: "12", daily_loss_stop_usdc: "3", max_orders_per_day: 6 }, rules: [] });
+    const p = parseRuleSet(rs);
+    expect(p.ok).toBe(true);
+    if (p.ok) expect(await hashRuleSet(p.rules)).toBe("f29ef0d0ac3a06c46640a840c4014f216babbdc2dc6944666809b369079bbd0c");
+  });
+  it("rules mode is unchanged (no mode key)", () => {
+    const rs = assembleRuleSet({ name: "x", pair: "PURR/USDC", limits, rules: [], mode: "rules" });
+    expect("mode" in rs).toBe(false);
+  });
+  it("orders a day are capped by the worker's agent cap", () => {
+    const h = agentHardLimits({ ...DEFAULT_HARD, maxOrders: 20 }, 10);
+    expect(h.maxOrders).toBe(10);
+    expect(limitIssues({ ...limits, maxOrders: "11" }, h).maxOrders).toEqual({ code: "max", n: 10 });
+    expect(limitIssues({ ...limits, maxOrders: "10" }, h).maxOrders).toBeUndefined();
+    expect(agentHardLimits({ ...DEFAULT_HARD, maxOrders: 4 }, 10).maxOrders).toBe(4);
+    expect(agentHardLimits({ ...DEFAULT_HARD, maxOrders: 20 }, null).maxOrders).toBe(20);
+    expect(agentHardLimits({ ...DEFAULT_HARD, maxOrders: 20 }, 0).maxOrders).toBe(20);
+  });
+  it("agent steps skip Rules and end with Connect", () => {
+    expect(wizardSteps("agent")).toEqual(["name", "limits", "review", "connect"]);
+    expect(wizardSteps("rules")).toEqual(["name", "rules", "limits", "review"]);
+  });
+  it("agent-specific worker errors in plain words", () => {
+    expect(signErrorText(new TradingHttpError(409, "BOT_KIND_MISMATCH", "x"))).toMatch(/another way/);
+    expect(signErrorText(new TradingHttpError(409, "AGENT_TRADING_DISABLED", "x"))).toMatch(/switched off/);
   });
 });

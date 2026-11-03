@@ -116,6 +116,7 @@ export function fallbackSummary(status: TradingStatusResult, store: Store, nowMs
   return {
     id: DEFAULT_BOT_ID,
     name: status.active_rules.name || t("trading.bot.defaultName"),
+    kind: "rules",
     state,
     state_reason: status.state === "running" ? null : status.state_reason ?? status.state,
     pairs,
@@ -229,6 +230,7 @@ export function hlFillToBotFill(x: unknown, coinToPair: ReadonlyMap<string, stri
     fee_usdc: String(feeUsdc),
     fee_token: token.slice(0, 20),
     realized_usdc: null,
+    note: null,
   };
 }
 
@@ -285,6 +287,8 @@ export async function loadBotDetail(ctx: BotCtx, id: string, signal?: AbortSigna
     pairs,
     open_orders: status.open_orders,
     hl_network: status.hl_network,
+    kind: "rules",
+    agent: null,
   };
 }
 
