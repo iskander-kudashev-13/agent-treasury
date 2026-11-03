@@ -132,7 +132,7 @@ export function harness(o: HarnessOpts = {}) {
     now: () => clock.t,
   });
   const pairs = createPairInfoProvider(() => service.hlPort(), { now: () => clock.t });
-  const confirmer = new RulesConfirmer({ ctx, store, registry: service.registry, maxBots: 3, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), now: () => clock.t });
+  const confirmer = new RulesConfirmer({ ctx, store, registry: service.registry, maxBots: 3, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), killStamp: (id) => service.killStamp(id), now: () => clock.t });
   const routeDeps: TradingRouteDeps = { service, confirmer, store, confirmCtx: ctx, sessionSecret: SECRET, vault: VAULT, trustProxy: true, now: () => clock.t, propose: o.proposer };
   const app = new Hono().route("/trading", createTradingRouter(routeDeps));
 

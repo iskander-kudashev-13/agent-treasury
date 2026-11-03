@@ -192,15 +192,17 @@ describe("3. archive: the bot is stopped before the wait, and the position is ch
     expect(h.service.registry.get("alpha")?.archived_at_ms).not.toBeNull();
   });
 
-  it("a fill that lands after the first check is found by the re-check; the refusal leaves the bot running (halt restored)", async () => {
+  it("a fill that lands after the first check is found by the re-check; the refusal leaves the bot HALTED (audit ML1: never back to trading)", async () => {
     const h = funded();
     await h.confirmDirect(rulesOf("Alpha strategy"), "alpha", "Alpha"); // order placed, its fill not folded in yet
     await expect(h.service.archive("alpha")).rejects.toMatchObject({ status: 409, code: "BOT_HOLDS_POSITION" });
     expect(h.service.registry.get("alpha")?.archived_at_ms).toBeNull();
-    await step(h);
-    expect(h.service.botsList(false).find((b) => b.id === "alpha")?.state).toBe("running");
+    const placed = h.hl.placed.length;
+    await step(h, 3_600_000);
+    expect(h.hl.placed).toHaveLength(placed);
+    expect(h.service.botsList(false).find((b) => b.id === "alpha")?.state).toBe("halted");
     const st = j(join(h.dir, "engine-state.json"));
-    expect(st.bots.alpha.halt).toBeNull();
+    expect(st.bots.alpha.halt).toMatchObject({ reason: "KILLED" });
   });
 });
 

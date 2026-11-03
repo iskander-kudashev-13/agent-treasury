@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearSession, saveSession } from "./assistantClient";
 import { VAULT_ID, WORKER_URL } from "./config";
-import { confirmTradingRules, fetchTradingStatus, killTrading, parseKill, parseLog, parseTradingStatus, TradingHttpError, withOwnerSession } from "./tradingClient";
+import { confirmTradingRules, fetchTradingStatus, killBot, killTrading, recordStop, stoppedSince, parseKill, parseLog, parseTradingStatus, TradingHttpError, withOwnerSession } from "./tradingClient";
 import { confirmationMessage, hashRuleSet, type RuleSetV1 } from "./tradingRules";
 
 const RULES: RuleSetV1 = {
@@ -148,12 +148,12 @@ describe("HTTP client (mocked fetch)", () => {
 
   describe("confirmTradingRules", () => {
     const nonce = btoa("n".repeat(32));
-    const setup = async (over: { message?: string; hash?: string; recipient?: string; botId?: string | null } = {}) => {
+    const setup = async (over: { message?: string; hash?: string; recipient?: string; botId?: string | null; isNew?: boolean } = {}) => {
       const hash = await hashRuleSet(RULES);
       const message = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash, botId: "default" });
       route({
         "/trading/status": () => json(STATUS),
-        "/trading/rules/challenge": () => json({ nonce, message: over.message ?? message, recipient: over.recipient ?? VAULT, hash: over.hash ?? hash, expires_at: 1, ...(over.botId === null ? {} : { bot_id: over.botId ?? "default", is_new: false }) }),
+        "/trading/rules/challenge": () => json({ nonce, message: over.message ?? message, recipient: over.recipient ?? VAULT, hash: over.hash ?? hash, expires_at: 1, ...(over.botId === null ? {} : { bot_id: over.botId ?? "default", is_new: over.isNew ?? false }) }),
         "/trading/rules/confirm": () => json({ active: { rules: RULES, hash, message, signature: "s", public_key: "p", account_id: "owner.testnet", nonce, callback_url: null, confirmed_at_ms: 9 }, state: "running" }),
       });
       const signMessage = vi.fn(() => Promise.resolve({ accountId: "owner.testnet", publicKey: "ed25519:pk", signature: "sig" }));
@@ -162,7 +162,7 @@ describe("HTTP client (mocked fetch)", () => {
 
     it("signs the locally built message and posts the confirmation", async () => {
       const { signMessage, message } = await setup();
-      const r = await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" });
+      const r = await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false });
       expect(signMessage).toHaveBeenCalledWith(expect.objectContaining({ message, recipient: VAULT }));
       expect(r.state).toBe("running");
       expect(r.active?.confirmed_at_ms).toBe(9);
@@ -171,7 +171,7 @@ describe("HTTP client (mocked fetch)", () => {
     });
     it("sends bot_id/bot_name in the challenge and bot_id in the confirmation", async () => {
       const { signMessage } = await setup();
-      await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", botName: "Dip" });
+      await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", botName: "Dip", expectNew: false });
       const ch = JSON.parse(String(calls.find((c) => c.path.endsWith("/challenge"))?.init?.body)) as Record<string, unknown>;
       expect(ch).toMatchObject({ bot_id: "default", bot_name: "Dip" });
       const body = JSON.parse(String(calls.find((c) => c.path.endsWith("/confirm"))?.init?.body)) as Record<string, unknown>;
@@ -179,52 +179,100 @@ describe("HTTP client (mocked fetch)", () => {
     });
     it("refuses (without asking the wallet) when the worker answers for another bot", async () => {
       const { signMessage } = await setup({ botId: "dip-buyer" });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/dip-buyer/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/dip-buyer/);
+      expect(signMessage).not.toHaveBeenCalled();
+    });
+    it("refuses (without asking the wallet) a 'new agent' choice when the worker says the agent already exists (MM1)", async () => {
+      const { signMessage } = await setup({ isNew: false });
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", botName: "Dip", expectNew: true })).rejects.toThrow(/already exists/);
+      expect(signMessage).not.toHaveBeenCalled();
+      expect(calls.some((c) => c.path.endsWith("/confirm"))).toBe(false);
+    });
+    it("refuses (without asking the wallet) an 'update' choice when the worker says the agent is new (MM1/ML5)", async () => {
+      const { signMessage } = await setup({ isNew: true });
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/does not exist yet/);
+      expect(signMessage).not.toHaveBeenCalled();
+    });
+    it("signs when the worker's is_new matches the choice (new)", async () => {
+      const { signMessage } = await setup({ isNew: true });
+      await confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", botName: "Dip", expectNew: true });
+      expect(signMessage).toHaveBeenCalledTimes(1);
+    });
+    it("refuses a challenge without is_new (older worker): the choice cannot be verified", async () => {
+      const { signMessage } = await setup();
+      route({
+        "/trading/status": () => json(STATUS),
+        "/trading/rules/challenge": () => json({ nonce, message: "x", recipient: VAULT, hash: "0".repeat(64), bot_id: "default" }),
+      });
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow();
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses a v1 message (worker without bots) for any bot but default", async () => {
       const { signMessage } = await setup({ botId: null });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "dca-2" })).rejects.toThrow(/dca-2/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "dca-2", expectNew: false })).rejects.toThrow(/dca-2/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses a v2 message when the bot line is missing or wrong", async () => {
       const hash = await hashRuleSet(RULES);
       const v1 = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash });
       const { signMessage } = await setup({ message: v1 });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/does not match/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/does not match/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses (without asking the wallet) when the worker hashes differently", async () => {
       const { signMessage } = await setup({ hash: "0".repeat(64) });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/different hash/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/different hash/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses when the message differs from the ADR text", async () => {
       const { signMessage } = await setup({ message: "Agent Treasury: activate trading rules\nvault: evil" });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/does not match/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/does not match/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses (without asking the wallet) when the worker's HL account is not the one the vault pays", async () => {
       const { signMessage } = await setup();
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: "0x" + "11".repeat(20), botId: "default" })).rejects.toThrow(/vault pays/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: "0x" + "11".repeat(20), botId: "default", expectNew: false })).rejects.toThrow(/vault pays/);
       expect(signMessage).not.toHaveBeenCalled();
       expect(calls.some((c) => c.path.includes("challenge"))).toBe(false);
     });
     it("refuses when the chain names no single HL account", async () => {
       const { signMessage } = await setup();
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: null, botId: "default" })).rejects.toThrow(/cannot be verified/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: null, botId: "default", expectNew: false })).rejects.toThrow(/cannot be verified/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses a challenge for another vault", async () => {
       const { signMessage } = await setup({ recipient: "evil.near" });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/different vault/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/different vault/);
       expect(signMessage).not.toHaveBeenCalled();
     });
     it("refuses when the wallet signs with another account", async () => {
       const { signMessage } = await setup();
       signMessage.mockResolvedValueOnce({ accountId: "other.testnet", publicKey: "k", signature: "s" });
-      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default" })).rejects.toThrow(/different account/);
+      await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/different account/);
       expect(calls.some((c) => c.path.endsWith("/confirm"))).toBe(false);
+    });
+  });
+
+  describe("stops are remembered for open rule cards (MM2)", () => {
+    it("killTrading and killBot record the stop even before the worker answers", async () => {
+      route({ "/trading/kill": () => json({ state: "halted", cancelled_orders: 0, steps: { cancel_all: "ok", schedule_cancel: "ok", state_saved: "ok", tick_wait: "ok" } }), "/trading/bots/zed/kill": () => json({ bot_id: "zed", state: "halted", cancelled_orders: 0, steps: { cancel: "ok", state_saved: "ok" } }) });
+      const t = Date.now();
+      await killBot("tok", "zed");
+      expect(stoppedSince("zed", t)).toBe(true);
+      expect(stoppedSince("other-bot", t)).toBe(false);
+      await killTrading("tok");
+      expect(stoppedSince("other-bot", t)).toBe(true);
+    });
+    it("recordStop(all) concerns every agent, recordStop(id) only that one, and only for cards that started before it", () => {
+      const t0 = 8_000_000_000_000_000;
+      expect(stoppedSince("alpha", t0)).toBe(false);
+      recordStop("alpha", t0 + 5);
+      expect(stoppedSince("alpha", t0)).toBe(true);
+      expect(stoppedSince("beta", t0)).toBe(false);
+      expect(stoppedSince("alpha", t0 + 6)).toBe(false); // a card created after the Stop is a deliberate re-creation
+      recordStop(null, t0 + 10);
+      expect(stoppedSince("beta", t0)).toBe(true);
+      expect(stoppedSince("beta", t0 + 11)).toBe(false);
     });
   });
 });

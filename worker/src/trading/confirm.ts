@@ -130,6 +130,12 @@ export interface ConfirmDeps {
   deadManAvailable?: (() => boolean) | undefined;
   /** Returns why the service cannot accept owner writes right now (corrupt state / registry), or null. Challenges and confirmations are refused meanwhile. */
   writeBlocked?: (() => string | null) | undefined;
+  /**
+   * Opaque stamp of the kill state that concerns `botId` (kill-all epoch + that bot's epoch). A challenge remembers the stamp it was
+   * issued under; a confirmation under a different stamp is refused, so a signature collected before a Stop cannot undo the Stop
+   * (audit 2026-11-03 MM2). Absent = no check (tests that do not wire the service).
+   */
+  killStamp?: ((botId: string) => string) | undefined;
   now?: () => number;
 }
 
@@ -169,7 +175,7 @@ function fromRegistry(e: unknown): never {
 }
 
 export class RulesConfirmer {
-  private readonly pending = new Map<string, { hash: string; botId: string; botName: string | undefined; expiresAt: number }>();
+  private readonly pending = new Map<string, { hash: string; botId: string; botName: string | undefined; isNew: boolean; stamp: string | null; expiresAt: number }>();
   private readonly now: () => number;
   constructor(private readonly d: ConfirmDeps) {
     this.now = d.now ?? Date.now;
@@ -194,6 +200,8 @@ export class RulesConfirmer {
    */
   async challenge(rulesInput: unknown, botId: string = DEFAULT_BOT_ID, botName?: string): Promise<Challenge> {
     this.assertWritable();
+    // Taken before any await: a kill that lands while the pair data is fetched also invalidates this challenge.
+    const stamp = this.d.killStamp?.(botId) ?? null;
     if (!BOT_ID_RE.test(botId)) throw new ConfirmError(400, "BAD_BOT_ID", "bot_id must be lower-case letters, digits and '-', 1..16 chars");
     const parsed = parseRuleSet(rulesInput);
     if (!parsed.ok) throw new ConfirmError(400, "RULES_INVALID", `Invalid rules: ${parsed.issues.map((i) => `${i.code} ${i.path}`).join(", ")}`);
@@ -212,7 +220,7 @@ export class RulesConfirmer {
     if (this.pending.size >= MAX_PENDING) throw new ConfirmError(429, "TOO_MANY_CHALLENGES", "Too many pending challenges. Try again shortly.");
     const nonce = randomBytes(32);
     const expiresAt = t + CHALLENGE_TTL_MS;
-    this.pending.set(nonce.toString("hex"), { hash, botId, botName: botName ?? parsed.value.name, expiresAt });
+    this.pending.set(nonce.toString("hex"), { hash, botId, botName: botName ?? parsed.value.name, isNew, stamp, expiresAt });
     const c = this.d.ctx;
     return {
       nonce: nonce.toString("base64"),
@@ -247,6 +255,13 @@ export class RulesConfirmer {
     // The nonce is bound to (hash, bot): a challenge for bot A cannot activate bot B.
     const botId = body.bot_id ?? p.botId;
     if (botId !== p.botId) throw new ConfirmError(400, "BOT_MISMATCH", "This challenge was issued for a different bot");
+
+    // A Stop (kill-all, or a kill of this bot) since the challenge was issued: the owner's later intent wins over this signature.
+    if (p.stamp !== null && this.d.killStamp?.(botId) !== p.stamp)
+      throw new ConfirmError(409, "KILLED_SINCE_CHALLENGE", "The trading was stopped after this confirmation was requested; nothing was activated. Create the rules again.");
+    // A challenge for a NEW bot must not turn into an update of a bot that took the id meanwhile (audit 2026-11-03 MM1).
+    if (p.isNew && this.d.registry.get(botId) !== undefined)
+      throw new ConfirmError(409, "BOT_ID_TAKEN", `An agent with the id "${botId}" exists now; this confirmation was for a new agent and would have replaced its rules. Create the rules again.`);
 
     const parsed = parseRuleSet(body.rules);
     if (!parsed.ok) throw new ConfirmError(400, "RULES_INVALID", `Invalid rules: ${parsed.issues.map((i) => `${i.code} ${i.path}`).join(", ")}`);

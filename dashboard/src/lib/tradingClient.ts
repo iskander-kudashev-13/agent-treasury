@@ -345,7 +345,32 @@ export async function fetchActiveRules(token: string, signal?: AbortSignal): Pro
   return isObj(j) && j.active !== null ? parseConfirmed(j.active) : null;
 }
 
+/**
+ * Stops done in this browser session (audit 2026-11-03 MM2). An open "confirm rules" card compares its own start time with these
+ * and disables itself after a Stop that concerns it ("all" or its bot), so a stale card cannot resume what the owner just stopped.
+ * The worker enforces the same rule on its side (KILLED_SINCE_CHALLENGE); this only keeps the UI honest.
+ */
+const stopLog: { all: number; bots: Map<string, number> } = { all: 0, bots: new Map() };
+const stopListeners = new Set<() => void>();
+let stopVersion = 0;
+export function recordStop(botId: string | null, at: number = Date.now()): void {
+  if (botId === null) stopLog.all = at;
+  else stopLog.bots.set(botId, at);
+  stopVersion += 1;
+  for (const l of stopListeners) l();
+}
+export function subscribeStops(l: () => void): () => void {
+  stopListeners.add(l);
+  return () => void stopListeners.delete(l);
+}
+export const stopSnapshot = (): number => stopVersion;
+/** True when a Stop of everything or of `botId` happened at or after `since`. */
+export function stoppedSince(botId: string, since: number): boolean {
+  return stopLog.all >= since || (stopLog.bots.get(botId) ?? 0) >= since;
+}
+
 export async function killTrading(token: string, reason?: string): Promise<KillResult> {
+  recordStop(null); // before the request: a card must not stay confirmable while the kill is in flight
   const r = parseKill(await request("/kill", { method: "POST", token, body: reason ? { reason } : {} }));
   if (!r) throw new Error(t("trading.err.unexpectedKill"));
   return r;
@@ -394,6 +419,11 @@ export interface ConfirmDeps {
   botId: string;
   /** Name for a bot that does not exist yet (it is created by the confirmation). */
   botName?: string;
+  /**
+   * What the owner chose: true = a NEW agent, false = update an existing one. The worker's challenge must say the same
+   * (`is_new`), otherwise nothing is signed (audit 2026-11-03 MM1: a "new" card must never replace a running agent's rules).
+   */
+  expectNew: boolean;
   /** Overridable for tests. */
   vault?: string;
 }
@@ -432,6 +462,7 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
   // bots answers without `bot_id` (v1 message); that is only acceptable for the single bot `default`.
   if (ch.bot_id !== undefined && ch.bot_id !== deps.botId) throw new Error(t("trading.err.botDiffers", { got: str(ch.bot_id, "?", 40), want: deps.botId }));
   if (ch.bot_id === undefined && deps.botId !== "default") throw new Error(t("trading.err.botDiffers", { got: "-", want: deps.botId }));
+  if (typeof ch.is_new !== "boolean" || ch.is_new !== deps.expectNew) throw new Error(t(deps.expectNew ? "trading.err.notNew" : "trading.err.isNew", { id: deps.botId }));
   const expected = confirmationMessage({
     vault: status.vault || vault,
     agentId: status.agent_id,
@@ -741,6 +772,7 @@ export async function archiveBot(token: string, id: string): Promise<{ bot: BotS
 }
 /** Stops one bot: its orders are cancelled and it halts; the other bots keep running. */
 export async function killBot(token: string, id: string, reason?: string): Promise<BotKillResult> {
+  recordStop(id);
   const r = parseBotKill(await request(`${botPath(id)}/kill`, { method: "POST", token, body: reason ? { reason } : {} }));
   if (!r) throw new Error(t("trading.err.unexpectedKill"));
   return r;

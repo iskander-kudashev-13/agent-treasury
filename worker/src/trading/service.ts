@@ -386,6 +386,11 @@ export class TradingService {
     return this.state.account.deadManGatedAtMs == null;
   }
 
+  /** Kill state that concerns one bot (kill-all epoch + the bot's own epoch). A rules challenge is bound to it (audit MM2). */
+  killStamp(botId: string): string {
+    return `${this.killEpoch}:${this.botEpoch.get(botId) ?? 0}`;
+  }
+
   /** Why owner writes (confirm, rename, archive) are refused right now, or null. Set when a state file is unusable. */
   writeBlockedReason(): string | null {
     return this.fatal;
@@ -1263,7 +1268,7 @@ export class TradingService {
     const killDetail = why ? `kill switch: ${why}` : "kill switch";
     this.mutate((st) => haltAll(st, at, "KILLED", killDetail, this.registry.live().map((b) => b.id)));
     // State file unusable: it is not touched; the halt goes to the marker file and is applied by the next start that can read it.
-    const markerOk = this.fatal !== null ? this.writeHaltMarker(null, at, "KILLED", killDetail) : true;
+    const markerOk = this.fatal !== null ? this.writeHaltMarker(null, at, "KILLED", killDetail) : false;
     this.appendLog([{ at_ms: at, kind: "state", detail: `KILL SWITCH${why ? `: ${why}` : ""}` }]);
 
     // Wait (bounded) for the tick that is running: after it ends nothing else can create an order, so the cancel below
@@ -1281,6 +1286,8 @@ export class TradingService {
       sched = "failed";
     }
     const saved = this.fatal !== null ? markerOk : this.persistState(); // final write: also retries a halt that could not be saved at the start
+    // ML2: the state write failed for another reason (disk full ...): the halt must still survive a restart.
+    if (!saved && !markerOk) this.writeHaltMarker(null, at, "KILLED", killDetail);
     this.appendLog([
       { at_ms: this.now(), kind: "cancel", detail: `kill: cancel_all ${cancelAll} (${c.cancelled} order(s)), schedule_cancel ${sched}, state_saved ${saved ? "ok" : "failed"}, tick_wait ${tickWait}` },
     ]);
@@ -1302,11 +1309,12 @@ export class TradingService {
     this.botEpoch.set(id, (this.botEpoch.get(id) ?? 0) + 1);
     const killDetail = why ? `kill switch: ${why}` : "kill switch";
     this.mutate((st) => haltBot(st, id, at, "KILLED", killDetail));
-    const markerOk = this.fatal !== null ? this.writeHaltMarker(id, at, "KILLED", killDetail) : true;
+    const markerOk = this.fatal !== null ? this.writeHaltMarker(id, at, "KILLED", killDetail) : false;
     this.appendLog([{ at_ms: at, kind: "state", bot_id: id, detail: `KILL SWITCH (bot ${id})${why ? `: ${why}` : ""}` }]);
     await this.waitTick();
     const c = await this.cancelWhere(this.ownsCloid(b.id));
     const saved = this.fatal !== null ? markerOk : this.persistState();
+    if (!saved && !markerOk) this.writeHaltMarker(id, at, "KILLED", killDetail);
     this.appendLog([{ at_ms: this.now(), kind: "cancel", bot_id: id, detail: `kill bot ${id}: cancel ${c.ok ? "ok" : "failed"} (${c.cancelled} order(s)), state_saved ${saved ? "ok" : "failed"}` }]);
     return { bot_id: id, state: "halted", cancelled_orders: c.cancelled, steps: { cancel: c.ok ? "ok" : "failed", state_saved: saved ? "ok" : "failed" } };
   }
@@ -1350,7 +1358,7 @@ export class TradingService {
    *  2. the bot is HALTED (persisted) and its epoch bumped, so neither the running tick nor any later one can place an order;
    *  3. wait for the running tick, cancel the bot's orders, run one fresh tick (fills of cancelled/partly filled orders are
    *     folded in) and check the position AGAIN on that fresh view;
-   *  4. only then the registry marks it archived. Any refusal in 3-4 restores the bot's previous halt state.
+   *  4. only then the registry marks it archived. A refusal in 3-4 leaves the bot HALTED (never back to trading).
    */
   async archive(id: string): Promise<ArchiveResult> {
     this.assertWritable();
@@ -1395,13 +1403,16 @@ export class TradingService {
       if (!c.ok) warnings.push("some of its orders could not be cancelled; check open orders on Hyperliquid");
       return { bot: this.botSummary(bot, true), cancelled_orders: c.cancelled, ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}) };
     } catch (e) {
-      restore();
+      // ML1: a refused archive must not put the bot back into trading. It stays halted (KILLED, persisted) until the owner signs
+      // its rules again; only the detail changes so the dashboard says why.
+      this.mutate((st) => haltBot(st, id, at, "KILLED", "archive was refused; the bot stays stopped until you sign its rules again"));
       throw e;
     }
   }
 
   /** New API wallet (the old key is deleted). Orders of the old key are cancelled first, best effort. */
   async rotateApiWallet(): Promise<string> {
+    this.assertWritable(); // ML8: no rotation while the state is unusable
     // Serialized with the tick: wait for a running one, then hold the single-flight slot while the key is swapped, so no
     // tick sees the old adapter with the new key (or the reverse).
     while (this.inflight) await this.inflight;

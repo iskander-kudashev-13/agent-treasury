@@ -140,7 +140,7 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
 
   const pairs = createPairInfoProvider(() => service.hlPort());
   const authoring: TradingAuthoring = { hard, pairs, deadManAvailable: () => service.deadManAvailable(), bots: { registry: service.registry, maxBots: config.TRADING_MAX_BOTS } };
-  const confirmer = new RulesConfirmer({ ctx: confirmCtx, store, registry: service.registry, maxBots: config.TRADING_MAX_BOTS, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), writeBlocked: () => service.writeBlockedReason() });
+  const confirmer = new RulesConfirmer({ ctx: confirmCtx, store, registry: service.registry, maxBots: config.TRADING_MAX_BOTS, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), writeBlocked: () => service.writeBlockedReason(), killStamp: (id) => service.killStamp(id) });
   const secret = config.AI_SESSION_SECRET;
   if (!secret) throw new Error("AI_SESSION_SECRET is required"); // config validation already guarantees it
   const routeDeps: TradingRouteDeps = {
