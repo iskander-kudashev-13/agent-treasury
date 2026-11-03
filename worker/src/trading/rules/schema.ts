@@ -60,21 +60,38 @@ const rule = z.strictObject({
   cooldown: z.enum(COOLDOWNS).optional(),
 });
 
+const nameSchema = z.string().regex(NAME_RE, "BAD_NAME");
+const pairsSchema = z.array(z.string().regex(PAIR_RE, "BAD_PAIR")).min(1, "NO_PAIRS").max(MAX_PAIRS, "TOO_MANY_PAIRS");
+const limitsSchema = z.strictObject({
+  max_position_usdc: dec,
+  max_order_usdc: dec,
+  daily_loss_stop_usdc: dec,
+  max_orders_per_day: z
+    .number()
+    .int("MAX_ORDERS_RANGE")
+    .min(1, "MAX_ORDERS_RANGE")
+    .max(MAX_ORDERS_PER_DAY_CAP, "MAX_ORDERS_RANGE"),
+});
+
 export const ruleSetSchema = z.strictObject({
   version: z.literal(1, "BAD_VERSION"),
-  name: z.string().regex(NAME_RE, "BAD_NAME"),
-  pairs: z.array(z.string().regex(PAIR_RE, "BAD_PAIR")).min(1, "NO_PAIRS").max(MAX_PAIRS, "TOO_MANY_PAIRS"),
-  limits: z.strictObject({
-    max_position_usdc: dec,
-    max_order_usdc: dec,
-    daily_loss_stop_usdc: dec,
-    max_orders_per_day: z
-      .number()
-      .int("MAX_ORDERS_RANGE")
-      .min(1, "MAX_ORDERS_RANGE")
-      .max(MAX_ORDERS_PER_DAY_CAP, "MAX_ORDERS_RANGE"),
-  }),
+  name: nameSchema,
+  pairs: pairsSchema,
+  limits: limitsSchema,
   rules: z.array(rule).min(1, "NO_RULES").max(MAX_RULES, "TOO_MANY_RULES"),
+});
+
+/**
+ * Agent-driven mandate (ADR-0007 section 1): the same object with `mode: "agent"` and an EMPTY `rules` array. Chosen by the
+ * presence of the `mode` key only, so every DSL input is parsed by `ruleSetSchema` exactly as before.
+ */
+export const agentMandateSchema = z.strictObject({
+  version: z.literal(1, "BAD_VERSION"),
+  mode: z.literal("agent", "BAD_MODE"),
+  name: nameSchema,
+  pairs: pairsSchema,
+  limits: limitsSchema,
+  rules: z.array(z.unknown()).max(0, "AGENT_HAS_RULES"),
 });
 
 // The schema output must stay assignable to the hand-written interface (and vice versa for the fields we read).
@@ -99,6 +116,9 @@ export const ISSUE_CODES = [
   "NO_RULES",
   "TOO_MANY_RULES",
   "MAX_ORDERS_RANGE",
+  // agent mode (ADR-0007)
+  "BAD_MODE",
+  "AGENT_HAS_RULES",
   // cross-field (static)
   "NAME_WHITESPACE",
   "DUPLICATE_PAIR",
@@ -125,6 +145,7 @@ export const ISSUE_CODES = [
   "PAIR_UNKNOWN",
   "PAIR_PERP",
   "PAIR_LOW_VOLUME",
+  "LIMIT_AGENT_MAX_ORDERS",
   /** Warnings only. */
   "SIZE_NEAR_HL_MINIMUM",
   "ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE",
@@ -196,7 +217,9 @@ export type ParseResult = { ok: true; value: RuleSetV1; issues: [] } | { ok: fal
 
 /** Structural parse + static cross-field checks. Never throws. */
 export function parseRuleSet(input: unknown): ParseResult {
-  const r = ruleSetSchema.safeParse(input);
+  const agent = typeof input === "object" && input !== null && !Array.isArray(input) && "mode" in input;
+  // The agent schema's `rules` is `[]` (checked by max(0)); its output is therefore a RuleSetV1 with no rules.
+  const r = agent ? (agentMandateSchema.safeParse(input) as z.ZodSafeParseResult<RuleSetV1>) : ruleSetSchema.safeParse(input);
   if (!r.success) {
     const issues = r.error.issues.map((i): ValidationIssue => {
       const code = i.code === "unrecognized_keys" ? "UNKNOWN_KEY" : KNOWN.has(i.message) ? (i.message as IssueCode) : "SCHEMA";

@@ -91,7 +91,11 @@ export function effectiveLimits(rules: RuleSetV1 | null, hard: HardLimits): Effe
     maxPosition: fxMin(h.maxPosition, fx(l.max_position_usdc)),
     maxOrder: fxMin(h.maxOrder, fx(l.max_order_usdc)),
     dailyLossStop: fxMin(h.dailyLossStop, fx(l.daily_loss_stop_usdc)),
-    maxOrdersPerDay: Math.min(h.maxOrdersPerDay, l.max_orders_per_day),
+    // Agent-driven bots (ADR-0007): also capped by TRADING_AGENT_MAX_ORDERS_PER_DAY.
+    maxOrdersPerDay:
+      rules.mode === "agent"
+        ? Math.min(h.maxOrdersPerDay, hard.agentMaxOrdersPerDay ?? Number.POSITIVE_INFINITY, l.max_orders_per_day)
+        : Math.min(h.maxOrdersPerDay, l.max_orders_per_day),
   };
 }
 

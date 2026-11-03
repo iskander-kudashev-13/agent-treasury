@@ -11,6 +11,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { CHALLENGE_TTL_MS, nep413Digest, verifyEd25519 } from "../ai/session.js";
+import { makeAgentToken } from "./agent.js";
 import { RegistryError } from "./bots.js";
 import type { BotRegistry } from "./bots.js";
 import { confirmationMessage, hashRuleSet } from "./rules/canonical.js";
@@ -18,7 +19,7 @@ import { parseRuleSet } from "./rules/schema.js";
 import { validate } from "./rules/validate.js";
 import type { RulesStore } from "./store.js";
 import { BOT_ID_RE, DEFAULT_BOT_ID } from "./types.js";
-import type { Bot, ConfirmedRules, HardLimits, PairInfoMap, RuleSetV1 } from "./types.js";
+import type { AgentTokenIssued, Bot, BotKind, ConfirmedRules, HardLimits, PairInfoMap, RuleSetV1 } from "./types.js";
 
 export interface ConfirmCtx {
   vault: string;
@@ -87,15 +88,17 @@ export async function verifyEnvelope(env: ConfirmedRules, ctx: ConfirmCtx, pairI
   if (typeof env.hash !== "string" || !SHA256_HEX.test(env.hash) || env.hash !== hash) throw new ConfirmError(400, "HASH_MISMATCH", "The hash does not match the rules");
 
   const base = { vault: ctx.vault, agentId: ctx.agentId, hlNetwork: ctx.hlNetwork, hlAccount: ctx.hlAccount, rulesSha256: hash };
+  // ADR-0007: the mode comes from the PARSED SIGNED rules, never from a request field; an agent mandate needs the v3 message.
+  const mode = rules.mode;
   let message: string;
   if (env.bot_id === undefined) {
     // Written before multi-bot support: valid only as the migrated `default` rule set that was active at migration time.
-    if (expect.botId !== DEFAULT_BOT_ID || expect.legacyV1Hash == null || expect.legacyV1Hash !== hash)
+    if (mode !== undefined || expect.botId !== DEFAULT_BOT_ID || expect.legacyV1Hash == null || expect.legacyV1Hash !== hash)
       throw new ConfirmError(400, "MESSAGE_MISMATCH", "This confirmation predates bots and is not valid for this bot; sign the rules again");
     message = confirmationMessage(base);
   } else {
     if (env.bot_id !== expect.botId) throw new ConfirmError(400, "MESSAGE_MISMATCH", "The confirmation was signed for a different bot");
-    message = confirmationMessage({ ...base, botId: env.bot_id });
+    message = confirmationMessage({ ...base, botId: env.bot_id, ...(mode !== undefined ? { mode } : {}) });
   }
   if (env.message !== message) throw new ConfirmError(400, "MESSAGE_MISMATCH", "The signed message is not the expected confirmation message");
 
@@ -136,6 +139,11 @@ export interface ConfirmDeps {
    * (audit 2026-11-03 MM2). Absent = no check (tests that do not wire the service).
    */
   killStamp?: ((botId: string) => string) | undefined;
+  /**
+   * ADR-0007: agent-driven trading. Absent or `enabled: false` = an agent mandate is refused (409 AGENT_TRADING_DISABLED).
+   * `tokenTtlMs`: lifetime of a token minted by a confirmation.
+   */
+  agent?: { enabled: boolean; tokenTtlMs: number } | undefined;
   now?: () => number;
 }
 
@@ -149,6 +157,8 @@ export interface Challenge {
   bot_id: string;
   /** True when the bot does not exist yet: it is created by the confirmation (not by this challenge). */
   is_new: boolean;
+  /** ADR-0007: "agent" for an agent mandate (message v3), else "rules". */
+  mode: BotKind;
 }
 
 export interface ConfirmBody {
@@ -165,6 +175,8 @@ export interface ConfirmBody {
 export interface Confirmation {
   env: ConfirmedRules;
   bot: Bot;
+  /** ADR-0007: the new agent token (returned ONCE; only its sha256 is stored). Null for DSL rule sets. */
+  agentToken: AgentTokenIssued | null;
 }
 
 const MAX_PENDING = 200;
@@ -179,6 +191,14 @@ export class RulesConfirmer {
   private readonly now: () => number;
   constructor(private readonly d: ConfirmDeps) {
     this.now = d.now ?? Date.now;
+  }
+
+  /** Kind of a parsed rule set, refused while agent-driven trading is off. */
+  private kindOf(rules: RuleSetV1): BotKind {
+    if (rules.mode !== "agent") return "rules";
+    if (this.d.agent?.enabled !== true)
+      throw new ConfirmError(409, "AGENT_TRADING_DISABLED", "AI-agent trading is turned off on this worker (TRADING_AGENT_ENABLED=false)");
+    return "agent";
   }
 
   private assertWritable(): void {
@@ -206,10 +226,11 @@ export class RulesConfirmer {
     const parsed = parseRuleSet(rulesInput);
     if (!parsed.ok) throw new ConfirmError(400, "RULES_INVALID", `Invalid rules: ${parsed.issues.map((i) => `${i.code} ${i.path}`).join(", ")}`);
     const hash = hashRuleSet(parsed.value);
-    // Bot rules first (cheap, no HL call): MAX_BOTS, RULES_USED_BY_OTHER_BOT, BOT_ARCHIVED ...
+    const kind = this.kindOf(parsed.value);
+    // Bot rules first (cheap, no HL call): MAX_BOTS, RULES_USED_BY_OTHER_BOT, BOT_ARCHIVED, BOT_KIND_MISMATCH ...
     let isNew: boolean;
     try {
-      isNew = this.d.registry.check({ botId, hash, name: botName ?? parsed.value.name, maxBots: this.d.maxBots }).isNew;
+      isNew = this.d.registry.check({ botId, hash, name: botName ?? parsed.value.name, maxBots: this.d.maxBots, kind }).isNew;
     } catch (e) {
       return fromRegistry(e);
     }
@@ -224,13 +245,14 @@ export class RulesConfirmer {
     const c = this.d.ctx;
     return {
       nonce: nonce.toString("base64"),
-      message: confirmationMessage({ vault: c.vault, agentId: c.agentId, hlNetwork: c.hlNetwork, hlAccount: c.hlAccount, rulesSha256: hash, botId }),
+      message: confirmationMessage({ vault: c.vault, agentId: c.agentId, hlNetwork: c.hlNetwork, hlAccount: c.hlAccount, rulesSha256: hash, botId, ...(kind === "agent" ? { mode: "agent" as const } : {}) }),
       recipient: c.vault,
       hash,
       expires_at: expiresAt,
       warnings: v.warnings.map((w) => `${w.code}: ${w.message}`),
       bot_id: botId,
       is_new: isNew,
+      mode: kind,
     };
   }
 
@@ -267,13 +289,14 @@ export class RulesConfirmer {
     if (!parsed.ok) throw new ConfirmError(400, "RULES_INVALID", `Invalid rules: ${parsed.issues.map((i) => `${i.code} ${i.path}`).join(", ")}`);
     const hash = hashRuleSet(parsed.value);
     if (hash !== p.hash) throw new ConfirmError(400, "HASH_MISMATCH", "These rules are not the rules the challenge was issued for");
+    const kind = this.kindOf(parsed.value);
 
     const c = this.d.ctx;
     const env: ConfirmedRules = {
       bot_id: botId,
       rules: parsed.value,
       hash,
-      message: confirmationMessage({ vault: c.vault, agentId: c.agentId, hlNetwork: c.hlNetwork, hlAccount: c.hlAccount, rulesSha256: hash, botId }),
+      message: confirmationMessage({ vault: c.vault, agentId: c.agentId, hlNetwork: c.hlNetwork, hlAccount: c.hlAccount, rulesSha256: hash, botId, ...(kind === "agent" ? { mode: "agent" as const } : {}) }),
       signature,
       public_key,
       account_id,
@@ -285,12 +308,15 @@ export class RulesConfirmer {
     // The bot exists only from this point on: after a valid signature. Rules are re-checked against the registry (it may have
     // changed while the signature was verified) and the registry file is the commit point, written after the envelope.
     const name = (typeof body.bot_name === "string" ? body.bot_name : undefined) ?? p.botName;
-    const act = { botId, hash, name, maxBots: this.d.maxBots };
+    const act = { botId, hash, name, maxBots: this.d.maxBots, kind };
     try {
       this.d.registry.check(act);
       this.d.store.save(env);
-      const bot = this.d.registry.activate(act, this.now());
-      return { env, bot };
+      // ADR-0007: every confirmation of an agent mandate (new bot, resume with the same hash, new limits) mints a NEW token. Only
+      // its sha256 goes into bots.json, in the same commit that activates the hash, so the previous token dies with that commit.
+      const minted = kind === "agent" ? makeAgentToken(botId, this.now(), this.d.agent?.tokenTtlMs ?? 0) : null;
+      const bot = this.d.registry.activate(act, this.now(), minted?.record);
+      return { env, bot, agentToken: minted?.issued ?? null };
     } catch (e) {
       return fromRegistry(e);
     }

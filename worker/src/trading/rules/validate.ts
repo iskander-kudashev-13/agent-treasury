@@ -42,6 +42,12 @@ export function validate(input: unknown, hard: HardLimits, pairInfo: PairInfoMap
       issue("LIMIT_MAX_ORDERS", "limits.max_orders_per_day", `max_orders_per_day ${rs.limits.max_orders_per_day} is above the hard limit ${hard.maxOrdersPerDay}`),
     );
 
+  // Agent-driven bots have their own, usually lower, orders-per-day cap (ADR-0007 section 8).
+  if (rs.mode === "agent" && hard.agentMaxOrdersPerDay !== undefined && rs.limits.max_orders_per_day > hard.agentMaxOrdersPerDay)
+    errors.push(
+      issue("LIMIT_AGENT_MAX_ORDERS", "limits.max_orders_per_day", `max_orders_per_day ${rs.limits.max_orders_per_day} is above the agent-mode limit ${hard.agentMaxOrdersPerDay} (TRADING_AGENT_MAX_ORDERS_PER_DAY)`),
+    );
+
   const minVol = toMicro(hard.minPairVolumeUsdc);
   rs.pairs.forEach((p, i) => {
     const at = `pairs.${i}`;

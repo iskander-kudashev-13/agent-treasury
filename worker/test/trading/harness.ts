@@ -11,6 +11,7 @@ import { createPairInfoProvider } from "../../src/trading/pairs.js";
 import { createTradingRouter } from "../../src/trading/route.js";
 import type { TradingRouteDeps } from "../../src/trading/route.js";
 import { TradingService } from "../../src/trading/service.js";
+import type { AgentTradingSettings } from "../../src/trading/service.js";
 import { RulesStore } from "../../src/trading/store.js";
 import type { RuleSetV1 } from "../../src/trading/types.js";
 import { ApiWalletManager } from "../../src/trading/wallet.js";
@@ -90,6 +91,8 @@ export interface HarnessOpts {
   envKey?: string | undefined;
   topup?: boolean;
   proposer?: TradingRouteDeps["propose"];
+  /** ADR-0007 agent-driven trading settings; absent = off. */
+  agent?: AgentTradingSettings;
 }
 
 export function harness(o: HarnessOpts = {}) {
@@ -113,7 +116,7 @@ export function harness(o: HarnessOpts = {}) {
   const funder = o.topup === false ? null : new Funder(client, { enabled: true, masterAddress: HL_ACCOUNT, topupUsdc: "20", floorUsdc: "10", stateDir: dir, now: () => clock.t });
   const hlCreated: string[] = [];
   const service = new TradingService({
-    settings: { vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", account: HL_ACCOUNT, hard: HARD, tickSec: 60, deadmanSec: 180, stateDir: dir },
+    settings: { vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", account: HL_ACCOUNT, hard: HARD, tickSec: 60, deadmanSec: 180, stateDir: dir, ...(o.agent ? { agent: o.agent } : {}) },
     hl,
     createHl: (w) => {
       hlCreated.push(w.address);
@@ -132,7 +135,7 @@ export function harness(o: HarnessOpts = {}) {
     now: () => clock.t,
   });
   const pairs = createPairInfoProvider(() => service.hlPort(), { now: () => clock.t });
-  const confirmer = new RulesConfirmer({ ctx, store, registry: service.registry, maxBots: 3, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), killStamp: (id) => service.killStamp(id), now: () => clock.t });
+  const confirmer = new RulesConfirmer({ ctx, store, registry: service.registry, maxBots: 3, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), killStamp: (id) => service.killStamp(id), ...(o.agent ? { agent: { enabled: o.agent.enabled, tokenTtlMs: o.agent.tokenTtlHours * 3_600_000 } } : {}), now: () => clock.t });
   const routeDeps: TradingRouteDeps = { service, confirmer, store, confirmCtx: ctx, sessionSecret: SECRET, vault: VAULT, trustProxy: true, now: () => clock.t, propose: o.proposer };
   const app = new Hono().route("/trading", createTradingRouter(routeDeps));
 

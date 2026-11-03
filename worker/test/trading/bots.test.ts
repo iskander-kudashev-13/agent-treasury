@@ -305,7 +305,7 @@ describe("HTTP: bots API", () => {
     const pj = await j(pub);
     expect(pj.max_bots).toBe(3);
     for (const b of pj.bots) {
-      expect(Object.keys(b).sort()).toEqual(["archived_at_ms", "created_at_ms", "id", "name", "pairs", "state", "state_reason"]);
+      expect(Object.keys(b).sort()).toEqual(["archived_at_ms", "created_at_ms", "id", "kind", "name", "pairs", "state", "state_reason"]);
     }
     expect(pj.bots.map((b: Json) => b.id)).toEqual(["alpha", "beta"]);
     expect(pj.bots[0]).toMatchObject({ name: "Alpha", state: "running", pairs: ["HYPE/USDC"] });
@@ -324,7 +324,7 @@ describe("HTTP: bots API", () => {
     expect((await get(h.app, "/bots/ghost", h.authed())).status).toBe(404);
     expect((await get(h.app, "/bots/Not%20An%20Id", h.authed())).status).toBe(404);
     const d = await j(await get(h.app, "/bots/alpha", h.authed()));
-    expect(Object.keys(d).sort()).toEqual(["bot", "hl_network", "limits", "open_orders", "pairs", "positions", "rules", "rules_history", "today"]);
+    expect(Object.keys(d).sort()).toEqual(["agent", "bot", "hl_network", "kind", "limits", "open_orders", "pairs", "positions", "rules", "rules_history", "today"]);
     expect(d.bot).toMatchObject({ id: "alpha", state: "running" });
     expect(d.rules).toMatchObject({ bot_id: "alpha", hash: hashRuleSet(rulesOf("Alpha strategy", [dca(), sellAll()])) });
     expect(d.limits.bot).toMatchObject({ max_order_usdc: "12" });
@@ -355,7 +355,7 @@ describe("HTTP: bots API", () => {
     expect(all.next_cursor).toBeNull();
     const times = all.fills.map((f: Json) => f.time_ms);
     expect(times).toEqual([...times].sort((a: number, b: number) => b - a));
-    expect(Object.keys(all.fills[0]).sort()).toEqual(["cloid", "fee_token", "fee_usdc", "oid", "pair", "price", "realized_usdc", "rule_id", "side", "size", "tid", "time_ms"]);
+    expect(Object.keys(all.fills[0]).sort()).toEqual(["cloid", "fee_token", "fee_usdc", "note", "oid", "pair", "price", "realized_usdc", "rule_id", "side", "size", "tid", "time_ms"]);
     const seen: number[] = [];
     let cursor: string | null = null;
     for (let i = 0; i < 20; i++) {

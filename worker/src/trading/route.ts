@@ -4,7 +4,10 @@
  *   public   GET /status                      (the data is public on HL and NEAR)
  *   owner    Bearer token of the NEP-413 assistant session (`/ai/session`), owner re-checked against the vault
  *   nep413   POST /rules/confirm              (the signature itself is the authentication)
+ *   agent    `/agent/*` (ADR-0007): the per-bot agent bearer token minted by a signed confirm. Mounted only while
+ *            TRADING_AGENT_ENABLED=true (otherwise 404). The bot id comes ONLY from the token.
  * Errors are `{ type: "error", code, message }`.
+ * Never log a request's Authorization header (owner session or agent token): this module logs nothing per request.
  */
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -12,6 +15,7 @@ import { z } from "zod";
 import { clientKey } from "../ai/route.js";
 import { RateLimiter } from "../ai/ratelimit.js";
 import { verifyToken } from "../ai/session.js";
+import { AGENT_BODY_MAX_BYTES, agentOrderBody, canonicalBody, intentOf, rejected, sanitizeNote, verifyAgentToken } from "./agent.js";
 import { ConfirmError } from "./confirm.js";
 import type { ConfirmBody, RulesConfirmer } from "./confirm.js";
 import { ProposeError } from "./propose.js";
@@ -298,10 +302,10 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
     try {
       // The perp-alarm check comes BEFORE the nonce is consumed, so the owner can retry the same signature flow later.
       await d.service.assertMayActivate();
-      const { env, bot } = await d.confirmer.confirm(b.value as ConfirmBody);
+      const { env, bot, agentToken } = await d.confirmer.confirm(b.value as ConfirmBody);
       const state = await d.service.activated(env, bot.id);
-      // `active` stays for the single-bot dashboard; `bot` is the multi-bot answer.
-      return c.json({ bot: d.service.botSummary(bot, true), state, active: env });
+      // `active` stays for the single-bot dashboard; `bot` is the multi-bot answer. `agent_token` (ADR-0007) is returned ONCE.
+      return c.json({ bot: d.service.botSummary(bot, true), state, active: env, agent_token: agentToken });
     } catch (e) {
       return mapError(c, e);
     }
@@ -338,6 +342,24 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
       return mapError(c, e);
     }
   });
+
+  // ADR-0007: revoke the agent token of an agent bot. Toward safety, so the same class as the kill switches.
+  app.post("/bots/:id/agent-token/revoke", async (c) => {
+    const o = await owner(c, true, true);
+    if (typeof o !== "string") return o;
+    const id = botId(c);
+    if (typeof id !== "string") return id;
+    const b = await json(c);
+    if (!b.ok) return b.res;
+    if (!emptyBody.safeParse(b.value).success) return fail(c, 400, "BAD_REQUEST", "Expected {}");
+    try {
+      return c.json(d.service.revokeAgentToken(id));
+    } catch (e) {
+      return mapError(c, e);
+    }
+  });
+
+  if (d.service.agentSettings.enabled) mountAgentRoutes(app, d, { fail, throttle, now });
 
   app.post("/bots/:id/rename", async (c) => {
     const t = throttle(c);
@@ -387,4 +409,72 @@ export function createTradingRouter(d: TradingRouteDeps): Hono {
   });
 
   return app;
+}
+
+type Fail = (c: Context, status: ErrStatus, code: string, message: string) => Response;
+
+/**
+ * `/agent/state` and `/agent/order` (ADR-0007 sections 3, 4, 9). Auth = the agent token; there is no bot id parameter anywhere.
+ * A gate refusal of an order is a 200 with `status: "rejected"`; HTTP errors are only for the request itself.
+ */
+function mountAgentRoutes(app: Hono, d: TradingRouteDeps, h: { fail: Fail; throttle: (c: Context) => Response | null; now: () => number }): void {
+  const { fail, throttle, now } = h;
+  const auth = (c: Context): { botId: string; tokenId: string } | Response => {
+    const r = verifyAgentToken(d.service.registry, c.req.header("authorization"), now());
+    if (!r.ok) return fail(c, r.status, r.code, r.message);
+    d.service.noteAgentUse(r.botId);
+    return { botId: r.botId, tokenId: r.tokenId };
+  };
+
+  app.get("/agent/state", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const a = auth(c);
+    if (a instanceof Response) return a;
+    try {
+      return c.json(await d.service.agentState(a.botId, a.tokenId));
+    } catch {
+      return fail(c, 502, "INTERNAL_ERROR", "The trading module failed to handle this request");
+    }
+  });
+
+  app.post("/agent/order", async (c) => {
+    const t = throttle(c);
+    if (t) return t;
+    const len = Number(c.req.header("content-length") ?? 0);
+    if (len > AGENT_BODY_MAX_BYTES) return fail(c, 413, "BODY_TOO_LARGE", "Request body too large (2 KB at most)");
+    const raw = await c.req.text();
+    if (Buffer.byteLength(raw, "utf8") > AGENT_BODY_MAX_BYTES) return fail(c, 413, "BODY_TOO_LARGE", "Request body too large (2 KB at most)");
+    const a = auth(c);
+    if (a instanceof Response) return a;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw) as unknown;
+    } catch {
+      return fail(c, 400, "BAD_ORDER_REQUEST", "Body must be JSON");
+    }
+    const parsed = agentOrderBody.safeParse(value);
+    if (!parsed.success) {
+      const why = parsed.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.code === "unrecognized_keys" ? "unknown field" : i.message}`).join("; ");
+      return fail(c, 400, "BAD_ORDER_REQUEST", `Invalid order: ${why}`.slice(0, 300));
+    }
+    const body = parsed.data;
+    const key = body.idempotency_key;
+    const canon = canonicalBody(body);
+    const g = d.service.agentGate.begin(a.botId, a.tokenId, key, canon);
+    if (g.kind === "replay") return c.json(g.response);
+    if (g.kind === "error") {
+      if (g.retryAfterS !== undefined) c.header("Retry-After", String(g.retryAfterS));
+      return fail(c, g.status, g.code, g.message);
+    }
+    try {
+      const res = await d.service.agentOrder(a.botId, intentOf(body), sanitizeNote(body.reason));
+      g.release(key, canon, res);
+      return c.json(res);
+    } catch {
+      // agentOrder does not throw (the tick maps its own failures); fail closed anyway, without caching the answer.
+      g.abort();
+      return c.json(rejected("INTERNAL_ERROR", "The worker failed while handling this order; its outcome is unknown, so read the bot state before trying again", d.service.agentRemaining(a.botId)));
+    }
+  });
 }

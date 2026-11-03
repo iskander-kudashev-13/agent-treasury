@@ -39,6 +39,8 @@ export interface JournalFill {
   realized_usdc: SDec | null;
   /** The bot's position in this pair after the fill (base units). */
   pos_after: Dec;
+  /** ADR-0007: the AI agent's sanitised reason for the order. Absent for DSL fills (their lines are unchanged). */
+  note?: string;
 }
 
 /** API shape `BotFill` of GET /trading/bots/:id/fills. */
@@ -55,6 +57,8 @@ export interface BotFill {
   fee_usdc: Dec;
   fee_token: string;
   realized_usdc: SDec | null;
+  /** ADR-0007: the AI agent's note for the order (plain text, owner only); null for DSL fills. */
+  note: string | null;
 }
 
 export interface FillsPage {
@@ -88,6 +92,7 @@ export function toBotFill(f: JournalFill): BotFill {
     fee_usdc: f.fee_usdc,
     fee_token: f.fee_token,
     realized_usdc: f.realized_usdc,
+    note: f.note ?? null,
   };
 }
 
@@ -99,7 +104,7 @@ const strOrNull = (x: unknown): string | null | undefined => (x === null ? null 
 
 function parseFill(x: unknown): JournalFill | null {
   if (!isObj(x)) return null;
-  const { tid, oid, cloid, rule_id, time_ms, pair, side, px, sz, fee_usdc, fee_token, fee_amount, realized_usdc, pos_after } = x;
+  const { tid, oid, cloid, rule_id, time_ms, pair, side, px, sz, fee_usdc, fee_token, fee_amount, realized_usdc, pos_after, note } = x;
   const c = strOrNull(cloid);
   const r = strOrNull(rule_id);
   const re = strOrNull(realized_usdc);
@@ -108,6 +113,7 @@ function parseFill(x: unknown): JournalFill | null {
   if (typeof pair !== "string" || (side !== "buy" && side !== "sell") || typeof fee_token !== "string") return null;
   for (const d of [px, sz, fee_usdc, fee_amount, pos_after]) if (typeof d !== "string" || !DEC.test(d)) return null;
   if (re !== null && !SDEC.test(re)) return null;
+  if (note !== undefined && typeof note !== "string") return null;
   return {
     tid,
     oid,
@@ -123,6 +129,7 @@ function parseFill(x: unknown): JournalFill | null {
     fee_amount: fee_amount as string,
     realized_usdc: re,
     pos_after: pos_after as string,
+    ...(typeof note === "string" ? { note: note.slice(0, 200) } : {}),
   };
 }
 

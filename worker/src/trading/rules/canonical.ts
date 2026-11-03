@@ -39,6 +39,8 @@ export function hashRuleSet(rules: RuleSetV1): string {
 /**
  * The exact NEP-413 message the owner signs. With `botId` it is the v2 message of ADR-0006 (a `bot:` line after `agent:`); without
  * it, the v1 message of ADR-0005, which the worker accepts only for the migrated bot `default` (see confirm.ts).
+ * With `mode: "agent"` it is the v3 message of ADR-0007: a different header and a `mode:` line, so a DSL signature and an agent
+ * signature can never stand in for each other. v3 always names the bot; `mode` without `botId` throws.
  */
 export function confirmationMessage(p: {
   vault: string;
@@ -47,7 +49,21 @@ export function confirmationMessage(p: {
   hlAccount: string;
   rulesSha256: string;
   botId?: string;
+  mode?: "agent";
 }): string {
+  if (p.mode !== undefined) {
+    if (p.botId === undefined) throw new Error("confirmationMessage: an agent-mode message needs botId");
+    return [
+      "Agent Treasury: activate AI agent trading limits",
+      `vault: ${p.vault}`,
+      `agent: ${p.agentId}`,
+      `bot: ${p.botId}`,
+      "mode: agent",
+      `hl_network: ${p.hlNetwork}`,
+      `hl_account: ${p.hlAccount.toLowerCase()}`,
+      `rules_sha256: ${p.rulesSha256}`,
+    ].join("\n");
+  }
   return [
     "Agent Treasury: activate trading rules",
     `vault: ${p.vault}`,

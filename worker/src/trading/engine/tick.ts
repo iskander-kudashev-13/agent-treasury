@@ -21,6 +21,8 @@
  */
 import { effectiveCooldown } from "../rules/describe.js";
 import type {
+  Action,
+  AgentIntent,
   AgentStatus,
   BotState,
   Dec,
@@ -172,10 +174,24 @@ export interface TickInput {
   /** Creation order = evaluation order. */
   bots: readonly BotInput[];
   state: EngineState;
+  /**
+   * ADR-0007 agent tick: one order an AI agent asked for, for one agent-mode bot. The whole tick runs as usual (reads, every gate,
+   * loss stops, cancels); in step 7 the DSL rules of EVERY bot are skipped and only this intent goes through `attempt()`, the
+   * same code path a DSL rule takes. At most one order.
+   */
+  agent?: { botId: string; intent: AgentIntent; note: string | null };
 }
 
+/**
+ * Outcome of one order attempt in step 7 (ADR-0007 section 5). `killed` (internal): the kill switch was pulled during the tick;
+ * the DSL loop stops evaluating this bot's rules.
+ */
+export type AttemptOutcome =
+  | { placed: false; code: string; reason: string; killed?: true }
+  | { placed: true; cloid: string; price: Fx; size: Fx; notional: Fx; result: HlOrderResult };
+
 /** The part of `TradingStatus` the engine knows. The service adds enabled/network/account/vault/agent/active_rules/bots. */
-export type StatusPieces = Omit<TradingStatus, "enabled" | "hl_network" | "hl_account" | "vault" | "agent_id" | "active_rules" | "bots" | "max_bots">;
+export type StatusPieces = Omit<TradingStatus, "enabled" | "hl_network" | "hl_account" | "vault" | "agent_id" | "active_rules" | "bots" | "max_bots" | "agent_trading">;
 
 /** One bot after the tick: the status the owner sees and the numbers for history and the bot page. */
 export interface BotView {
@@ -206,15 +222,48 @@ export interface TickResult {
   /** New decisions of this tick (the same ones were appended to `state.account.recent`). */
   entries: LogEntry[];
   bots: Record<string, BotView>;
-  /** Fills that were new this tick and belong to a bot, oldest first, with the rule that placed them when known. */
-  attributed: (AttributedFill & { ruleId: string | null })[];
+  /**
+   * Fills that were new this tick and belong to a bot, oldest first, with the rule that placed them when known. `note` (ADR-0007)
+   * = the sanitised reason an AI agent gave for the order, when the order came from an agent.
+   */
+  attributed: (AttributedFill & { ruleId: string | null; note?: string | null })[];
   /** Account-level history sample; null when equity could not be computed. */
   accountSample: { pnl: SDec; today: SDec; equity: Dec; positionUsdc: Dec; px: Record<string, Dec> } | null;
+  /** ADR-0007: set by an agent tick that reached step 7. Undefined = the tick ended earlier (see `status.state_reason`). */
+  agent?: AttemptOutcome;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Tick
 // ---------------------------------------------------------------------------------------------------------------------
+
+/** `rule_id` of agent orders in the log, `firedAt`, `cloidRule` and the journal (ADR-0007). Agent bots have no DSL rules, so it cannot clash. */
+export const AGENT_RULE_ID = "agent";
+
+/** One order to try in step 7: a fired DSL rule or an agent intent (ADR-0007 section 5). */
+interface Candidate {
+  ruleId: string;
+  pair: string;
+  action: Action;
+  cooldownMs: number | undefined;
+  source: "rules" | "agent";
+  /** Sanitised agent note; null for DSL rules. */
+  note: string | null;
+}
+
+/** Per-bot setup of step 7 (`botPosition` and `ownOpenSell` change as orders are placed in the tick). */
+interface BotCtx {
+  bot: BotInput;
+  active1: ActiveRules;
+  rules: RuleSetV1;
+  s: BotEngineState;
+  botEff: EffectiveLimits;
+  prefix: string;
+  ownOpenSell: Map<string, Fx>;
+  botPosition: Fx;
+  botOpenBuy: Fx;
+  capacityOf: (pair: string) => Fx | null;
+}
 
 const dec = (v: Fx, d = 6): string => fxStr(v, d);
 const pos0 = (v: Fx): Fx => (v > 0n ? v : 0n);
@@ -263,7 +312,9 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
   let otherAgents: StatusPieces["other_approved_agents"] = [];
   let pnl: ReturnType<typeof pnlSummaryMulti> | null = null;
   let mids: Awaited<ReturnType<HlPort["getMids"]>> | null = null;
-  let attributed: (AttributedFill & { ruleId: string | null })[] = [];
+  let attributed: (AttributedFill & { ruleId: string | null; note?: string | null })[] = [];
+  /** ADR-0007: outcome of the agent intent, when this is an agent tick that reached step 7. */
+  let agentOut: AttemptOutcome | undefined;
   const bestBot = input.bots.find((b) => b.id === "default" && b.rules !== null && !b.archived) ?? active[0] ?? null;
   const bestRules = bestBot?.rules ?? null;
   let eff: EffectiveLimits = effectiveLimits(bestRules?.rules ?? null, cfg.hard);
@@ -445,7 +496,7 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
             px: Object.fromEntries(eq.positions.map((p) => [p.pair, dec(p.mid, 8)])),
           }
         : null;
-    return { state: st, tradingState, status, entries, bots: views, attributed, accountSample };
+    return { state: st, tradingState, status, entries, bots: views, attributed, accountSample, ...(agentOut !== undefined ? { agent: agentOut } : {}) };
   };
 
   try {
@@ -610,7 +661,12 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
     const ap = applyFills(cur, aggsIn, newFills, { fundedSinceMs: cfg.fundedSinceMs, resolve: (f) => resolveBot(f, prefixToBot, st.oidBot) });
     acct.fillCursor = ap.cursor;
     for (const [id, a] of Object.entries(ap.aggs)) bs(id).agg = a;
-    attributed = ap.attributed.map((x) => ({ ...x, ruleId: (x.fill.cloid !== null ? bs(x.botId).cloidRule?.[x.fill.cloid.toLowerCase()] : undefined) ?? null }));
+    attributed = ap.attributed.map((x) => {
+      const ruleId = (x.fill.cloid !== null ? bs(x.botId).cloidRule?.[x.fill.cloid.toLowerCase()] : undefined) ?? null;
+      // ADR-0007: the agent's sanitised note for the order (only present for agent orders, so DSL rows are unchanged).
+      const note = x.fill.cloid !== null ? bs(x.botId).cloidNote?.[x.fill.cloid.toLowerCase()] : undefined;
+      return note === undefined ? { ...x, ruleId } : { ...x, ruleId, note };
+    });
     if (acct.day !== null && ap.cursor.todayFromMs !== acct.day.snapshotAtMs) {
       acct.fillCursor = null; // out of sync with the day snapshot (hand-edited state?): rebuild from scratch next tick
       return finish("error", "FILLS_RESYNC", "fill tracker does not match the day snapshot; rebuilding");
@@ -892,6 +948,8 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
     // 7. Per bot, in creation order. At most 1 order per rule and MAX_ORDERS_PER_TICK per tick for the whole account. Free
     //    balances are decremented as we go, conservatively assuming each attempted order fills, so a later order (also of
     //    another bot) cannot overspend.
+    //    ADR-0007: everything from sizing to the post-placement balance updates lives in `attempt()`, the ONE path by which an
+    //    order reaches HL, for a fired DSL rule and for an AI agent's intent alike.
     const freeBase = new Map(equity.positions.map((p) => [p.pair, p.free]));
     let freeUsdc = equity.usdcFree;
     let accountPosition = equity.positions.filter((p) => allowed.has(p.pair)).reduce((a, p) => a + p.value, 0n);
@@ -901,20 +959,13 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
     let placed = 0;
     const hardAcct = effectiveLimits(null, cfg.hard);
 
-    for (const bot of live) {
-      if (placed >= MAX_ORDERS_PER_TICK) break;
+    /** Per-bot setup: the bot's limits, its own holdings and orders. A bot only ever sells what its own fills bought. */
+    const botCtx = (bot: BotInput): BotCtx => {
       const active1 = bot.rules as ActiveRules;
       const rules = active1.rules;
       const s = bs(bot.id);
       const botEff = effectiveLimits(rules, cfg.hard);
       const prefix = cloidPrefix(active1.hash);
-      // position_pnl: cost basis per rule set from the incremental sums (no history re-read). It is exact only for rule sets
-      // confirmed at or after the cursor's `completeFromMs`; for an older one (history gap) those rules are skipped, never guessed.
-      const basisPartial = trk.completeFromMs > active1.confirmedAtMs;
-      if (basisPartial && rules.rules.some((r) => r.when.type === "position_pnl")) {
-        warnings.push(`bot ${bot.id}: position_pnl cost basis is partial (fill history gap); those rules are skipped until a new rule set is confirmed`);
-      }
-      // The bot's own holdings and orders. A bot only ever sells what its own fills bought.
       const ownPos = positionOf(s.agg.total);
       const mine = openSpot.filter((o) => ownerOf(o.cloid) === bot.id);
       const ownOpenSell = new Map<string, Fx>();
@@ -924,6 +975,184 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
       const botOpenBuy = (cancelledBuyByBot.get(bot.id) ?? 0n) + mine.filter((o) => o.side === "buy").reduce((a, o) => a + fxMul(fx(o.price), fx(o.size)), 0n);
       /** What a sell of this pair may still take from the bot: its own position minus its open sells; null = unknown. */
       const capacityOf = (pair: string): Fx | null => (s.agg.totalComplete ? pos0((ownPos[pair] ?? 0n) - (ownOpenSell.get(pair) ?? 0n)) : null);
+      return { bot, active1, rules, s, botEff, prefix, ownOpenSell, botPosition, botOpenBuy, capacityOf };
+    };
+
+    /** A refusal: DSL skips keep their de-duplication; every agent refusal is logged (with its code and the agent's note). */
+    const refuse = (botId: string, s: BotEngineState, cand: Candidate, code: string, reason: string): AttemptOutcome => {
+      if (cand.source === "rules") skip(s, log, botId, cand.ruleId, code, reason);
+      else log("skip", `${code}: ${reason}`, { rule_id: cand.ruleId, bot_id: botId, source: "agent", code, ...(cand.note !== null ? { note: cand.note } : {}) });
+      return { placed: false, code, reason };
+    };
+
+    /**
+     * The shared order path (ADR-0007 section 5): market checks, sell capacity, sizing, book, `checkOrder` (bot limits, then the
+     * account caps), the dead-man lock, the kill check, write-ahead counters, placement, attribution and balance updates.
+     * Returns a TickResult only when the write-ahead failed (STATE_WRITE_FAILED ends the tick).
+     */
+    const attempt = async (ctx: BotCtx, cand: Candidate): Promise<AttemptOutcome | TickResult> => {
+      const { bot, active1, rules, s, botEff } = ctx;
+      const info = pairMap.get(cand.pair);
+      const midStr = midsRead.mids[cand.pair];
+      if (info === undefined || midStr === undefined) return refuse(bot.id, s, cand, "NO_MARKET", `no spot pair or mid for ${cand.pair}`);
+      // Live 24 h volume (the offline check at load time cannot know it): a thin pair is never traded.
+      if (fx(info.volume24hUsdc) < fx(cfg.hard.minPairVolumeUsdc))
+        return refuse(bot.id, s, cand, "PAIR_LOW_VOLUME", `${cand.pair} 24h volume ${info.volume24hUsdc} is below the minimum ${cfg.hard.minPairVolumeUsdc}`);
+      const mid = fx(midStr);
+      const action = cand.action;
+
+      const isSell = action.side === "sell";
+      const accountFree = freeBase.get(cand.pair) ?? 0n;
+      let botBase: Fx | null | undefined;
+      if (isSell) {
+        botBase = ctx.capacityOf(cand.pair);
+        if (botBase === null)
+          return refuse(bot.id, s, cand, "BOT_POSITION_UNKNOWN", "this bot's position cannot be derived from its fills (history before today is incomplete), so it sells nothing");
+        if (botBase <= 0n) return refuse(bot.id, s, cand, "INSUFFICIENT_BOT_BASE", "this bot owns none of this coin (it never sells another bot's or the owner's coins)");
+      }
+      const sized = sizeOrder({ action, mid, priceBandBps: cfg.hard.priceBandBps, szDecimals: info.szDecimals, freeBase: botBase === undefined || botBase === null ? accountFree : fxMin(accountFree, botBase) });
+      if (!sized.ok) return refuse(bot.id, s, cand, sized.code, sized.reason);
+
+      let book;
+      try {
+        book = await hl.getBook(cand.pair);
+      } catch (e) {
+        return refuse(bot.id, s, cand, "BOOK_UNAVAILABLE", `order book unavailable: ${errMsg(e)}`);
+      }
+      const verdict = checkOrder(
+        { pair: cand.pair, assetId: info.assetId, side: action.side, price: sized.price, size: sized.size, tif: sized.tif },
+        {
+          nowMs: now,
+          tickMs,
+          deadManAvailable: deadManOk,
+          allowedPairs: cfg.hard.allowedPairs,
+          rulePairs: rules.pairs,
+          priceBandBps: cfg.hard.priceBandBps,
+          limits: botEff,
+          ordersToday: s.ordersToday,
+          mid,
+          book: { bid: book.bid === null ? null : fx(book.bid), ask: book.ask === null ? null : fx(book.ask), atMs: book.atMs },
+          freeUsdc,
+          freeBase: accountFree,
+          positionValue: ctx.botPosition,
+          openBuyValue: ctx.botOpenBuy,
+          lastFiredAtMs: s.firedAt[cand.ruleId],
+          cooldownMs: cand.cooldownMs,
+          account: { maxPosition: hardAcct.maxPosition, maxOrdersPerDay: hardAcct.maxOrdersPerDay, ordersToday: acct.ordersToday, positionValue: accountPosition, openBuyValue: accountOpenBuy },
+          ...(isSell ? { botBase } : {}),
+        },
+      );
+      if (!verdict.ok) {
+        let reason = verdict.reason;
+        if (verdict.code === "MIN_NOTIONAL") {
+          const adv = "usdc" in action.size ? minOrderAdvice(fx(action.size.usdc), sized.price, info.szDecimals) : undefined;
+          reason += `; order is ${fxStr(sized.size, 8)} coins at ${fxStr(sized.price, 8)}${adv ? `, ${describeMinOrder(adv, botEff.maxOrder)}` : ""}`;
+        }
+        return refuse(bot.id, s, cand, verdict.code, reason);
+      }
+
+      // Second lock (checkOrder rejects this already): a resting order never goes out without the dead-man switch.
+      if (sized.tif !== "Ioc" && !deadManOk) return refuse(bot.id, s, cand, "LIMIT_NEEDS_DEADMAN", "a resting order needs the dead-man switch, which is unavailable");
+      // Place. From here the rule is "fired" whatever HL answers (a rejected order still starts the cooldown).
+      if (stopped(bot.id)) {
+        const reason = "kill switch pulled while the tick was running: no further orders";
+        log("skip", reason, { rule_id: cand.ruleId, bot_id: bot.id, ...(cand.source === "agent" ? { source: "agent" as const, code: "KILLED", ...(cand.note !== null ? { note: cand.note } : {}) } : {}) });
+        return { placed: false, code: "KILLED", reason, killed: true };
+      }
+      clearSkip(s, cand.ruleId);
+      const prevFired = s.firedAt[cand.ruleId];
+      acct.orderCounter += 1;
+      const cloid = makeCloid(active1.hash, acct.orderCounter);
+      s.firedAt[cand.ruleId] = now;
+      s.ordersToday += 1;
+      acct.ordersToday += 1;
+      try {
+        deps.beforeOrder?.(st, attributed); // write-ahead: counters are on disk before the order can reach HL
+      } catch (e) {
+        acct.orderCounter -= 1;
+        s.ordersToday -= 1;
+        acct.ordersToday -= 1;
+        s.firedAt = Object.fromEntries(Object.entries(s.firedAt).filter(([k]) => k !== cand.ruleId || prevFired !== undefined));
+        if (prevFired !== undefined) s.firedAt[cand.ruleId] = prevFired;
+        warnings.push("state write failed");
+        return finish("error", "STATE_WRITE_FAILED", `refusing to place an order: ${errMsg(e)}`);
+      }
+      placed += 1;
+      let result: HlOrderResult;
+      try {
+        result = await hl.placeSpotOrder({
+          assetId: info.assetId,
+          isBuy: action.side === "buy",
+          price: dec(sized.price, 12),
+          size: dec(sized.size, 12),
+          tif: sized.tif,
+          cloid,
+        });
+      } catch (e) {
+        result = { status: "rejected", error: errMsg(e) };
+      }
+      s.cloidRule = Object.fromEntries(Object.entries({ ...(s.cloidRule ?? {}), [cloid]: cand.ruleId }).slice(-MAX_CLOID_RULES));
+      if (cand.note !== null) s.cloidNote = Object.fromEntries(Object.entries({ ...(s.cloidNote ?? {}), [cloid]: cand.note }).slice(-MAX_CLOID_RULES));
+      if ("oid" in result) {
+        st.oidBot[String(result.oid)] = bot.id;
+        st.oidBot = trimOids(st.oidBot);
+      }
+      if (result.status === "filled" && fx(result.filledSize) > 0n) {
+        s.filledOrdersToday += 1;
+        if ("oid" in result) s.filledOidsToday = [...s.filledOidsToday, result.oid].slice(-MAX_BOT_OIDS);
+      }
+      log("order", `${action.side} ${dec(sized.size, 8)} ${cand.pair} @ ${dec(sized.price, 8)} ${sized.tif}: ${result.status}${result.status === "rejected" ? ` (${result.error})` : ""}`, {
+        rule_id: cand.ruleId,
+        bot_id: bot.id,
+        cloid,
+        ...("oid" in result ? { oid: result.oid } : {}),
+        ...(cand.source === "agent"
+          ? { source: "agent" as const, ...(result.status === "rejected" ? { code: "HL_REJECTED" } : {}), ...(cand.note !== null ? { note: cand.note } : {}) }
+          : {}),
+      });
+      if (result.status === "resting") {
+        const ttl = action.order.type === "limit" ? action.order.ttl : null;
+        s.orders[cloid] = { ruleId: cand.ruleId, expiresAtMs: ttl === null ? null : now + DURATION_MS[ttl] };
+      }
+      if (action.side === "buy") {
+        freeUsdc -= verdict.notional;
+        ctx.botPosition += verdict.notional;
+        accountPosition += verdict.notional;
+      } else {
+        freeBase.set(cand.pair, fxMax(0n, accountFree - sized.size));
+        ctx.ownOpenSell.set(cand.pair, (ctx.ownOpenSell.get(cand.pair) ?? 0n) + sized.size);
+      }
+      return { placed: true, cloid, price: sized.price, size: sized.size, notional: verdict.notional, result };
+    };
+
+    // ADR-0007 agent tick: no DSL rule of any bot is evaluated; the one intent goes through `attempt()`.
+    if (input.agent !== undefined) {
+      const ag = input.agent;
+      const cand: Candidate = { ruleId: AGENT_RULE_ID, pair: ag.intent.pair, action: { side: ag.intent.side, size: ag.intent.size, order: { type: "ioc" } }, cooldownMs: undefined, source: "agent", note: ag.note };
+      const target = active.find((b) => b.id === ag.botId);
+      const sb = bs(ag.botId);
+      if (target === undefined) agentOut = refuse(ag.botId, sb, cand, "BOT_NOT_ACTIVE", "this bot has no active, verified mandate (archived, not confirmed, or its stored mandate was refused)");
+      else if ((target.rules as ActiveRules).rules.mode !== "agent") agentOut = refuse(ag.botId, sb, cand, "NOT_AGENT_BOT", "this bot's signed rule set is not an AI-agent mandate");
+      else if (sb.halt !== null) agentOut = refuse(ag.botId, sb, cand, "BOT_HALTED", `this bot is stopped (${sb.halt.reason}); the owner must sign its limits again`);
+      else if (sb.stoppedDayIndex === day.dayIndex) agentOut = refuse(ag.botId, sb, cand, "DAILY_LOSS_STOP", "this bot hit its daily loss stop; it trades again after 00:00 UTC");
+      else {
+        const r = await attempt(botCtx(target), cand);
+        if (!("placed" in r)) return r;
+        agentOut = r;
+      }
+      return finish("running");
+    }
+
+    for (const bot of live) {
+      if (placed >= MAX_ORDERS_PER_TICK) break;
+      const ctx = botCtx(bot);
+      const { active1, rules, s, prefix } = ctx;
+      // position_pnl: cost basis per rule set from the incremental sums (no history re-read). It is exact only for rule sets
+      // confirmed at or after the cursor's `completeFromMs`; for an older one (history gap) those rules are skipped, never guessed.
+      const basisPartial = trk.completeFromMs > active1.confirmedAtMs;
+      if (basisPartial && rules.rules.some((r) => r.when.type === "position_pnl")) {
+        warnings.push(`bot ${bot.id}: position_pnl cost basis is partial (fill history gap); those rules are skipped until a new rule set is confirmed`);
+      }
 
       for (const rule of rules.rules) {
         if (placed >= MAX_ORDERS_PER_TICK) break;
@@ -960,135 +1189,9 @@ export async function runTick(deps: TickDeps, input: TickInput): Promise<TickRes
           continue;
         }
 
-        const isSell = rule.action.side === "sell";
-        const accountFree = freeBase.get(rule.pair) ?? 0n;
-        let botBase: Fx | null | undefined;
-        if (isSell) {
-          botBase = capacityOf(rule.pair);
-          if (botBase === null) {
-            skip(s, log, bot.id, rule.id, "BOT_POSITION_UNKNOWN", "this bot's position cannot be derived from its fills (history before today is incomplete), so it sells nothing");
-            continue;
-          }
-          if (botBase <= 0n) {
-            skip(s, log, bot.id, rule.id, "INSUFFICIENT_BOT_BASE", "this bot owns none of this coin (it never sells another bot's or the owner's coins)");
-            continue;
-          }
-        }
-        const sized = sizeOrder({ action: rule.action, mid, priceBandBps: cfg.hard.priceBandBps, szDecimals: info.szDecimals, freeBase: botBase === undefined || botBase === null ? accountFree : fxMin(accountFree, botBase) });
-        if (!sized.ok) {
-          skip(s, log, bot.id, rule.id, sized.code, sized.reason);
-          continue;
-        }
-
-        let book;
-        try {
-          book = await hl.getBook(rule.pair);
-        } catch (e) {
-          skip(s, log, bot.id, rule.id, "BOOK_UNAVAILABLE", `order book unavailable: ${errMsg(e)}`);
-          continue;
-        }
-        const verdict = checkOrder(
-          { pair: rule.pair, assetId: info.assetId, side: rule.action.side, price: sized.price, size: sized.size, tif: sized.tif },
-          {
-            nowMs: now,
-            tickMs,
-            deadManAvailable: deadManOk,
-            allowedPairs: cfg.hard.allowedPairs,
-            rulePairs: rules.pairs,
-            priceBandBps: cfg.hard.priceBandBps,
-            limits: botEff,
-            ordersToday: s.ordersToday,
-            mid,
-            book: { bid: book.bid === null ? null : fx(book.bid), ask: book.ask === null ? null : fx(book.ask), atMs: book.atMs },
-            freeUsdc,
-            freeBase: accountFree,
-            positionValue: botPosition,
-            openBuyValue: botOpenBuy,
-            lastFiredAtMs: s.firedAt[rule.id],
-            cooldownMs: cdMs,
-            account: { maxPosition: hardAcct.maxPosition, maxOrdersPerDay: hardAcct.maxOrdersPerDay, ordersToday: acct.ordersToday, positionValue: accountPosition, openBuyValue: accountOpenBuy },
-            ...(isSell ? { botBase } : {}),
-          },
-        );
-        if (!verdict.ok) {
-          let reason = verdict.reason;
-          if (verdict.code === "MIN_NOTIONAL") {
-            const adv = "usdc" in rule.action.size ? minOrderAdvice(fx(rule.action.size.usdc), sized.price, info.szDecimals) : undefined;
-            reason += `; order is ${fxStr(sized.size, 8)} coins at ${fxStr(sized.price, 8)}${adv ? `, ${describeMinOrder(adv, botEff.maxOrder)}` : ""}`;
-          }
-          skip(s, log, bot.id, rule.id, verdict.code, reason);
-          continue;
-        }
-
-        // Second lock (checkOrder rejects this already): a resting order never goes out without the dead-man switch.
-        if (sized.tif !== "Ioc" && !deadManOk) {
-          skip(s, log, bot.id, rule.id, "LIMIT_NEEDS_DEADMAN", "a resting order needs the dead-man switch, which is unavailable");
-          continue;
-        }
-        // Place. From here the rule is "fired" whatever HL answers (a rejected order still starts the cooldown).
-        if (stopped(bot.id)) {
-          log("skip", "kill switch pulled while the tick was running: no further orders", { rule_id: rule.id, bot_id: bot.id });
-          break;
-        }
-        clearSkip(s, rule.id);
-        const prevFired = s.firedAt[rule.id];
-        acct.orderCounter += 1;
-        const cloid = makeCloid(active1.hash, acct.orderCounter);
-        s.firedAt[rule.id] = now;
-        s.ordersToday += 1;
-        acct.ordersToday += 1;
-        try {
-          deps.beforeOrder?.(st, attributed); // write-ahead: counters are on disk before the order can reach HL
-        } catch (e) {
-          acct.orderCounter -= 1;
-          s.ordersToday -= 1;
-          acct.ordersToday -= 1;
-          s.firedAt = Object.fromEntries(Object.entries(s.firedAt).filter(([k]) => k !== rule.id || prevFired !== undefined));
-          if (prevFired !== undefined) s.firedAt[rule.id] = prevFired;
-          warnings.push("state write failed");
-          return finish("error", "STATE_WRITE_FAILED", `refusing to place an order: ${errMsg(e)}`);
-        }
-        placed += 1;
-        let result: HlOrderResult;
-        try {
-          result = await hl.placeSpotOrder({
-            assetId: info.assetId,
-            isBuy: rule.action.side === "buy",
-            price: dec(sized.price, 12),
-            size: dec(sized.size, 12),
-            tif: sized.tif,
-            cloid,
-          });
-        } catch (e) {
-          result = { status: "rejected", error: errMsg(e) };
-        }
-        s.cloidRule = Object.fromEntries(Object.entries({ ...(s.cloidRule ?? {}), [cloid]: rule.id }).slice(-MAX_CLOID_RULES));
-        if ("oid" in result) {
-          st.oidBot[String(result.oid)] = bot.id;
-          st.oidBot = trimOids(st.oidBot);
-        }
-        if (result.status === "filled" && fx(result.filledSize) > 0n) {
-          s.filledOrdersToday += 1;
-          if ("oid" in result) s.filledOidsToday = [...s.filledOidsToday, result.oid].slice(-MAX_BOT_OIDS);
-        }
-        log("order", `${rule.action.side} ${dec(sized.size, 8)} ${rule.pair} @ ${dec(sized.price, 8)} ${sized.tif}: ${result.status}${result.status === "rejected" ? ` (${result.error})` : ""}`, {
-          rule_id: rule.id,
-          bot_id: bot.id,
-          cloid,
-          ...("oid" in result ? { oid: result.oid } : {}),
-        });
-        if (result.status === "resting") {
-          const ttl = rule.action.order.type === "limit" ? rule.action.order.ttl : null;
-          s.orders[cloid] = { ruleId: rule.id, expiresAtMs: ttl === null ? null : now + DURATION_MS[ttl] };
-        }
-        if (rule.action.side === "buy") {
-          freeUsdc -= verdict.notional;
-          botPosition += verdict.notional;
-          accountPosition += verdict.notional;
-        } else {
-          freeBase.set(rule.pair, fxMax(0n, accountFree - sized.size));
-          ownOpenSell.set(rule.pair, (ownOpenSell.get(rule.pair) ?? 0n) + sized.size);
-        }
+        const r = await attempt(ctx, { ruleId: rule.id, pair: rule.pair, action: rule.action, cooldownMs: cdMs, source: "rules", note: null });
+        if (!("placed" in r)) return r; // STATE_WRITE_FAILED
+        if (!r.placed && r.killed === true) break;
       }
     }
     // Account state: running while at least one bot can still trade (always true here: a tick with no live bot returned above).

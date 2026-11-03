@@ -53,6 +53,11 @@ export interface RuleLimits {
 
 export interface RuleSetV1 {
   version: 1;
+  /**
+   * ADR-0007. Absent = a DSL bot (exactly as before). "agent" = an agent-driven bot: `rules` MUST be [] and the orders come from a
+   * connected AI agent, each checked by the same risk gate. "rules" is not a value (it would give two canonical forms).
+   */
+  mode?: "agent";
   name: string;
   pairs: string[];
   limits: RuleLimits;
@@ -71,6 +76,8 @@ export interface HardLimits {
   minPairVolumeUsdc: Dec;
   /** `TRADING_PRICE_BAND_BPS`. */
   priceBandBps: number;
+  /** `TRADING_AGENT_MAX_ORDERS_PER_DAY` (ADR-0007): the cap for agent-mode bots. Absent = `maxOrdersPerDay`. */
+  agentMaxOrdersPerDay?: number;
 }
 
 /** What `spotMeta` / `spotMetaAndAssetCtxs` say about one spot pair, keyed by display name ("HYPE/USDC"). */
@@ -129,6 +136,27 @@ export interface BotHashEntry {
   activated_at_ms: number;
 }
 
+/** ADR-0007: how a bot decides its orders. Fixed for the bot's life. */
+export type BotKind = "rules" | "agent";
+
+/** The agent bearer token of an agent bot: only its sha256 is stored (ADR-0007 section 3). */
+export interface AgentTokenRecord {
+  /** 64 hex. */
+  token_sha256: string;
+  /** First 8 hex of `token_sha256`; the only part that is ever logged or shown. */
+  token_id: string;
+  issued_at_ms: number;
+  expires_at_ms: number;
+}
+
+/** The token as returned ONCE by the confirm response. */
+export interface AgentTokenIssued {
+  token: string;
+  token_id: string;
+  issued_at_ms: number;
+  expires_at_ms: number;
+}
+
 export interface Bot {
   id: string;
   /** 1..60 chars, display only, owner can rename (not signed). */
@@ -138,6 +166,10 @@ export interface Bot {
   /** Confirmed rule set in force; null = draft or archived. */
   active_hash: string | null;
   hashes: BotHashEntry[];
+  /** ADR-0007. Absent in files from before agent bots = "rules". Always written for new bots. */
+  kind?: BotKind;
+  /** Agent bots only: the current token (null = none / revoked). */
+  agent?: AgentTokenRecord | null;
 }
 
 export const BOT_STATES = ["draft", "running", "stopped_today", "halted", "archived", "blocked"] as const;
@@ -147,6 +179,8 @@ export type BotState = (typeof BOT_STATES)[number];
 export interface BotSummary {
   id: string;
   name: string;
+  /** ADR-0007. */
+  kind: BotKind;
   state: BotState;
   state_reason: string | null;
   pairs: string[];
@@ -162,6 +196,10 @@ export interface BotSummary {
 
 export interface BotDetail {
   bot: BotSummary;
+  /** ADR-0007. */
+  kind: BotKind;
+  /** Agent bots only (null for rules bots). `last_used_ms` lives in memory only. */
+  agent: { connected: boolean; token_id: string | null; issued_at_ms: number | null; expires_at_ms: number | null; last_used_ms: number | null } | null;
   rules: ConfirmedRules | null;
   rules_history: { hash: string; name: string; confirmed_at_ms: number; superseded_at_ms: number | null }[];
   limits: { bot: RuleLimits | null; account: RuleLimits & { price_band_bps: number } };
@@ -430,6 +468,8 @@ export interface TradingStatus {
   last_tick_ms: number | null;
   next_tick_ms: number | null;
   warnings: string[];
+  /** ADR-0007 (additive): agent-driven trading settings (`TRADING_AGENT_*`). */
+  agent_trading: { enabled: boolean; max_orders_per_day: number; min_order_interval_sec: number; token_ttl_hours: number };
 }
 
 /** `GET /trading/status` while `TRADING_ENABLED=false`. */
@@ -449,4 +489,60 @@ export interface TradingRulesProposal {
   bot: { id: string; name: string; is_new: boolean };
   validation: { ok: boolean; errors: string[]; warnings: string[] };
   confirm: { kind: "nep413"; challenge: "/trading/rules/challenge"; endpoint: "/trading/rules/confirm" };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Agent-driven trading (ADR-0007 section 9, frozen contract)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** One order an AI agent asked for. Always IOC at the band edge; the agent never sets a price. */
+export interface AgentIntent {
+  pair: string;
+  side: "buy" | "sell";
+  size: { usdc: Dec } | { position_pct: Dec };
+}
+
+/** `POST /trading/agent/order` body. Exactly one of usdc / position_pct; position_pct only on sells (1..100). */
+export interface AgentOrderRequest {
+  pair: string;
+  side: "buy" | "sell";
+  usdc?: Dec;
+  position_pct?: Dec;
+  reason?: string;
+  idempotency_key?: string;
+}
+
+export interface AgentOrderResponse {
+  status: "filled" | "partially_filled" | "unfilled" | "rejected";
+  /** null unless rejected; "HL_REJECTED" when HL refused a placed order. */
+  code: string | null;
+  /** English, at most 300 chars. */
+  message: string;
+  /** false only for rejected codes in TRANSIENT; false for non-rejected statuses. */
+  final: boolean;
+  /** 60 when final === false and rejected, else null. */
+  retry_after_s: number | null;
+  order: { pair: string; side: "buy" | "sell"; price_limit: Dec; size: Dec; notional_usdc: Dec; cloid: string } | null;
+  fill: { filled_size: Dec; avg_price: Dec } | null;
+  remaining_today: { orders: number; loss_usdc: Dec };
+  replayed: boolean;
+  /** cloid if placed, else 16 random hex. */
+  request_id: string;
+}
+
+export interface AgentState {
+  bot: { id: string; name: string; state: BotState; state_reason: string | null };
+  can_trade: boolean;
+  account: { state: TradingState; state_reason: string | null };
+  mandate: { hash: string; pairs: string[]; limits: RuleLimits; effective: RuleLimits & { price_band_bps: number }; order_type: "ioc" };
+  today: { orders_used: number; orders_left: number; loss_usdc: Dec; loss_left_usdc: Dec; resets_at_ms: number };
+  balances: { usdc_free: Dec };
+  positions: { pair: string; size: Dec; sellable_size: Dec | null; avg_cost: Dec | null; mid: Dec; value_usdc: Dec }[];
+  position_left_usdc: Dec;
+  pnl: { today_usdc: SDec; total_usdc: SDec };
+  markets: { pair: string; mid: Dec | null; sz_decimals: number; min_order_usdc: "10" }[];
+  recent_fills: { time_ms: number; side: "buy" | "sell"; price: Dec; size: Dec; fee_usdc: Dec; realized_usdc: SDec | null }[];
+  recent_orders: { at_ms: number; status: "placed" | "rejected"; code: string | null }[];
+  as_of_ms: number | null;
+  next_order_allowed_at_ms: number;
 }

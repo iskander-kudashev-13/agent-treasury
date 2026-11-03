@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./history.js";
 import { cloidPrefix } from "./engine/risk.js";
 import { BOT_ID_RE, BOT_NAME_MAX, DEFAULT_BOT_ID, MAX_RULE_SETS_PER_BOT } from "./types.js";
-import type { Bot, BotHashEntry } from "./types.js";
+import type { AgentTokenRecord, Bot, BotHashEntry, BotKind } from "./types.js";
 
 export class RegistryError extends Error {
   constructor(
@@ -45,7 +45,22 @@ export interface BotsFile {
 const RESERVED_IDS: ReadonlySet<string> = new Set(["new"]);
 const PREFIX = /^0x[0-9a-f]{16}$/;
 const HASH = /^[0-9a-f]{64}$/;
+const TOKEN_ID = /^[0-9a-f]{8}$/;
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+
+/** ADR-0007: a bot without `kind` (files from before agent bots) is a rules bot. */
+export const botKind = (b: Pick<Bot, "kind">): BotKind => b.kind ?? "rules";
+
+function parseAgentRecord(x: unknown, id: string): AgentTokenRecord | null {
+  if (x === null) return null;
+  if (!isObj(x)) throw new Error(`bad agent token record for bot ${id}`);
+  const { token_sha256, token_id, issued_at_ms, expires_at_ms } = x;
+  if (typeof token_sha256 !== "string" || !HASH.test(token_sha256) || typeof token_id !== "string" || !TOKEN_ID.test(token_id) || token_id !== token_sha256.slice(0, 8))
+    throw new Error(`bad agent token record for bot ${id}`);
+  if (typeof issued_at_ms !== "number" || !Number.isFinite(issued_at_ms) || typeof expires_at_ms !== "number" || !Number.isFinite(expires_at_ms))
+    throw new Error(`bad agent token record for bot ${id}`);
+  return { token_sha256, token_id, issued_at_ms, expires_at_ms };
+}
 
 /** Cleans a display name: control characters out, trimmed, at most 60 chars. */
 export function cleanBotName(s: string): string {
@@ -67,7 +82,18 @@ function parseBot(x: unknown): Bot {
     if (hash !== null && (typeof hash !== "string" || !HASH.test(hash))) throw new Error(`bad hash for bot ${id}`);
     return { prefix: h["prefix"], hash, activated_at_ms: h["activated_at_ms"] };
   });
-  return { id, name, created_at_ms, archived_at_ms, active_hash, hashes: hs };
+  const out: Bot = { id, name, created_at_ms, archived_at_ms, active_hash, hashes: hs };
+  // ADR-0007 additive fields. Absent stays absent, so an old file round-trips unchanged.
+  if ("kind" in x) {
+    if (x["kind"] !== "rules" && x["kind"] !== "agent") throw new Error(`bad kind for bot ${id}`);
+    out.kind = x["kind"];
+  }
+  if ("agent" in x) {
+    const a = parseAgentRecord(x["agent"], id);
+    if (a !== null && out.kind !== "agent") throw new Error(`bot ${id} has an agent token but is not an agent bot`);
+    out.agent = a;
+  }
+  return out;
 }
 
 function parseFile(text: string): BotsFile {
@@ -87,6 +113,8 @@ export interface ActivationCheck {
   /** Required when the bot does not exist yet. */
   name?: string | undefined;
   maxBots: number;
+  /** ADR-0007: what the signed rule set is (`mode: "agent"` = "agent"). Absent = "rules". A bot's kind never changes. */
+  kind?: BotKind | undefined;
 }
 
 export class BotRegistry {
@@ -175,6 +203,8 @@ export class BotRegistry {
     if (!BOT_ID_RE.test(c.botId) || RESERVED_IDS.has(c.botId)) throw new RegistryError(400, "BAD_BOT_ID", "bot_id must be lower-case letters, digits and '-', 1..16 chars, starting with a letter or digit");
     const bot = this.get(c.botId);
     if (bot?.archived_at_ms != null) throw new RegistryError(409, "BOT_ARCHIVED", "This bot is archived; its id is never reused. Create a new strategy instead.");
+    if (bot !== undefined && botKind(bot) !== (c.kind ?? "rules"))
+      throw new RegistryError(409, "BOT_KIND_MISMATCH", "An AI-agent bot cannot get DSL rules and vice versa; create a new bot");
     if (bot === undefined) {
       // bots.json lost a bot the engine state still has: reusing its id would hand the old position and fills to a new strategy.
       for (const id of this.stateIds())
@@ -196,15 +226,22 @@ export class BotRegistry {
     return { isNew: bot === undefined };
   }
 
-  /** Commit point of a confirmation: creates the bot if needed, records the prefix, makes the hash active. Re-checks first. */
-  activate(c: ActivationCheck, nowMs: number): Bot {
+  /**
+   * Commit point of a confirmation: creates the bot if needed, records the prefix, makes the hash active. Re-checks first.
+   * `token` (agent bots, ADR-0007): the new agent token record, written in the SAME atomic commit, so the old token stops
+   * working exactly when the new mandate becomes active.
+   */
+  activate(c: ActivationCheck, nowMs: number, token?: AgentTokenRecord): Bot {
     this.check(c);
+    const kind = c.kind ?? "rules";
+    if (token !== undefined && kind !== "agent") throw new RegistryError(400, "NOT_AGENT_BOT", "Only an AI-agent bot has an agent token");
     const prefix = cloidPrefix(c.hash);
     const old = this.get(c.botId);
     const bot: Bot =
       old === undefined
-        ? { id: c.botId, name: cleanBotName(c.name ?? ""), created_at_ms: nowMs, archived_at_ms: null, active_hash: null, hashes: [] }
+        ? { id: c.botId, name: cleanBotName(c.name ?? ""), created_at_ms: nowMs, archived_at_ms: null, active_hash: null, hashes: [], ...(kind === "agent" ? { kind } : {}) }
         : { ...old, hashes: old.hashes.map((h) => ({ ...h })) };
+    if (kind === "agent") bot.agent = token ?? null;
     const entry = bot.hashes.find((h) => h.prefix === prefix);
     if (entry === undefined) bot.hashes.push({ prefix, hash: c.hash, activated_at_ms: nowMs });
     else if (entry.hash === null) entry.hash = c.hash;
@@ -235,8 +272,19 @@ export class BotRegistry {
     if (old === undefined) throw new RegistryError(404, "BOT_NOT_FOUND", "No such bot");
     if (old.archived_at_ms !== null) return old;
     const bot: Bot = { ...old, archived_at_ms: nowMs, active_hash: null };
+    if (botKind(old) === "agent") bot.agent = null; // ADR-0007: archive also revokes the agent token
     this.commit(this.with(bot));
     return bot;
+  }
+
+  /** ADR-0007: drops the agent token of an agent bot (owner action toward safety). False = there was none. */
+  revokeAgentToken(id: string): boolean {
+    const old = this.get(id);
+    if (old === undefined) throw new RegistryError(404, "BOT_NOT_FOUND", "No such bot");
+    if (botKind(old) !== "agent") throw new RegistryError(409, "NOT_AGENT_BOT", "This bot is not run by an AI agent");
+    if (old.agent == null) return false;
+    this.commit(this.with({ ...old, agent: null }));
+    return true;
   }
 }
 

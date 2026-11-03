@@ -21,6 +21,12 @@ export interface LogEntry {
   detail: string;
   cloid?: string;
   oid?: number;
+  /** ADR-0007: set on entries about an AI agent's order request. */
+  source?: "agent";
+  /** ADR-0007: refusal code of an agent request (or HL_REJECTED). */
+  code?: string;
+  /** ADR-0007: the agent's sanitised reason (plain text, owner display only; never sent to the agent or an LLM). */
+  note?: string;
 }
 
 export type HaltRecord = { reason: HaltReason; atMs: number; detail: string };
@@ -71,6 +77,8 @@ export interface BotEngineState {
   agg: BotAgg;
   /** cloid (lower case) -> rule id, the 200 newest: lets the fills journal say which rule placed a fill. */
   cloidRule?: Record<string, string>;
+  /** ADR-0007: cloid (lower case) -> the agent's sanitised note, the 200 newest; feeds the fills journal `note`. */
+  cloidNote?: Record<string, string>;
   /** The bot's OWN holdings at the day snapshot (from its fills): the loss stop marks these, never the account's. */
   startPositions: Record<string, { size: string; mid: string }>;
 }

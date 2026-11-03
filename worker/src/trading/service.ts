@@ -20,14 +20,17 @@ import { join } from "node:path";
 import { formatUsdc } from "agent-treasury-sdk";
 import { z } from "zod";
 import { addDec } from "./hl/format.js";
-import { BotRegistry, RegistryError, openRegistry } from "./bots.js";
+import { BotRegistry, RegistryError, botKind, openRegistry } from "./bots.js";
+import { AgentGate, hlErrorText, rejected, responseMessage } from "./agent.js";
+import type { RemainingToday } from "./agent.js";
 import type { BotsFile } from "./bots.js";
 import { clearHalt, haltAll, haltBot, initialEngineState, runTick } from "./engine/tick.js";
 import { positionOf } from "./engine/fills.js";
-import type { BotInput, BotView, EngineState, LogEntry, StatusPieces, VaultView } from "./engine/tick.js";
+import type { BotInput, BotView, EngineState, LogEntry, StatusPieces, TickInput, TickResult, VaultView } from "./engine/tick.js";
 import { type EngineStateV1, initialEngineStateV1, migrateV1 } from "./engine/migrate.js";
 import { emptyBotState } from "./engine/state.js";
-import { type Fx, MIN_NOTIONAL, effectiveLimits, effectiveLimitsStatus, fx, fxStr } from "./engine/risk.js";
+import { type Fx, MIN_NOTIONAL, effectiveLimits, effectiveLimitsStatus, fx, fxMin, fxMul, fxStr } from "./engine/risk.js";
+import { DAY_MS, utcDayIndex } from "./engine/pnl.js";
 import type { ConfirmCtx } from "./confirm.js";
 import type { Funder, FundingResult } from "./funding.js";
 import { HistoryStore, RANGE_MS } from "./history.js";
@@ -40,7 +43,32 @@ import type { ApiWallet, ApiWalletManager } from "./wallet.js";
 import { ACCOUNT_SCOPE } from "./history.js";
 import { DEFAULT_BOT_ID } from "./types.js";
 import { HALT_REASONS } from "./types.js";
-import type { Bot, BotDetail, BotState, BotSummary, ConfirmedRules, HaltReason, HardLimits, HlFill, HlPort, HlSpotPair, TradingState, TradingStatus } from "./types.js";
+import type {
+  AgentIntent,
+  AgentOrderResponse,
+  AgentState,
+  Bot,
+  BotDetail,
+  BotState,
+  BotSummary,
+  ConfirmedRules,
+  HaltReason,
+  HardLimits,
+  HlFill,
+  HlPort,
+  HlSpotPair,
+  TradingState,
+  TradingStatus,
+} from "./types.js";
+
+/** ADR-0007 section 8 (`TRADING_AGENT_*`). */
+export interface AgentTradingSettings {
+  enabled: boolean;
+  maxOrdersPerDay: number;
+  minOrderIntervalSec: number;
+  tokenTtlHours: number;
+}
+export const AGENT_TRADING_OFF: AgentTradingSettings = { enabled: false, maxOrdersPerDay: 10, minOrderIntervalSec: 10, tokenTtlHours: 72 };
 
 export interface TradingSettings {
   vault: string;
@@ -56,6 +84,8 @@ export interface TradingSettings {
   startMs?: number | undefined;
   /** `TRADING_MAX_BOTS`: bots that are not archived (default 3, 1..5). */
   maxBots?: number | undefined;
+  /** ADR-0007. Absent = agent-driven trading off. */
+  agent?: AgentTradingSettings | undefined;
 }
 
 export interface TradingServiceDeps {
@@ -299,6 +329,12 @@ export class TradingService {
   /** Set when a state file exists but is unusable: the service then refuses to trade. */
   private fatal: string | null = null;
   private inflight: Promise<void> | null = null;
+  /** ADR-0007: what holds the single-flight slot. A scheduled tick never just joins an agent tick (it runs its own after it). */
+  private inflightKind: "tick" | "agent" | null = null;
+  /** ADR-0007: per agent bot, one request in flight, the order interval, and the idempotency cache (memory only). */
+  readonly agentGate: AgentGate;
+  /** ADR-0007: last authenticated agent request per bot (memory only: no bots.json write per request). */
+  private readonly agentLastUsed = new Map<string, number>();
   /** Owner mutations that arrived while a tick was running (replayed on its result). */
   private pendingOps: ((s: EngineState) => EngineState)[] | null = null;
   private last: LastTick | null = null;
@@ -332,6 +368,7 @@ export class TradingService {
     this.metaFile = join(dir, "meta.json");
     this.startMs = d.settings.startMs ?? this.loadStartMs();
     this.history = new HistoryStore(dir, this.now);
+    this.agentGate = new AgentGate(this.agentSettings.minOrderIntervalSec * 1000, this.now);
     this.journal = new FillsJournal(dir);
     // State first (pure parse; a v1 file also yields the cloid prefixes the old engine remembered), then the registry
     // (which migrates `active.json`), then the converted state is written. Each step is idempotent, see bots.ts / migrate.ts.
@@ -487,6 +524,10 @@ export class TradingService {
     return this.d.settings.maxBots ?? 3;
   }
 
+  get agentSettings(): AgentTradingSettings {
+    return this.d.settings.agent ?? AGENT_TRADING_OFF;
+  }
+
   // -------------------------------------------------------------------------------------------------------------------
   // Persistence
   // -------------------------------------------------------------------------------------------------------------------
@@ -626,11 +667,19 @@ export class TradingService {
 
   /** Runs one tick unless one is running (then returns that one). Never throws. */
   tick(): Promise<void> {
-    if (this.inflight) return this.inflight;
-    const p = this.runOnce().finally(() => {
-      this.inflight = null;
-    });
+    if (this.inflight) {
+      // ADR-0007: an agent tick runs only that agent's order; DSL bots must not be starved, so run a full tick after it.
+      if (this.inflightKind !== "agent") return this.inflight;
+      return this.inflight.then(() => this.tick());
+    }
+    const p = this.runOnce()
+      .then(() => undefined)
+      .finally(() => {
+        this.inflight = null;
+        this.inflightKind = null;
+      });
     this.inflight = p;
+    this.inflightKind = "tick";
     return p;
   }
 
@@ -644,7 +693,11 @@ export class TradingService {
     return this.inflight !== null;
   }
 
-  private async runOnce(): Promise<void> {
+  /**
+   * One engine tick. `agent` (ADR-0007) makes it an agent tick: the same reads, gates and write-ahead, but in step 7 only that
+   * intent is tried. Returns the tick result, or null when the tick did not run (an error status was set instead).
+   */
+  private async runOnce(agent?: TickInput["agent"]): Promise<TickResult | null> {
     const now = this.now();
     const s = this.d.settings;
     const epoch = this.killEpoch;
@@ -653,17 +706,17 @@ export class TradingService {
     try {
       if (this.fatal !== null) {
         this.setErrorStatus(now, "STATE_CORRUPT", this.fatal);
-        return;
+        return null;
       }
       // A state file that cannot be written means a halt, a counter or a cooldown could be forgotten: do not trade.
       if (this.persistFailed && !this.persistState()) {
         this.setErrorStatus(now, "STATE_WRITE_FAILED", "engine state cannot be written; not trading until it can");
-        return;
+        return null;
       }
       const missing = this.missingFromRegistry();
       if (missing.length > 0) {
         this.setErrorStatus(now, "REGISTRY_MISSING_BOT", `engine state refers to bot(s) ${missing.slice(0, 5).join(", ")} that the registry does not list`);
-        return;
+        return null;
       }
       if (this.startMs === undefined) {
         this.startMs = now;
@@ -709,7 +762,7 @@ export class TradingService {
         apiAddress = this.d.wallet.address();
       } catch (e) {
         this.setErrorStatus(now, "API_WALLET_UNAVAILABLE", errMsg(e));
-        return;
+        return null;
       }
 
       const result = await runTick(
@@ -742,7 +795,7 @@ export class TradingService {
             }
           },
         },
-        { nowMs: now, bots: botsIn, state: this.state },
+        { nowMs: now, bots: botsIn, state: this.state, ...(agent !== undefined ? { agent } : {}) },
       );
       let next = result.state;
       for (const op of this.pendingOps) next = op(next);
@@ -771,8 +824,10 @@ export class TradingService {
         });
         this.noteFunding(fr, now);
       }
+      return result;
     } catch (e) {
       this.setErrorStatus(now, "SERVICE_ERROR", errMsg(e));
+      return null;
     } finally {
       this.pendingOps = null;
     }
@@ -826,6 +881,7 @@ export class TradingService {
           fee_amount: f.feeAmount ?? f.feeUsdc,
           realized_usdc: null,
           pos_after: "0",
+          ...(typeof a.note === "string" ? { note: a.note } : {}),
         };
         if (this.journal.has(a.botId, jf)) continue;
         const applied = applyFill(this.bookOf(a.botId), jf);
@@ -1023,6 +1079,12 @@ export class TradingService {
       bots: this.registry.live().map((b) => ({ id: b.id, name: b.name, state: this.botState(b).state })),
       max_bots: this.maxBots,
       warnings: [...pieces.warnings, ...this.extraWarnings.values()].map((w) => publicText(w) ?? ""),
+      agent_trading: {
+        enabled: this.agentSettings.enabled,
+        max_orders_per_day: this.agentSettings.maxOrdersPerDay,
+        min_order_interval_sec: this.agentSettings.minOrderIntervalSec,
+        token_ttl_hours: this.agentSettings.tokenTtlHours,
+      },
     };
   }
 
@@ -1056,6 +1118,7 @@ export class TradingService {
     const base: BotSummary = {
       id: b.id,
       name: b.name,
+      kind: botKind(b),
       state: st.state,
       state_reason: st.reason,
       pairs: rules?.rules.pairs ?? [],
@@ -1101,8 +1164,21 @@ export class TradingService {
     const v = this.last?.bots[id];
     const meta = await this.pairsMeta();
     const pairNames = rules?.rules.pairs ?? [];
+    const kind = botKind(b);
+    const tok = b.agent ?? null;
     return {
       bot: this.botSummary(b, true),
+      kind,
+      agent:
+        kind === "agent"
+          ? {
+              connected: tok !== null && tok.expires_at_ms > this.now(),
+              token_id: tok?.token_id ?? null,
+              issued_at_ms: tok?.issued_at_ms ?? null,
+              expires_at_ms: tok?.expires_at_ms ?? null,
+              last_used_ms: tok === null ? null : (this.agentLastUsed.get(id) ?? null),
+            }
+          : null,
       rules,
       rules_history: this.rulesHistory(id),
       limits: {
@@ -1319,6 +1395,199 @@ export class TradingService {
     return { bot_id: id, state: "halted", cancelled_orders: c.cancelled, steps: { cancel: c.ok ? "ok" : "failed", state_saved: saved ? "ok" : "failed" } };
   }
 
+  // -------------------------------------------------------------------------------------------------------------------
+  // Agent-driven trading (ADR-0007)
+  // -------------------------------------------------------------------------------------------------------------------
+
+  /** Remembers the last authenticated agent request (memory only). */
+  noteAgentUse(botId: string): void {
+    this.agentLastUsed.set(botId, this.now());
+  }
+
+  /** Revokes the agent token of an agent bot (owner, toward safety). The bot keeps its mandate; the agent gets 401 from now on. */
+  revokeAgentToken(id: string): { bot_id: string; revoked: boolean } {
+    let revoked: boolean;
+    try {
+      revoked = this.registry.revokeAgentToken(id);
+    } catch (e) {
+      if (e instanceof RegistryError) throw new ServiceError(e.status === 404 ? 404 : 409, e.code, e.message);
+      throw e;
+    }
+    this.agentLastUsed.delete(id);
+    if (revoked) this.appendLog([{ at_ms: this.now(), kind: "state", bot_id: id, detail: "agent token revoked by the owner" }]);
+    return { bot_id: id, revoked };
+  }
+
+  /** Orders and loss this agent bot may still use today: min(bot, account). */
+  agentRemaining(botId: string): RemainingToday {
+    const hard = this.d.settings.hard;
+    const env = this.last?.rules.get(botId) ?? null;
+    const lim = effectiveLimits(env?.rules ?? null, hard);
+    const acctLim = effectiveLimits(null, hard);
+    const sb = this.state.bots[botId];
+    const today = this.state.account.day?.dayIndex === utcDayIndex(this.now());
+    const botOrders = today ? (sb?.ordersToday ?? 0) : 0;
+    const acctOrders = today ? this.state.account.ordersToday : 0;
+    const orders = Math.max(0, Math.min(lim.maxOrdersPerDay - botOrders, acctLim.maxOrdersPerDay - acctOrders));
+    const botLoss = fx(this.last?.bots[botId]?.lossToday ?? "0");
+    const acctLoss = fx(this.last?.pieces.limits.today.loss_usdc ?? "0");
+    const left = fxMin(lim.dailyLossStop - botLoss, acctLim.dailyLossStop - acctLoss);
+    return { orders, loss_usdc: fxStr(left > 0n ? left : 0n) };
+  }
+
+  /** Step 5 of `POST /trading/agent/order`: refusals that need no tick. Null = go on. */
+  private agentPrecheck(botId: string): { code: string; message: string } | null {
+    const b = this.registry.get(botId);
+    if (b === undefined || b.archived_at_ms !== null || b.active_hash === null) return { code: "BOT_NOT_ACTIVE", message: "This bot has no active mandate" };
+    if (botKind(b) !== "agent") return { code: "NOT_AGENT_BOT", message: "This bot is not run by an AI agent" };
+    const acctHalt = this.state.account.halt;
+    if (acctHalt !== null)
+      return acctHalt.reason === "KILLED"
+        ? { code: "KILLED", message: "The owner stopped all trading; nothing is traded until the owner signs the limits again" }
+        : { code: acctHalt.reason, message: `Trading is halted (${acctHalt.reason}); the owner must act` };
+    const h = this.state.bots[botId]?.halt ?? null;
+    if (h !== null) return { code: "BOT_HALTED", message: "The owner stopped this bot; it trades again only after the owner signs its limits again (a new agent token)" };
+    return null;
+  }
+
+  private logAgentRefusal(botId: string, code: string, message: string, note: string | null): void {
+    this.appendLog([{ at_ms: this.now(), kind: "skip", rule_id: "agent", bot_id: botId, detail: `${code}: ${responseMessage(message)}`, source: "agent", code, ...(note !== null ? { note } : {}) }]);
+  }
+
+  /**
+   * One agent order (ADR-0007 sections 4-5): cheap pre-check, then ONE engine tick that carries the intent, in the single-flight
+   * slot (it waits for a running tick first). The engine decides; this only maps its outcome to the frozen response.
+   */
+  async agentOrder(botId: string, intent: AgentIntent, note: string | null): Promise<AgentOrderResponse> {
+    const pre = this.agentPrecheck(botId);
+    if (pre !== null) {
+      this.logAgentRefusal(botId, pre.code, pre.message, note);
+      return rejected(pre.code, pre.message, this.agentRemaining(botId));
+    }
+    while (this.inflight) await this.inflight;
+    // Claimed synchronously after the last check: no other tick can start in between.
+    const run = this.runOnce({ botId, intent, note });
+    const slot = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.inflight = slot;
+    this.inflightKind = "agent";
+    let r: TickResult | null;
+    try {
+      r = await run;
+    } finally {
+      if (this.inflight === slot) {
+        this.inflight = null;
+        this.inflightKind = null;
+      }
+    }
+    const remaining = this.agentRemaining(botId);
+    if (r === null || r.agent === undefined) {
+      // The tick ended before step 7 (or did not run): the account state says why. No order was placed.
+      const pieces = r?.status ?? this.last?.pieces;
+      const state = r?.tradingState ?? this.last?.tradingState ?? "error";
+      const code = pieces?.state_reason ?? `STATE_${state.toUpperCase()}`;
+      const detail = pieces?.state_detail ?? null;
+      const message = `No order: trading is ${state} (${code})${detail ? `: ${publicText(detail) ?? ""}` : ""}`;
+      this.logAgentRefusal(botId, code, message, note);
+      return rejected(code, message, remaining);
+    }
+    const out = r.agent;
+    if (!out.placed) return rejected(out.code, out.reason, remaining);
+    const order = { pair: intent.pair, side: intent.side, price_limit: fxStr(out.price, 8), size: fxStr(out.size, 8), notional_usdc: fxStr(out.notional), cloid: out.cloid };
+    const base = { order, remaining_today: remaining, replayed: false, request_id: out.cloid };
+    const res = out.result;
+    switch (res.status) {
+      case "rejected":
+        return { ...rejected("HL_REJECTED", `Hyperliquid refused the order: ${hlErrorText(res.error)}`, remaining, order, out.cloid) };
+      case "unfilled":
+        return { status: "unfilled", code: null, message: "No liquidity inside the price band; nothing traded (it counts toward today's orders)", final: false, retry_after_s: null, fill: null, ...base };
+      case "resting":
+        // Cannot happen for IOC; reported without a fill (the engine's dead-man / stale-order cancels cover a resting order).
+        return { status: "unfilled", code: null, message: "The order is resting on the book (unexpected for an immediate-or-cancel order); nothing was filled yet", final: false, retry_after_s: null, fill: null, ...base };
+      case "filled": {
+        const partial = fx(res.filledSize) < out.size;
+        return {
+          status: partial ? "partially_filled" : "filled",
+          code: null,
+          message: responseMessage(`${partial ? "Partially filled" : "Filled"}: ${intent.side} ${res.filledSize} at ${res.avgPx} (${intent.pair})`),
+          final: false,
+          retry_after_s: null,
+          fill: { filled_size: res.filledSize, avg_price: res.avgPx },
+          ...base,
+        };
+      }
+    }
+  }
+
+  /** `GET /trading/agent/state` (ADR-0007 section 9): built from the last tick, the engine state and the journal. No HL write. */
+  async agentState(botId: string, tokenId: string): Promise<AgentState> {
+    const b = this.botOrThrow(botId);
+    const hard = this.d.settings.hard;
+    const st = this.status();
+    const bst = this.botState(b);
+    const env = this.last?.rules.get(botId) ?? (await this.loadRules(botId).catch(() => null));
+    const lim = effectiveLimits(env?.rules ?? null, hard);
+    const acctLim = effectiveLimits(null, hard);
+    const v = this.last?.bots[botId];
+    const sb = this.state.bots[botId];
+    const remaining = this.agentRemaining(botId);
+    const now = this.now();
+    const today = this.state.account.day?.dayIndex === utcDayIndex(now);
+    const botLoss = fx(v?.lossToday ?? "0");
+    const openOrders = v?.openOrders ?? [];
+    const openSellOf = (pair: string): Fx => openOrders.filter((o) => o.side === "sell" && o.pair === pair).reduce((a, o) => a + fx(o.size), 0n);
+    const sumBuys = (rows: { side: string; price: string; size: string }[]): Fx => rows.filter((o) => o.side === "buy").reduce((a, o) => a + fxMul(fx(o.price), fx(o.size)), 0n);
+    const complete = sb?.agg.totalComplete ?? true;
+    const positions = (v?.positions ?? []).map((p) => {
+      const sellable = complete ? fx(p.size) - openSellOf(p.pair) : null;
+      return { pair: p.pair, size: p.size, sellable_size: sellable === null ? null : fxStr(sellable > 0n ? sellable : 0n, 8), avg_cost: p.avgCost, mid: p.mid, value_usdc: p.value };
+    });
+    const botLeft = lim.maxPosition - fx(v?.positionUsdc ?? "0") - sumBuys(openOrders);
+    const acctLeft = acctLim.maxPosition - fx(st.limits.position_usdc) - sumBuys(st.open_orders);
+    const posLeft = fxMin(botLeft, acctLeft);
+    const meta = await this.pairsMeta();
+    const pairs = env?.rules.pairs ?? [];
+    const recentOrders = this.readLog(200, botId)
+      .filter((e) => e.source === "agent" && (e.kind === "order" || e.kind === "skip"))
+      .slice(0, 10)
+      .map((e) => ({ at_ms: e.at_ms, status: e.kind === "order" ? ("placed" as const) : ("rejected" as const), code: e.code ?? null }));
+    return {
+      bot: { id: b.id, name: b.name, state: bst.state, state_reason: bst.reason },
+      can_trade: bst.state === "running" && st.state === "running",
+      account: { state: st.state, state_reason: st.state_reason },
+      mandate: {
+        hash: env?.hash ?? b.active_hash ?? "",
+        pairs,
+        limits: env?.rules.limits ?? { max_position_usdc: fxStr(lim.maxPosition), max_order_usdc: fxStr(lim.maxOrder), daily_loss_stop_usdc: fxStr(lim.dailyLossStop), max_orders_per_day: lim.maxOrdersPerDay },
+        effective: effectiveLimitsStatus(lim, hard.priceBandBps),
+        order_type: "ioc",
+      },
+      today: {
+        orders_used: today ? (sb?.ordersToday ?? 0) : 0,
+        orders_left: remaining.orders,
+        loss_usdc: fxStr(botLoss > 0n ? botLoss : 0n),
+        loss_left_usdc: remaining.loss_usdc,
+        resets_at_ms: (utcDayIndex(now) + 1) * DAY_MS,
+      },
+      balances: { usdc_free: st.balances.usdc_free },
+      positions,
+      position_left_usdc: fxStr(posLeft > 0n ? posLeft : 0n),
+      pnl: { today_usdc: v?.pnlToday ?? "0", total_usdc: v?.pnlTotal ?? "0" },
+      markets: pairs.map((pair) => {
+        const m = meta.find((x) => x.name === pair);
+        const mid = v?.px[pair] ?? null;
+        return { pair, mid, sz_decimals: m?.szDecimals ?? 0, min_order_usdc: "10" as const };
+      }),
+      // Numbers only: notes never go back to the agent (a leaked token must not plant text for the legitimate agent).
+      recent_fills: this.journal.page(botId, { limit: 10 }).fills.map((f) => ({ time_ms: f.time_ms, side: f.side, price: f.price, size: f.size, fee_usdc: f.fee_usdc, realized_usdc: f.realized_usdc })),
+      recent_orders: recentOrders,
+      as_of_ms: st.last_tick_ms,
+      next_order_allowed_at_ms: this.agentGate.nextAllowedAtMs(botId, tokenId),
+    };
+  }
+
   rename(id: string, name: string): BotSummary {
     this.assertWritable();
     this.botOrThrow(id);
@@ -1422,12 +1691,16 @@ export class TradingService {
       () => undefined,
     );
     this.inflight = slot;
+    this.inflightKind = "tick";
     let address: string;
     try {
       address = await op;
     } finally {
       await slot;
-      if (this.inflight === slot) this.inflight = null;
+      if (this.inflight === slot) {
+        this.inflight = null;
+        this.inflightKind = null;
+      }
     }
     await this.tickFresh();
     return address;

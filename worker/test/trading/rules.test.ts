@@ -11,7 +11,7 @@ import { TRADING_STATES } from "../../src/trading/types.js";
 interface Vectors {
   context: { hard: HardLimits; pairs: PairInfoMap };
   valid: { name: string; input: unknown; canonical: string; sha256: string; describe: string[] }[];
-  invalid: { name: string; layer: "schema" | "limits"; input: unknown; errors: string[] }[];
+  invalid: { name: string; layer: "schema" | "limits"; input: unknown; errors: string[]; context?: { hard?: Partial<HardLimits> } }[];
 }
 const vectors = JSON.parse(readFileSync(new URL("../../../docs/trading-rules-vectors.json", import.meta.url), "utf8")) as Vectors;
 const { hard, pairs } = vectors.context;
@@ -48,7 +48,8 @@ suite("shared vectors", () => {
 
   for (const v of vectors.invalid) {
     it(`invalid (${v.layer}): ${v.name}`, () => {
-      const r = validate(v.input, hard, pairs);
+      // A vector may override parts of the hard limits for itself (ADR-0007: agentMaxOrdersPerDay).
+      const r = validate(v.input, { ...hard, ...v.context?.hard }, pairs);
       expect(r.ok).toBe(false);
       expect(codes(r.errors)).toEqual(v.errors);
       if (v.layer === "schema") expect(parseRuleSet(v.input).ok).toBe(false);

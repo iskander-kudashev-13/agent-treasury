@@ -5,6 +5,7 @@
 import { runChat } from "../ai/chat.js";
 import type { AiDeps } from "../ai/route.js";
 import { buildTools } from "../ai/tools.js";
+import { hasModeKey } from "../ai/trading.js";
 import type { TradingAuthoring, TradingRulesCard } from "../ai/trading.js";
 import type { RuleSetV1 } from "./types.js";
 
@@ -44,6 +45,8 @@ export function createProposer(ai: AiDeps, authoring: TradingAuthoring): Propose
       if (ev.type === "text") said += ev.delta;
       if (ev.type === "proposal" && (ev.proposal as { type: string }).type === "TradingRules") {
         const card = ev.proposal as unknown as TradingRulesCard;
+        // ADR-0007 (defence in depth; the card builder refuses it already): no agent-mode mandate from a model.
+        if (hasModeKey(card.rules)) throw new ProposeError(400, "AGENT_MODE_NOT_FROM_AI", "agent-driven bots are created in the dashboard wizard");
         return { rules: card.rules, hash: card.hash, validation: card.validation, model: cfg.model };
       }
     }

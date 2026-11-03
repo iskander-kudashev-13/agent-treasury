@@ -58,6 +58,9 @@ export function describeRule(r: Rule, index: number): string[] {
   ];
 }
 
+/** ADR-0007: the line an agent-mode mandate shows instead of rules (frozen in docs/trading-rules-vectors.json). */
+export const AGENT_ORDERS_LINE = "Orders: chosen by a connected AI agent; each is an immediate-or-cancel order inside the price band and is checked against these limits";
+
 export function describe(rs: RuleSetV1): string[] {
   return [
     `Rule set: ${rs.name}`,
@@ -66,6 +69,7 @@ export function describe(rs: RuleSetV1): string[] {
     `Max order: ${rs.limits.max_order_usdc} USDC`,
     `Daily loss stop: ${rs.limits.daily_loss_stop_usdc} USDC`,
     `Max orders per day: ${rs.limits.max_orders_per_day}`,
+    ...(rs.mode === "agent" ? [AGENT_ORDERS_LINE] : []),
     ...rs.rules.flatMap(describeRule),
   ];
 }

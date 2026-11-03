@@ -125,6 +125,12 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
       stateDir: config.TRADING_STATE_DIR,
       startMs: config.TRADING_START_MS,
       maxBots: config.TRADING_MAX_BOTS,
+      agent: {
+        enabled: config.TRADING_AGENT_ENABLED,
+        maxOrdersPerDay: config.TRADING_AGENT_MAX_ORDERS_PER_DAY,
+        minOrderIntervalSec: config.TRADING_AGENT_MIN_ORDER_INTERVAL_SEC,
+        tokenTtlHours: config.TRADING_AGENT_TOKEN_TTL_HOURS,
+      },
     },
     hl,
     createHl,
@@ -140,7 +146,7 @@ export function createTradingModule(config: Config, ai: AiDeps): TradingModule {
 
   const pairs = createPairInfoProvider(() => service.hlPort());
   const authoring: TradingAuthoring = { hard, pairs, deadManAvailable: () => service.deadManAvailable(), bots: { registry: service.registry, maxBots: config.TRADING_MAX_BOTS } };
-  const confirmer = new RulesConfirmer({ ctx: confirmCtx, store, registry: service.registry, maxBots: config.TRADING_MAX_BOTS, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), writeBlocked: () => service.writeBlockedReason(), killStamp: (id) => service.killStamp(id) });
+  const confirmer = new RulesConfirmer({ ctx: confirmCtx, store, registry: service.registry, maxBots: config.TRADING_MAX_BOTS, getPairInfo: () => pairs.getPairInfo(), deadManAvailable: () => service.deadManAvailable(), writeBlocked: () => service.writeBlockedReason(), killStamp: (id) => service.killStamp(id), agent: { enabled: config.TRADING_AGENT_ENABLED, tokenTtlMs: config.TRADING_AGENT_TOKEN_TTL_HOURS * 3_600_000 } });
   const secret = config.AI_SESSION_SECRET;
   if (!secret) throw new Error("AI_SESSION_SECRET is required"); // config validation already guarantees it
   const routeDeps: TradingRouteDeps = {

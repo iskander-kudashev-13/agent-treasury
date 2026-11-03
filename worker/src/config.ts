@@ -94,6 +94,14 @@ const baseEnvShape = z.object({
     TRADING_TOPUP_FLOOR_USDC: decString("10"),
     /** Baseline (ms epoch) for net_funded. Unset = the time of the first tick, persisted in meta.json. */
     TRADING_START_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().optional()),
+    // ---- Agent-driven trading (docs/adr/0007). Inert while TRADING_AGENT_ENABLED=false; requires TRADING_ENABLED=true. ----
+    TRADING_AGENT_ENABLED: boolFlag(false),
+    /** Orders per day cap for agent-mode bots (on top of TRADING_HARD_MAX_ORDERS_PER_DAY). */
+    TRADING_AGENT_MAX_ORDERS_PER_DAY: z.coerce.number().int().min(1).max(50).default(10),
+    /** Minimum time between two order requests of one agent bot, start to start. */
+    TRADING_AGENT_MIN_ORDER_INTERVAL_SEC: z.coerce.number().int().min(5).max(600).default(10),
+    /** Lifetime of an agent token minted by a signed confirmation. */
+    TRADING_AGENT_TOKEN_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(72),
 });
 
 const envSchema = baseEnvShape.superRefine((env, ctx) => {
@@ -119,6 +127,9 @@ const envSchema = baseEnvShape.superRefine((env, ctx) => {
       });
     }
     if (env.TRADING_ENABLED) validateTrading(env, ctx);
+    if (env.TRADING_AGENT_ENABLED && !env.TRADING_ENABLED) {
+      ctx.addIssue({ code: "custom", message: "TRADING_AGENT_ENABLED=true requires TRADING_ENABLED=true", path: ["TRADING_AGENT_ENABLED"] });
+    }
 });
 
 type Env = z.infer<typeof baseEnvShape>;
@@ -166,6 +177,8 @@ export function hardLimitsOf(c: Config): HardLimits {
     allowedPairs: c.TRADING_ALLOWED_PAIRS,
     minPairVolumeUsdc: c.TRADING_MIN_PAIR_VOLUME_USDC,
     priceBandBps: c.TRADING_PRICE_BAND_BPS,
+    // ADR-0007: only while agent trading is on, so the hard limits are unchanged otherwise.
+    ...(c.TRADING_AGENT_ENABLED ? { agentMaxOrdersPerDay: c.TRADING_AGENT_MAX_ORDERS_PER_DAY } : {}),
   };
 }
 

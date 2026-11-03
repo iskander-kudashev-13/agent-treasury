@@ -1,5 +1,5 @@
 {
-  "$comment": "Shared test vectors for Rules DSL v1 (docs/adr/0005-hyperliquid-trading-agent.md). Used by worker/test/trading/*.test.ts and the dashboard. canonical = keys sorted, no whitespace, UTF-8; sha256 = hex(sha256(canonical)); describe = lines of the English rendering. invalid[].layer 'schema' = parse errors independent of env; 'limits' = needs `context`. errors = the exact set of codes (sorted, unique) expected.",
+  "$comment": "Shared test vectors for Rules DSL v1 (docs/adr/0005-hyperliquid-trading-agent.md). Used by worker/test/trading/*.test.ts and the dashboard. canonical = keys sorted, no whitespace, UTF-8; sha256 = hex(sha256(canonical)); describe = lines of the English rendering. invalid[].layer 'schema' = parse errors independent of env; 'limits' = needs `context`. errors = the exact set of codes (sorted, unique) expected. ADR-0007: an invalid vector may carry `context.hard`, merged over the top-level context.hard for that vector only. messages.v3_agent = the agent-mode message (input carries mode: \"agent\").",
   "version": 1,
   "context": {
     "hard": {
@@ -295,6 +295,35 @@
         "  When: price change over 4 hours is at or above +5.25%",
         "  Do: Sell 25.5% of the PURR position as a limit order 10% above the market price, cancelled after 1 day",
         "  Cooldown: 15 minutes"
+      ]
+    },
+    {
+      "name": "ADR-0007 agent mandate (mode agent, no rules)",
+      "input": {
+        "version": 1,
+        "mode": "agent",
+        "name": "PURR agent",
+        "pairs": [
+          "PURR/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "25",
+          "max_order_usdc": "12",
+          "daily_loss_stop_usdc": "3",
+          "max_orders_per_day": 6
+        },
+        "rules": []
+      },
+      "canonical": "{\"limits\":{\"daily_loss_stop_usdc\":\"3\",\"max_order_usdc\":\"12\",\"max_orders_per_day\":6,\"max_position_usdc\":\"25\"},\"mode\":\"agent\",\"name\":\"PURR agent\",\"pairs\":[\"PURR/USDC\"],\"rules\":[],\"version\":1}",
+      "sha256": "f29ef0d0ac3a06c46640a840c4014f216babbdc2dc6944666809b369079bbd0c",
+      "describe": [
+        "Rule set: PURR agent",
+        "Pairs: PURR/USDC",
+        "Max position: 25 USDC",
+        "Max order: 12 USDC",
+        "Daily loss stop: 3 USDC",
+        "Max orders per day: 6",
+        "Orders: chosen by a connected AI agent; each is an immediate-or-cancel order inside the price band and is checked against these limits"
       ]
     }
   ],
@@ -2679,6 +2708,119 @@
       "errors": [
         "PAIR_LOW_VOLUME"
       ]
+    },
+    {
+      "name": "agent: mode other than \"agent\"",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "mode": "rules",
+        "name": "PURR agent",
+        "pairs": [
+          "PURR/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "25",
+          "max_order_usdc": "12",
+          "daily_loss_stop_usdc": "3",
+          "max_orders_per_day": 6
+        },
+        "rules": []
+      },
+      "errors": [
+        "BAD_MODE"
+      ]
+    },
+    {
+      "name": "agent: mode agent with a rule",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "mode": "agent",
+        "name": "PURR agent",
+        "pairs": [
+          "PURR/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "25",
+          "max_order_usdc": "12",
+          "daily_loss_stop_usdc": "3",
+          "max_orders_per_day": 6
+        },
+        "rules": [
+          {
+            "id": "dip",
+            "pair": "PURR/USDC",
+            "when": {
+              "type": "price_change",
+              "window": "1d",
+              "op": "lte",
+              "pct": "-3"
+            },
+            "action": {
+              "side": "buy",
+              "size": {
+                "usdc": "10"
+              },
+              "order": {
+                "type": "ioc"
+              }
+            },
+            "cooldown": "1d"
+          }
+        ]
+      },
+      "errors": [
+        "AGENT_HAS_RULES"
+      ]
+    },
+    {
+      "name": "agent: mode agent without a rules key",
+      "layer": "schema",
+      "input": {
+        "version": 1,
+        "mode": "agent",
+        "name": "PURR agent",
+        "pairs": [
+          "PURR/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "25",
+          "max_order_usdc": "12",
+          "daily_loss_stop_usdc": "3",
+          "max_orders_per_day": 6
+        }
+      },
+      "errors": [
+        "SCHEMA"
+      ]
+    },
+    {
+      "name": "agent: max_orders_per_day above TRADING_AGENT_MAX_ORDERS_PER_DAY",
+      "layer": "limits",
+      "context": {
+        "hard": {
+          "agentMaxOrdersPerDay": 10
+        }
+      },
+      "input": {
+        "version": 1,
+        "mode": "agent",
+        "name": "PURR agent",
+        "pairs": [
+          "PURR/USDC"
+        ],
+        "limits": {
+          "max_position_usdc": "25",
+          "max_order_usdc": "12",
+          "daily_loss_stop_usdc": "3",
+          "max_orders_per_day": 11
+        },
+        "rules": []
+      },
+      "errors": [
+        "LIMIT_AGENT_MAX_ORDERS"
+      ]
     }
   ],
   "messages": {
@@ -2728,6 +2870,20 @@
           "rulesSha256": "91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
         },
         "message": "Agent Treasury: activate trading rules\nvault: vault.testnet\nagent: hl-trader\nhl_network: mainnet\nhl_account: 0xabcdef0123456789abcdef0123456789abcdef01\nrules_sha256: 91ceae7874e716c311d94aba05de1045ef2312e28410c59de2a8d2e00f7edcea"
+      }
+    ],
+    "v3_agent": [
+      {
+        "input": {
+          "vault": "vault.testnet",
+          "agentId": "hl-trader",
+          "hlNetwork": "testnet",
+          "hlAccount": "0xAbCdEf0123456789aBcDeF0123456789abCDEF01",
+          "botId": "purr-agent",
+          "mode": "agent",
+          "rulesSha256": "f29ef0d0ac3a06c46640a840c4014f216babbdc2dc6944666809b369079bbd0c"
+        },
+        "message": "Agent Treasury: activate AI agent trading limits\nvault: vault.testnet\nagent: hl-trader\nbot: purr-agent\nmode: agent\nhl_network: testnet\nhl_account: 0xabcdef0123456789abcdef0123456789abcdef01\nrules_sha256: f29ef0d0ac3a06c46640a840c4014f216babbdc2dc6944666809b369079bbd0c"
       }
     ]
   }

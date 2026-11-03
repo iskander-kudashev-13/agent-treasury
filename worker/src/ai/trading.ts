@@ -41,7 +41,16 @@ export type TradingBuild =
   /** Not a card (structural errors, or the pair data could not be loaded): sent back to the model. */
   | { card?: undefined; errors: string[] };
 
+/** ADR-0007: the assistant may never produce an agent-driven mandate (that bot kind is created in the dashboard wizard only). */
+export const AGENT_MODE_NOT_FROM_AI = "AGENT_MODE_NOT_FROM_AI: agent-driven bots are created in the dashboard wizard";
+
+/** True when model output carries a `mode` key (any value): such output is refused before anything else. */
+export function hasModeKey(rules: unknown): boolean {
+  return typeof rules === "object" && rules !== null && !Array.isArray(rules) && "mode" in rules;
+}
+
 export async function buildTradingRulesCard(deps: TradingAuthoring, state: TurnState, rules: unknown, opts: { showInvalid: boolean }): Promise<TradingBuild> {
+  if (hasModeKey(rules)) return { errors: [AGENT_MODE_NOT_FROM_AI] };
   let info: PairInfoMap;
   try {
     info = await deps.pairs.getPairInfo();
@@ -64,7 +73,8 @@ export async function buildTradingRulesCard(deps: TradingAuthoring, state: TurnS
   const botErrors: string[] = [];
   if (deps.bots) {
     try {
-      deps.bots.registry.check({ botId: target.bot.id, hash, name: target.bot.name, maxBots: deps.bots.maxBots });
+      // kind "rules": the assistant cannot "change" an AI-agent bot either (BOT_KIND_MISMATCH).
+      deps.bots.registry.check({ botId: target.bot.id, hash, name: target.bot.name, maxBots: deps.bots.maxBots, kind: "rules" });
     } catch (e) {
       if (!(e instanceof RegistryError)) throw e;
       botErrors.push(`${e.code}: ${e.message}`);
