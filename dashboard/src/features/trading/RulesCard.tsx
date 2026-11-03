@@ -8,9 +8,11 @@ import type { ReactNode } from "react";
 import { useAssistantPanel } from "@/features/layout/AssistantContext";
 import { lastDecisions } from "@/lib/tradingSkips";
 import { RulesView } from "./RulesView";
+import { Link } from "react-router-dom";
+import { TRADING_NEW_PATH } from "@/lib/agentKind";
 
 /** The rules the bot runs: name, hash and who confirmed them from the status; the full text after the owner signs in. */
-export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn, error, pair, help, log = [] }: { status: TradingStatus; rules: ConfirmedRules | null; verified: boolean; signedIn: boolean; signingIn: boolean; signIn: () => void; error: string | null; pair: string; help: ReactNode; log?: LogEntry[] }) {
+export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn, error, help, log = [] }: { status: TradingStatus; rules: ConfirmedRules | null; verified: boolean; signedIn: boolean; signingIn: boolean; signIn: () => void; error: string | null; pair: string; help: ReactNode; log?: LogEntry[] }) {
   const t = useT();
   const { openWith } = useAssistantPanel();
   const a = status.active_rules;
@@ -20,15 +22,11 @@ export function RulesCard({ status, rules, verified, signedIn, signingIn, signIn
       {!a ? (
         <div className="flex flex-col gap-3">
           <p className="m-0 text-sm text-ink-secondary">{t("trading.rules.none")}</p>
-          {AI_ENABLED ? (
-            <div>
-              <Button variant="assistant" icon={<Icons.Sparkles size={14} />} onClick={() => openWith(t("trading.rules.prefillNew", { pair }), "new")}>
-                {t("trading.rules.describeBtn")}
-              </Button>
-            </div>
-          ) : (
-            <p className="m-0 text-xs text-ink-subtle">{t("trading.rules.aiOff")}</p>
-          )}
+          <div>
+            <Link to={TRADING_NEW_PATH}>
+              <Button variant="primary" icon={<Icons.Plus size={14} />}>{t("trading.bots.newStrategy")}</Button>
+            </Link>
+          </div>
         </div>
       ) : (
         <>

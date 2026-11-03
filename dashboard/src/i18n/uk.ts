@@ -1803,7 +1803,7 @@ export const uk: Messages = {
   "trading.wiz.step.rules": "Правила",
   "trading.wiz.step.limits": "Ліміти",
   "trading.wiz.name": "Назва",
-  "trading.wiz.namePlaceholder": "наприклад, HYPE щодня",
+  "trading.wiz.namePlaceholder": "наприклад, {base} щодня",
   "trading.wiz.pair": "Пара",
   "trading.wiz.tpl.dca": "Купувати регулярно",
   "trading.wiz.tpl.sl": "Обмежити збиток",

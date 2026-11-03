@@ -177,7 +177,7 @@ export function NewStrategyWizard() {
                 {...a11y}
                 value={name}
                 maxLength={MAX_NAME}
-                placeholder={t("trading.wiz.namePlaceholder")}
+                placeholder={t("trading.wiz.namePlaceholder", { base: pair.split("/")[0] || "PURR" })}
                 state={nameTouched && nErr ? "error" : "default"}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={() => setNameTouched(true)}

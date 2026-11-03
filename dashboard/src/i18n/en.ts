@@ -1801,7 +1801,7 @@ export const en = {
   "trading.wiz.step.rules": "Rules",
   "trading.wiz.step.limits": "Limits",
   "trading.wiz.name": "Name",
-  "trading.wiz.namePlaceholder": "e.g. HYPE every day",
+  "trading.wiz.namePlaceholder": "e.g. {base} every day",
   "trading.wiz.pair": "Pair",
   "trading.wiz.tpl.dca": "Buy regularly",
   "trading.wiz.tpl.sl": "Limit loss",
