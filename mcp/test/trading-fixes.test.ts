@@ -34,7 +34,7 @@ const tools = (fetchFn: typeof fetch, workerUrl = "http://127.0.0.1:3000") => {
   return { place: byName("trading_place_order"), state: byName("trading_get_state") };
 };
 const body = (r: Awaited<ReturnType<Handler>>) => JSON.parse(r.content[0]?.text ?? "{}") as Record<string, unknown>;
-const ORDER = { pair: "HYPE/USDC", side: "buy", usdc: "12", reason: "test" };
+const ORDER = { pair: "HYPE/USDC", side: "buy", usdc: "12", reason: "test", idempotency_key: "test-key-0001" };
 
 describe("AL1: no redirect is followed with the token", () => {
   it("a 302 from the worker URL to another host: the target never sees the request, the tool reports an error", async () => {
@@ -51,7 +51,7 @@ describe("AL1: no redirect is followed with the token", () => {
     expect(a.isError).toBe(true);
     const b = await place({ ...ORDER });
     expect(b.isError).toBe(true);
-    expect(body(b).idempotency_key).toMatch(/^[0-9a-f]{32}$/);
+    expect(body(b).idempotency_key).toBe("test-key-0001");
     expect(seenAtTarget).toHaveLength(0);
   });
 
@@ -92,7 +92,7 @@ describe("AL2: the idempotency_key is in every place_order result", () => {
     const b3 = body(e3);
     expect(b3.error).toBe("WORKER_UNREACHABLE");
     expect(String(b3.message)).toContain("trading_get_state");
-    expect(b3.idempotency_key).toMatch(/^[0-9a-f]{32}$/);
+    expect(b3.idempotency_key).toBe("test-key-0001");
   });
 
   it("the default client timeout is 300 s (above the worker's worst case of two ticks)", () => {

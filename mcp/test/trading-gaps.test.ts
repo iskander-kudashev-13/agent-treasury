@@ -108,7 +108,7 @@ const place = (fetchFn: typeof fetch, timeoutMs = 1000): Handler => {
   const tools = createTradingTools(createTradingApi({ workerUrl: "http://127.0.0.1:3000", token: TOKEN, fetchFn, timeoutMs }));
   return tools.find((t) => t.name === "trading_place_order")?.handler as unknown as Handler;
 };
-const ORDER = { pair: "PURR/USDC", side: "buy", usdc: "14", reason: "r" };
+const ORDER = { pair: "PURR/USDC", side: "buy", usdc: "14", reason: "r", idempotency_key: "test-key-0001" };
 
 describe("the single retry", () => {
   it("a timeout (abort) is retried once with the same idempotency_key and the same body", async () => {
@@ -117,7 +117,7 @@ describe("the single retry", () => {
     expect(out.isError).toBeFalsy();
     expect(w.seen).toHaveLength(2);
     expect(w.seen[0]?.body).toEqual(w.seen[1]?.body);
-    expect(String(w.seen[0]?.body?.["idempotency_key"])).toMatch(/^[0-9a-f]{32}$/);
+    expect(w.seen[0]?.body?.["idempotency_key"]).toBe("test-key-0001");
   });
 
   it("network error then 409 ORDER_IN_FLIGHT (the first request is still running on the worker): isError, no third attempt", async () => {
@@ -128,12 +128,14 @@ describe("the single retry", () => {
     expect(w.seen).toHaveLength(2);
   });
 
-  it("two separate tool calls without a key get two different keys (no accidental replay across calls)", async () => {
-    const w = fakeFetch([res(200, FILLED), res(200, FILLED)]);
-    const h = place(w.fetchFn);
-    await h(ORDER);
-    await h(ORDER);
-    expect(w.seen[0]?.body?.["idempotency_key"]).not.toBe(w.seen[1]?.body?.["idempotency_key"]);
+  it("a call without an idempotency_key is refused locally: nothing reaches the worker (re-review M1)", async () => {
+    const w = fakeFetch([res(200, FILLED)]);
+    const noKey: Record<string, unknown> = { ...ORDER };
+    delete noKey["idempotency_key"];
+    const out = await place(w.fetchFn)(noKey);
+    expect(out.isError).toBe(true);
+    expect(JSON.parse(out.content[0]?.text ?? "{}")).toMatchObject({ error: "BAD_ORDER_REQUEST" });
+    expect(w.seen).toHaveLength(0);
   });
 
   it("the token never appears in a result, even when the network error or the worker's message carries it", async () => {

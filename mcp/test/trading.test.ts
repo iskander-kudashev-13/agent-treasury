@@ -98,7 +98,7 @@ describe("tools", () => {
     const d = place?.description ?? "";
     for (const s of [/REAL MONEY/, /you cannot set a price/, /FINAL/, /NEVER split/, /You cannot withdraw or move funds; no tool can/, /never executed/]) expect(d).toMatch(s);
     expect(Object.keys((place?.inputSchema.properties ?? {}) as object).sort()).toEqual(["idempotency_key", "pair", "position_pct", "reason", "side", "usdc"]);
-    expect(place?.inputSchema.required).toEqual(["pair", "side", "reason"]);
+    expect(place?.inputSchema.required).toEqual(["pair", "side", "reason", "idempotency_key"]);
     const both = await connect([], true);
     expect((await both.client.listTools()).tools).toHaveLength(7);
   });
@@ -122,13 +122,13 @@ describe("tools", () => {
 
   it("place_order: a 200 rejection is a structured result (not isError) with final", async () => {
     const { call, seen } = await connect([res(200, REJECTED)]);
-    const { r, json } = await call("trading_place_order", { pair: "PURR/USDC", side: "buy", usdc: 100, reason: "buy the dip" });
+    const { r, json } = await call("trading_place_order", { pair: "PURR/USDC", side: "buy", usdc: 100, reason: "buy the dip", idempotency_key: "test-key-0001" });
     expect(r.isError).toBeFalsy();
     expect(json).toMatchObject({ status: "rejected", code: "MAX_ORDER", final: true });
     expect(json).not.toHaveProperty("request_id");
     expect(seen[0]?.url).toBe("http://127.0.0.1:3000/trading/agent/order");
     expect(seen[0]?.body).toMatchObject({ pair: "PURR/USDC", side: "buy", usdc: "100", reason: "buy the dip" });
-    expect(String(seen[0]?.body?.["idempotency_key"])).toMatch(/^[0-9a-f]{32}$/);
+    expect(seen[0]?.body?.["idempotency_key"]).toBe("test-key-0001");
   });
 
   it("HTTP errors become isError with { error, message }; 401 adds the new-token hint", async () => {
@@ -136,9 +136,9 @@ describe("tools", () => {
     const a = await call("trading_get_state");
     expect(a.r.isError).toBe(true);
     expect(a.json).toEqual({ error: "AGENT_UNAUTHORIZED", message: "Missing or invalid agent token; the token is invalid, expired, revoked or was replaced (a Stop also revokes it); ask the owner for a new one" });
-    const b = await call("trading_place_order", { pair: "PURR/USDC", side: "buy", usdc: "14", reason: "r" });
+    const b = await call("trading_place_order", { pair: "PURR/USDC", side: "buy", usdc: "14", reason: "r", idempotency_key: "test-key-0001" });
     expect(b.r.isError).toBe(true);
-    expect(b.json).toEqual({ error: "AGENT_RATE_LIMITED", message: "wait", idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown });
+    expect(b.json).toEqual({ error: "AGENT_RATE_LIMITED", message: "wait", idempotency_key: "test-key-0001" });
   });
 
   it("exactly one size field; position_pct only on sells, 1..100; nothing reaches the worker otherwise", async () => {
@@ -174,9 +174,9 @@ describe("tools", () => {
     expect(n.seen).toHaveLength(2);
     expect(n.seen[0]?.body).toEqual(n.seen[1]?.body);
     expect(n.seen[1]?.body).toMatchObject({ idempotency_key: "my-key-0001", position_pct: "100" });
-    // A generated key is also reused by the retry.
+    // The model's key is reused by the retry.
     const g = await connect([new TypeError("fetch failed"), res(200, ok)]);
-    await g.call("trading_place_order", { pair: "PURR/USDC", side: "buy", usdc: "14", reason: "r" });
+    await g.call("trading_place_order", { pair: "PURR/USDC", side: "buy", usdc: "14", reason: "r", idempotency_key: "test-key-0001" });
     expect(g.seen[0]?.body?.["idempotency_key"]).toBe(g.seen[1]?.body?.["idempotency_key"]);
     // HTTP 502: no retry. Two network errors: WORKER_UNREACHABLE.
     const h = await connect([res(502, { type: "error", code: "INTERNAL_ERROR", message: "x" })]);

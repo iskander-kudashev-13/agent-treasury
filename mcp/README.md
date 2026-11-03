@@ -109,12 +109,13 @@ inside the price band. The agent never holds Hyperliquid or NEAR keys and there 
 | Tool | Input | Output |
 |---|---|---|
 | `trading_get_state` | none | `AgentState`: `can_trade`, signed `mandate` (pairs, limits, effective limits), `today` (orders / loss used and left), `positions` (own coins only, `sellable_size`), `pnl`, `markets` (mid, `sz_decimals`), `recent_fills`, `recent_orders`, `next_order_allowed_at_ms` |
-| `trading_place_order` | `{ pair, side, usdc? \| position_pct? (sell only, 1..100), reason (1..200), idempotency_key? }` | `{ status: "filled" \| "partially_filled" \| "unfilled" \| "rejected", code, message, final, retry_after_s, order, fill, remaining_today, replayed, idempotency_key }` |
+| `trading_place_order` | `{ pair, side, usdc? \| position_pct? (sell only, 1..100), reason (1..200), idempotency_key (required, 8..64 of A-Z a-z 0-9 - _) }` | `{ status: "filled" \| "partially_filled" \| "unfilled" \| "rejected", code, message, final, retry_after_s, order, fill, remaining_today, replayed, idempotency_key }` |
 
 A `rejected` result with `final: true` is final (do not retry, split or reshape). `final: false` means the market or worker was
 briefly unavailable; one retry after `retry_after_s` is allowed. HTTP errors (401 bad / expired / replaced token, 409, 429) come
-back as `isError` with `{ error, message, idempotency_key }`. The tool retries once on a network error with the same `idempotency_key` (it generates
-one when the model gives none), so a lost answer cannot place a second order. Every `trading_place_order` result, errors included,
+back as `isError` with `{ error, message, idempotency_key }`. The model must supply a new `idempotency_key` for every new order (so it knows the key
+even when its MCP host times the call out first); the tool retries once on a network error with that same key, so a lost answer
+cannot place a second order. Every `trading_place_order` result, errors included,
 carries the `idempotency_key` it used; passing that key again for the same order replays the first answer (the worker makes a
 duplicate that arrives while the first is still running wait for it). `OUTCOME_UNKNOWN` (final) means the order was sent but no clean
 answer came back: call `trading_get_state` before anything else. The client timeout is 300 s, above the worker's worst case for one

@@ -3,7 +3,6 @@
  * worker checks every order against the limits the owner signed and executes it. This module only forwards requests to the
  * worker's `/trading/agent/*` routes with the bot's agent token. It holds no keys, cannot withdraw, and never logs the token.
  */
-import { randomUUID } from "node:crypto";
 import * as z from "zod";
 import type { ToolDef, ToolResult } from "./tools.js";
 
@@ -116,8 +115,9 @@ const PLACE_ORDER_DESCRIPTION =
   "`rejected` = refused with a `code` and `message`. If `final` is true the refusal is FINAL: relay `message` to the user, do NOT " +
   "retry the same order, NEVER split it into smaller orders, switch pairs or change sides to get around a limit. If `final` is false " +
   "the market or worker was temporarily unavailable; you may try once more after `retry_after_s`. Code `OUTCOME_UNKNOWN`, or an error " +
-  "without a clear answer: the order may or may not have traded; call trading_get_state before anything else. Every result carries " +
-  "the `idempotency_key` used; to retry the SAME order pass that key again, which can never place it twice. `reason` is a short note " +
+  "without a clear answer (including your own call timing out): the order may or may not have traded; call trading_get_state " +
+  "before anything else. `idempotency_key` is REQUIRED: make up a NEW random key for every new order and remember it; to retry the " +
+  "SAME order (after a timeout or an error without an answer) pass the same key again, which can never place it twice. `reason` is a short note " +
   "for the owner's records (max 200 chars); it is never executed. You cannot withdraw or move funds; no tool can.";
 
 const DEC_RE = /^\d+(\.\d{1,6})?$/;
@@ -142,8 +142,7 @@ export const placeOrderInput = z.object({
   idempotency_key: z
     .string()
     .regex(/^[A-Za-z0-9_-]{8,64}$/)
-    .optional()
-    .describe("Optional. The same key with the same order returns the first result instead of placing a second order."),
+    .describe("Required. A new random key (8..64 letters, digits, - or _) for each new order; reuse it only to retry the same order. The same key with the same order returns the first result instead of placing a second order."),
 });
 
 const json = (o: unknown): string => JSON.stringify(o, null, 2);
@@ -186,11 +185,12 @@ export function createTradingTools(api: TradingApi): ToolDef[] {
       inputSchema: placeOrderInput,
       readOnly: false,
       handler: (a: z.infer<typeof placeOrderInput>) => {
-        // One key per call when the model gave none, so the internal retry after a network error cannot place a second order.
-        // It is returned in every result, so the model can retry the same order with it.
-        const key = a.idempotency_key ?? randomUUID().replace(/-/g, "");
+        // The model supplies the key (re-review M1): it knows it even when its MCP host times the call out before any result,
+        // so a retry of the same order reuses it and cannot place a second order. It is echoed in every result too.
+        const key = a.idempotency_key;
         const extra = { idempotency_key: key };
         return guarded(async () => {
+          if (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key)) return errResult("BAD_ORDER_REQUEST", "idempotency_key is required: a new random key (8..64 letters, digits, - or _) for each new order", extra);
           // Exactly one size field; position_pct for sells only (1..100). Checked here so the model gets a clear message.
           if ((a.usdc === undefined) === (a.position_pct === undefined)) return errResult("BAD_ORDER_REQUEST", "Give exactly one of usdc / position_pct", extra);
           const body: Record<string, unknown> = { pair: a.pair, side: a.side, reason: a.reason };

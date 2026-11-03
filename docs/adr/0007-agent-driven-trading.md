@@ -318,7 +318,7 @@ the agent tick returns it as `TickResult.agent`.
 | Name | Annotations | Input (zod) |
 |---|---|---|
 | `trading_get_state` | readOnly | `{}` |
-| `trading_place_order` | destructive, not idempotent, openWorld | `{ pair: string /^[A-Za-z0-9]{1,16}\/USDC$/, side: "buy"\|"sell", usdc?: Dec\|number>0, position_pct?: Dec\|number (1..100, sell only), reason: string 1..200, idempotency_key?: /^[A-Za-z0-9_-]{8,64}$/ }`; exactly one of `usdc` / `position_pct` |
+| `trading_place_order` | destructive, not idempotent, openWorld | `{ pair: string /^[A-Za-z0-9]{1,16}\/USDC$/, side: "buy"\|"sell", usdc?: Dec\|number>0, position_pct?: Dec\|number (1..100, sell only), reason: string 1..200, idempotency_key: /^[A-Za-z0-9_-]{8,64}$/ }` (required in the MCP tool so the model knows its key even when its host times out; optional on the worker HTTP API); exactly one of `usdc` / `position_pct` |
 
   Descriptions (verbatim):
   - `trading_get_state`: "Returns your trading bot's state on Hyperliquid spot: whether it can trade now, the pairs and
