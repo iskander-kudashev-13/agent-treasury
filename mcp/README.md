@@ -1,7 +1,7 @@
 # agent-treasury-mcp
 
 MCP server (stdio) that lets an AI agent pay from an Agent Treasury vault **only within the mandate the owner set for it**.
-It wraps `agent-treasury-sdk` (`../sdk`) and exposes five tools:
+It wraps `agent-treasury-sdk` (`../sdk`) and exposes five payment tools (plus two optional trading-bot tools, see [Trading bot tools](#trading-bot-tools-optional-docsadr0007)):
 
 | Tool | Input | Output |
 |---|---|---|
@@ -28,9 +28,9 @@ cd ../mcp && pnpm install && pnpm build        # produces mcp/dist/index.js
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `TREASURY_VAULT` | yes | vault contract account, e.g. `vault.owner.near` |
-| `TREASURY_NETWORK` | yes | `mainnet` or `testnet` |
-| `TREASURY_AGENT_ACCOUNT` | yes | the agent's NEAR account, e.g. `procurement.owner.near` |
+| `TREASURY_VAULT` | for payments | vault contract account, e.g. `vault.owner.near` |
+| `TREASURY_NETWORK` | with `TREASURY_VAULT` | `mainnet` or `testnet` |
+| `TREASURY_AGENT_ACCOUNT` | with `TREASURY_VAULT` | the agent's NEAR account, e.g. `procurement.owner.near` |
 | `TREASURY_AGENT_PRIVATE_KEY` | for payments | the function-call key (`ed25519:...`). Without it only the read-only tools work. |
 | `TREASURY_AGENT_ID` | no | skips the lookup of the agent id by account |
 | `NEAR_RPC` | no | RPC URL (default FastNEAR for the network) |
@@ -99,6 +99,35 @@ HTTP transport is not implemented yet.
 4. `request_payment` is signed with the function-call key (150 TGas, zero deposit).
 5. On `submitted`: `/v0/deposit/submit`, then a background poll of `/v0/status` that calls `report_payout_status` on SUCCESS / REFUNDED / FAILED. The tool returns immediately.
    If this process is stopped before the end, calling `treasury_get_payment_status` on a `Sent` payment restarts the watch.
+
+## Trading bot tools (optional, docs/adr/0007)
+
+The same server can also drive ONE agent-driven trading bot on Hyperliquid spot. The agent decides the orders; the worker checks
+every order against the limits the owner signed (same risk gate as rule-based bots) and executes it as an immediate-or-cancel order
+inside the price band. The agent never holds Hyperliquid or NEAR keys and there is no withdraw tool.
+
+| Tool | Input | Output |
+|---|---|---|
+| `trading_get_state` | none | `AgentState`: `can_trade`, signed `mandate` (pairs, limits, effective limits), `today` (orders / loss used and left), `positions` (own coins only, `sellable_size`), `pnl`, `markets` (mid, `sz_decimals`), `recent_fills`, `recent_orders`, `next_order_allowed_at_ms` |
+| `trading_place_order` | `{ pair, side, usdc? \| position_pct? (sell only, 1..100), reason (1..200), idempotency_key? }` | `{ status: "filled" \| "partially_filled" \| "unfilled" \| "rejected", code, message, final, retry_after_s, order, fill, remaining_today, replayed }` |
+
+A `rejected` result with `final: true` is final (do not retry, split or reshape). `final: false` means the market or worker was
+briefly unavailable; one retry after `retry_after_s` is allowed. HTTP errors (401 bad / expired / replaced token, 409, 429) come
+back as `isError` with `{ error, message }`. The tool retries once on a network error with the same `idempotency_key` (it generates
+one when the model gives none), so a lost answer cannot place a second order. `reason` is stored for the owner only; it is never
+returned to the agent and never sent to an LLM by the worker.
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `TRADING_AGENT_TOKEN` | for trading | `atk1_<bot>_<key>`, shown ONCE by the dashboard after the owner signs the bot's limits. A re-sign (Resume / New key) replaces it. |
+| `TRADING_WORKER_URL` | with the token | worker base URL. `https://`, or `http://` to `127.0.0.1` / `localhost` / `[::1]` only (no token over plain HTTP). |
+
+Each section is optional: `TREASURY_VAULT` turns on the five payment tools, `TRADING_AGENT_TOKEN` the two trading tools, and at least
+one must be set. The startup line on stderr says `trading=enabled bot=<id>`; the token is never printed.
+
+```bash
+claude mcp add agent-treasury-trading -e TRADING_WORKER_URL=http://127.0.0.1:3000 -e TRADING_AGENT_TOKEN=<token> -- node /ABSOLUTE/PATH/TO/agent-treasury/mcp/dist/index.js
+```
 
 ## Security notes
 
