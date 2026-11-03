@@ -109,12 +109,18 @@ inside the price band. The agent never holds Hyperliquid or NEAR keys and there 
 | Tool | Input | Output |
 |---|---|---|
 | `trading_get_state` | none | `AgentState`: `can_trade`, signed `mandate` (pairs, limits, effective limits), `today` (orders / loss used and left), `positions` (own coins only, `sellable_size`), `pnl`, `markets` (mid, `sz_decimals`), `recent_fills`, `recent_orders`, `next_order_allowed_at_ms` |
-| `trading_place_order` | `{ pair, side, usdc? \| position_pct? (sell only, 1..100), reason (1..200), idempotency_key? }` | `{ status: "filled" \| "partially_filled" \| "unfilled" \| "rejected", code, message, final, retry_after_s, order, fill, remaining_today, replayed }` |
+| `trading_place_order` | `{ pair, side, usdc? \| position_pct? (sell only, 1..100), reason (1..200), idempotency_key? }` | `{ status: "filled" \| "partially_filled" \| "unfilled" \| "rejected", code, message, final, retry_after_s, order, fill, remaining_today, replayed, idempotency_key }` |
 
 A `rejected` result with `final: true` is final (do not retry, split or reshape). `final: false` means the market or worker was
 briefly unavailable; one retry after `retry_after_s` is allowed. HTTP errors (401 bad / expired / replaced token, 409, 429) come
-back as `isError` with `{ error, message }`. The tool retries once on a network error with the same `idempotency_key` (it generates
-one when the model gives none), so a lost answer cannot place a second order. `reason` is stored for the owner only; it is never
+back as `isError` with `{ error, message, idempotency_key }`. The tool retries once on a network error with the same `idempotency_key` (it generates
+one when the model gives none), so a lost answer cannot place a second order. Every `trading_place_order` result, errors included,
+carries the `idempotency_key` it used; passing that key again for the same order replays the first answer (the worker makes a
+duplicate that arrives while the first is still running wait for it). `OUTCOME_UNKNOWN` (final) means the order was sent but no clean
+answer came back: call `trading_get_state` before anything else. The client timeout is 300 s, above the worker's worst case for one
+order (it may wait for a running tick, then runs its own: about 2 x 10 sequential HL / RPC calls x `HTTP_TIMEOUT_MS` 15 s). The
+client never follows an HTTP redirect (`redirect: "error"`), so the token cannot be forwarded to another host. A Stop in the dashboard
+revokes the token: every call then gets 401 until the owner re-signs (Resume), which shows a new token. `reason` is stored for the owner only; it is never
 returned to the agent and never sent to an LLM by the worker.
 
 | Variable | Required | Meaning |

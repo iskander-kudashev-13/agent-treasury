@@ -135,10 +135,10 @@ describe("tools", () => {
     const { call } = await connect([res(401, { type: "error", code: "AGENT_UNAUTHORIZED", message: "Missing or invalid agent token" }), res(429, { type: "error", code: "AGENT_RATE_LIMITED", message: "wait" })]);
     const a = await call("trading_get_state");
     expect(a.r.isError).toBe(true);
-    expect(a.json).toEqual({ error: "AGENT_UNAUTHORIZED", message: "Missing or invalid agent token; the token is invalid, expired or was replaced; ask the owner for a new one" });
+    expect(a.json).toEqual({ error: "AGENT_UNAUTHORIZED", message: "Missing or invalid agent token; the token is invalid, expired, revoked or was replaced (a Stop also revokes it); ask the owner for a new one" });
     const b = await call("trading_place_order", { pair: "PURR/USDC", side: "buy", usdc: "14", reason: "r" });
     expect(b.r.isError).toBe(true);
-    expect(b.json).toEqual({ error: "AGENT_RATE_LIMITED", message: "wait" });
+    expect(b.json).toEqual({ error: "AGENT_RATE_LIMITED", message: "wait", idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown });
   });
 
   it("exactly one size field; position_pct only on sells, 1..100; nothing reaches the worker otherwise", async () => {

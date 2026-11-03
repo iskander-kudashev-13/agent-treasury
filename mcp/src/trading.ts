@@ -31,9 +31,18 @@ export class WorkerUnreachableError extends Error {
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
+/**
+ * Client timeout per HTTP call: 300 s. It must be above the worker's worst case for one order, or the tool reports a lost answer
+ * for an order that is still being decided. Worst case = the agent's request waits for a running tick, then runs its own tick;
+ * each tick is about 10 sequential Hyperliquid / NEAR RPC calls (parallel reads, ledger, fills, vault, book, order, dead-man,
+ * funding), each bounded by the worker's `HTTP_TIMEOUT_MS` (default 15 s): 2 x 10 x 15 s = 300 s. A same-key retry after a timeout
+ * waits for the first request's answer on the worker, so it cannot place a second order.
+ */
+export const TRADING_TIMEOUT_MS = 300_000;
+
 export function createTradingApi(o: TradingApiOptions): TradingApi {
   const fetchFn = o.fetchFn ?? fetch;
-  const timeoutMs = o.timeoutMs ?? 45_000;
+  const timeoutMs = o.timeoutMs ?? TRADING_TIMEOUT_MS;
   const base = o.workerUrl.replace(/\/+$/, "");
 
   const once = async (path: string, init: { method: "GET" | "POST"; body?: string }): Promise<Response> => {
@@ -46,6 +55,8 @@ export function createTradingApi(o: TradingApiOptions): TradingApi {
         method: init.method,
         headers: { authorization: `Bearer ${o.token}`, accept: "application/json", ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
         ...(init.body !== undefined ? { body: init.body } : {}),
+        // Audit AL1: never follow a redirect with the bearer token (where it would go depends on the HTTP client version).
+        redirect: "error",
         signal: ac.signal,
       });
     } finally {
@@ -104,8 +115,10 @@ const PLACE_ORDER_DESCRIPTION =
   "`partially_filled` = executed; `unfilled` = no liquidity inside the band, nothing traded (it still counts toward today's orders); " +
   "`rejected` = refused with a `code` and `message`. If `final` is true the refusal is FINAL: relay `message` to the user, do NOT " +
   "retry the same order, NEVER split it into smaller orders, switch pairs or change sides to get around a limit. If `final` is false " +
-  "the market or worker was temporarily unavailable; you may try once more after `retry_after_s`. `reason` is a short note for the " +
-  "owner's records (max 200 chars); it is never executed. You cannot withdraw or move funds; no tool can.";
+  "the market or worker was temporarily unavailable; you may try once more after `retry_after_s`. Code `OUTCOME_UNKNOWN`, or an error " +
+  "without a clear answer: the order may or may not have traded; call trading_get_state before anything else. Every result carries " +
+  "the `idempotency_key` used; to retry the SAME order pass that key again, which can never place it twice. `reason` is a short note " +
+  "for the owner's records (max 200 chars); it is never executed. You cannot withdraw or move funds; no tool can.";
 
 const DEC_RE = /^\d+(\.\d{1,6})?$/;
 const decOrNumber = z.union([z.string().regex(DEC_RE, 'use a plain decimal such as "14" or "12.5" (max 6 decimals)'), z.number().positive()]);
@@ -135,23 +148,24 @@ export const placeOrderInput = z.object({
 
 const json = (o: unknown): string => JSON.stringify(o, null, 2);
 const okResult = (structured: Record<string, unknown>): ToolResult => ({ content: [{ type: "text", text: json(structured) }], structuredContent: structured });
-const errResult = (error: string, message: string): ToolResult => ({ isError: true, content: [{ type: "text", text: json({ error, message }) }] });
+/** `extra` (the order's idempotency_key) is added to every result of trading_place_order, errors included (audit AL2). */
+const errResult = (error: string, message: string, extra: Record<string, unknown> = {}): ToolResult => ({ isError: true, content: [{ type: "text", text: json({ error, message, ...extra }) }] });
 
-function mapResult(r: ApiResult): ToolResult {
+function mapResult(r: ApiResult, extra: Record<string, unknown> = {}): ToolResult {
   if (r.ok) {
     const rest = Object.fromEntries(Object.entries(r.body).filter(([k]) => k !== "request_id"));
-    return okResult(rest);
+    return okResult({ ...rest, ...extra });
   }
-  const hint = r.status === 401 ? "; the token is invalid, expired or was replaced; ask the owner for a new one" : "";
-  return errResult(r.code, `${r.message}${hint}`);
+  const hint = r.status === 401 ? "; the token is invalid, expired, revoked or was replaced (a Stop also revokes it); ask the owner for a new one" : "";
+  return errResult(r.code, `${r.message}${hint}`, extra);
 }
 
-async function guarded(fn: () => Promise<ToolResult>): Promise<ToolResult> {
+async function guarded(fn: () => Promise<ToolResult>, extra: Record<string, unknown> = {}): Promise<ToolResult> {
   try {
     return await fn();
   } catch (e) {
-    if (e instanceof WorkerUnreachableError) return errResult("WORKER_UNREACHABLE", e.message);
-    return errResult("UNEXPECTED_ERROR", e instanceof Error ? e.message : String(e));
+    if (e instanceof WorkerUnreachableError) return errResult("WORKER_UNREACHABLE", `${e.message}. Call trading_get_state before anything else`, extra);
+    return errResult("UNEXPECTED_ERROR", e instanceof Error ? e.message : String(e), extra);
   }
 }
 
@@ -171,25 +185,29 @@ export function createTradingTools(api: TradingApi): ToolDef[] {
       description: PLACE_ORDER_DESCRIPTION,
       inputSchema: placeOrderInput,
       readOnly: false,
-      handler: (a: z.infer<typeof placeOrderInput>) =>
-        guarded(async () => {
+      handler: (a: z.infer<typeof placeOrderInput>) => {
+        // One key per call when the model gave none, so the internal retry after a network error cannot place a second order.
+        // It is returned in every result, so the model can retry the same order with it.
+        const key = a.idempotency_key ?? randomUUID().replace(/-/g, "");
+        const extra = { idempotency_key: key };
+        return guarded(async () => {
           // Exactly one size field; position_pct for sells only (1..100). Checked here so the model gets a clear message.
-          if ((a.usdc === undefined) === (a.position_pct === undefined)) return errResult("BAD_ORDER_REQUEST", "Give exactly one of usdc / position_pct");
+          if ((a.usdc === undefined) === (a.position_pct === undefined)) return errResult("BAD_ORDER_REQUEST", "Give exactly one of usdc / position_pct", extra);
           const body: Record<string, unknown> = { pair: a.pair, side: a.side, reason: a.reason };
           if (a.usdc !== undefined) {
             const d = toDec(a.usdc);
-            if (d === null || micro(d) <= 0n) return errResult("BAD_ORDER_REQUEST", "usdc must be a positive decimal with at most 6 decimals");
+            if (d === null || micro(d) <= 0n) return errResult("BAD_ORDER_REQUEST", "usdc must be a positive decimal with at most 6 decimals", extra);
             body["usdc"] = d;
           } else {
             const d = toDec(a.position_pct as string | number);
-            if (a.side !== "sell") return errResult("BAD_ORDER_REQUEST", "position_pct is allowed for sells only");
-            if (d === null || micro(d) < 1_000_000n || micro(d) > 100_000_000n) return errResult("BAD_ORDER_REQUEST", "position_pct must be between 1 and 100");
+            if (a.side !== "sell") return errResult("BAD_ORDER_REQUEST", "position_pct is allowed for sells only", extra);
+            if (d === null || micro(d) < 1_000_000n || micro(d) > 100_000_000n) return errResult("BAD_ORDER_REQUEST", "position_pct must be between 1 and 100", extra);
             body["position_pct"] = d;
           }
-          // One key per call when the model gave none, so the internal retry after a network error cannot place a second order.
-          body["idempotency_key"] = a.idempotency_key ?? randomUUID().replace(/-/g, "");
-          return mapResult(await api.placeOrder(body));
-        }),
+          body["idempotency_key"] = key;
+          return mapResult(await api.placeOrder(body), extra);
+        }, extra);
+      },
     },
   ];
 }
