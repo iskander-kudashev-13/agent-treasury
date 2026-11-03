@@ -14,6 +14,16 @@ export function BotStatePill({ state }: { state: BotState }) {
   return <StatusPill state={PILL[state]} label={t(`trading.bots.state.${state}`)} />;
 }
 
+/** ADR-0007: "Run by AI agent" (bot page) / "AI agent" (list tag). */
+export function AgentPill({ short }: { short?: boolean }) {
+  const t = useT();
+  return (
+    <Pill accent="neutral" icon={<Icons.Sparkles size={12} />}>
+      {t(short ? "trading.agent.tag" : "trading.agent.pill")}
+    </Pill>
+  );
+}
+
 const tone = (v: string | null) => (v === null || Number(v) === 0 ? "text-ink-muted" : Number(v) > 0 ? ACCENT_TEXT.ok : ACCENT_TEXT.danger);
 
 /** Signed P&L number in USDC, coloured by sign; an em dash while unknown (public view without the owner session). */
@@ -43,6 +53,7 @@ export function BotRow({ bot }: { bot: BotSummary }) {
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-[15px] font-semibold break-words text-ink">{bot.name}</span>
               <Pill accent="info">{t("trading.bots.kind")}</Pill>
+              {bot.kind === "agent" && <AgentPill short />}
             </div>
             {pair && <div className="mono mt-0.5 text-xs text-ink-muted">{pair}</div>}
           </div>

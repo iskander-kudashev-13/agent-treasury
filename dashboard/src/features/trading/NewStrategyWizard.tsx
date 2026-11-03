@@ -1,16 +1,17 @@
 import { useT } from "@/i18n";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Callout, Card, CardHeader, Field, Input, Select, SigningHint, Skeleton, Stepper } from "@/kit";
+import { Button, Callout, Card, CardHeader, cx, Field, Icons, Input, Select, SigningHint, Skeleton, Stepper } from "@/kit";
 import { useOwner } from "@/features/owner/OwnerProvider";
 import { useWallet } from "@/features/wallet/WalletProvider";
 import { botPath, TRADING_LIST_PATH } from "@/lib/agentKind";
 import { NETWORK, WORKER_URL } from "@/lib/config";
-import { confirmTradingRules, proposeTradingRules, stopSnapshot, stoppedSince, subscribeStops, withOwnerSession } from "@/lib/tradingClient";
+import { confirmTradingRules, proposeTradingRules, stopSnapshot, stoppedSince, subscribeStops, withOwnerSession, type AgentTokenIssued } from "@/lib/tradingClient";
 import { DEFAULT_HARD, hardLimitsOf, midsOf, pickPair } from "@/lib/tradingGuide";
 import { issueText, parseRuleSet } from "@/lib/tradingRules";
 import {
+  agentHardLimits,
   appendAiRules,
   assembleRuleSet,
   defaultLimits,
@@ -25,11 +26,14 @@ import {
   pairOptions,
   proposeErrorText,
   signErrorText,
+  wizardSteps,
   type DraftRule,
   type LimitsForm,
   type TemplateFields,
+  type WizMode,
 } from "@/lib/tradingWizard";
 import { AccountTrustCallout } from "./AccountTrust";
+import { AgentConnectStep } from "./AgentConnectStep";
 import { RuleBuilder, type AiState } from "./RuleBuilder";
 import { RulesView } from "./RulesView";
 import { useBots } from "./useBots";
@@ -42,10 +46,36 @@ const LIMIT_FIELDS = [
   { key: "maxOrders", label: "trading.wiz.l.maxOrders", unit: "" },
 ] as const;
 
+function ModeCard({ selected, disabled, icon, title, desc, note, onClick }: { selected: boolean; disabled?: boolean; icon: ReactNode; title: string; desc: string; note?: string | null; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className={cx(
+        "flex flex-col gap-1.5 rounded-card border p-4 text-left text-ink transition-colors",
+        selected ? "border-ok bg-surface-hover" : "border-line bg-surface",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-line-strong",
+      )}
+    >
+      <span className="flex items-center gap-2 text-[15px] font-semibold">
+        {icon}
+        {title}
+        {selected && <Icons.Check size={16} className="ml-auto text-ok" />}
+      </span>
+      <span className="text-sm text-ink-secondary">{desc}</span>
+      {note && <span className="text-xs text-ink-muted">{note}</span>}
+    </button>
+  );
+}
+
 /**
  * `/trading/new`: Name & pair -> Rules (templates or own words) -> Limits -> Review & sign. Creates a NEW worker bot (ADR-0006):
  * the owner signs the NEP-413 confirmation of the exact rule set shown, with `expectNew` so a challenge for an existing bot is
  * refused (audit MM1). The side chat stays for changing existing bots.
+ * "Run by an AI agent" (ADR-0007): Name & pair -> Limits -> Review & sign -> Connect. The owner signs only limits (`mode: "agent"`,
+ * no rules); the confirm returns the agent's access key once, shown on the Connect step and kept in this component's state only.
  */
 export function NewStrategyWizard() {
   const t = useT();
@@ -59,11 +89,16 @@ export function NewStrategyWizard() {
   const { data: botsLoad } = useBots();
   useSyncExternalStore(subscribeStops, stopSnapshot);
 
-  const hard = hardLimitsOf(live) ?? DEFAULT_HARD;
+  const agentOn = live?.agent_trading?.enabled === true;
+  const [modePick, setModePick] = useState<WizMode>("rules");
+  // Chosen on the first step and kept after it (a status poll must not flip the steps under the owner; the worker re-checks).
+  const [step, setStep] = useState(0);
+  const mode: WizMode = modePick === "agent" && (agentOn || step > 0) ? "agent" : "rules";
+  const accountHard = hardLimitsOf(live) ?? DEFAULT_HARD;
+  const hard = mode === "agent" ? agentHardLimits(accountHard, live?.agent_trading?.max_orders_per_day) : accountHard;
   const bots = botsLoad?.bots ?? [];
   const pairs = pairOptions(pickPair({ status: live, network: live?.hl_network ?? (NETWORK === "mainnet" ? "mainnet" : "testnet") }), bots.flatMap((b) => b.pairs));
 
-  const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [pairPick, setPairPick] = useState<string | null>(null);
@@ -77,6 +112,8 @@ export function NewStrategyWizard() {
   const [reviewAt, setReviewAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The agent's access key after a successful agent-mode confirm. React state only (ADR-0007 §3: shown once, never stored).
+  const [issued, setIssued] = useState<{ token: AgentTokenIssued; botId: string; name: string } | null>(null);
 
   const limitErr = limitIssues(limits, hard);
   const maxOrderNum = Number(normNumber(limits.maxOrder));
@@ -84,19 +121,25 @@ export function NewStrategyWizard() {
   const oversized = oversizedBuys(rules, limitErr.maxOrder ? String(Math.floor(hard.maxOrder)) : normNumber(limits.maxOrder));
   const nErr = nameIssue(name);
 
-  const ruleSet = useMemo(() => assembleRuleSet({ name, pair, limits, rules }), [name, pair, limits, rules]);
+  const ruleSet = useMemo(() => assembleRuleSet({ name, pair, limits, rules, mode }), [name, pair, limits, rules, mode]);
   const parsed = useMemo(() => parseRuleSet(ruleSet), [ruleSet]);
   const takenIds = bots.map((b) => b.id);
   const botId = newBotId(name, takenIds);
   // MM2: a Stop (all, or this id) after the owner reached the review step: signing stays off until they review again.
   const stopped = reviewAt !== null && stoppedSince(botId, reviewAt);
 
-  const steps = [t("trading.wiz.step.name"), t("trading.wiz.step.rules"), t("trading.wiz.step.limits"), t("wiz.stepReview")];
-  const stepOk = [nErr === null && pair !== "", rules.length > 0 && editing === null && oversized.length === 0, Object.keys(limitErr).length === 0 && oversized.length === 0, true][step] ?? false;
+  const stepKeys = wizardSteps(mode);
+  const cur = stepKeys[step] ?? "name";
+  const reviewIdx = stepKeys.indexOf("review");
+  const STEP_LABEL = { name: t("trading.wiz.step.name"), rules: t("trading.wiz.step.rules"), limits: t("trading.wiz.step.limits"), review: t("wiz.stepReview"), connect: t("trading.agent.step.connect") } as const;
+  const steps = stepKeys.map((k) => STEP_LABEL[k]);
+  // Agent mode has no rules, so drafted rules (if the owner switched modes) never block it.
+  const tooBig = mode === "rules" && oversized.length > 0;
+  const stepOk = { name: nErr === null && pair !== "", rules: rules.length > 0 && editing === null && !tooBig, limits: Object.keys(limitErr).length === 0 && !tooBig, review: true, connect: true }[cur];
 
   const next = () => {
-    const to = Math.min(3, step + 1);
-    if (to === 3) setReviewAt(Date.now());
+    const to = Math.min(reviewIdx, step + 1);
+    if (to === reviewIdx) setReviewAt(Date.now());
     setError(null);
     setStep(to);
   };
@@ -139,6 +182,11 @@ export function NewStrategyWizard() {
     try {
       const r = await confirmTradingRules(ruleSet, { accountId, signMessage, trustedHlAccount: trusted, botId, botName: ruleSet.name, expectNew: true });
       void qc.invalidateQueries({ queryKey: tradingKeys.all });
+      if (r.agent_token) {
+        setIssued({ token: r.agent_token, botId: r.bot?.id ?? botId, name: ruleSet.name });
+        setStep(stepKeys.indexOf("connect"));
+        return;
+      }
       navigate(botPath(r.bot?.id ?? botId));
     } catch (e) {
       setError(signErrorText(e));
@@ -150,6 +198,15 @@ export function NewStrategyWizard() {
   /* ───────── not available ───────── */
   if (WORKER_URL === "" || (status !== null && !status.enabled)) return <Callout accent="neutral">{t("trading.err.off")}</Callout>;
   if (statusLoading) return <Skeleton className="h-48" />;
+
+  if (issued) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Stepper steps={steps} current={stepKeys.indexOf("connect")} />
+        <AgentConnectStep botName={issued.name} workerUrl={WORKER_URL} issued={issued.token} doneLabel={t("trading.agent.savedDone")} onDone={() => navigate(botPath(issued.botId))} />
+      </div>
+    );
+  }
 
   // At most one warning per screen: the most important one wins.
   const reviewNote = !canAct ? (
@@ -167,9 +224,29 @@ export function NewStrategyWizard() {
   return (
     <div className="flex flex-col gap-4">
       <Stepper steps={steps} current={step} />
-      {!canAct && step < 3 && <Callout accent="neutral">{t("trading.wiz.ownerOnly")}</Callout>}
+      {!canAct && step < reviewIdx && <Callout accent="neutral">{t("trading.wiz.ownerOnly")}</Callout>}
 
-      {step === 0 && (
+      {cur === "name" && (
+        <Card className="flex flex-col gap-3" aria-labelledby="new-strategy-how">
+          <h2 id="new-strategy-how" className="m-0 text-[13px] font-medium text-ink-secondary">
+            {t("trading.agent.how")}
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ModeCard selected={mode === "rules"} icon={<Icons.TrendingUp size={18} className="text-info" />} title={t("trading.agent.byRules")} desc={t("trading.agent.byRulesHint")} onClick={() => setModePick("rules")} />
+            <ModeCard
+              selected={mode === "agent"}
+              disabled={!agentOn}
+              icon={<Icons.Sparkles size={18} className="text-info" />}
+              title={t("trading.agent.byAgent")}
+              desc={t("trading.agent.byAgentHint")}
+              note={agentOn ? null : t("trading.agent.off")}
+              onClick={() => setModePick("agent")}
+            />
+          </div>
+        </Card>
+      )}
+
+      {cur === "name" && (
         <Card className="grid gap-4 sm:grid-cols-2">
           <Field label={t("trading.wiz.name")} error={nameTouched && nErr ? issueMessage(nErr) : null}>
             {(a11y) => (
@@ -202,7 +279,7 @@ export function NewStrategyWizard() {
         </Card>
       )}
 
-      {step === 1 && (
+      {cur === "rules" && (
         <Card className="flex flex-col gap-4">
           <RuleBuilder
             rules={rules}
@@ -219,8 +296,9 @@ export function NewStrategyWizard() {
         </Card>
       )}
 
-      {step === 2 && (
+      {cur === "limits" && (
         <Card className="flex flex-col gap-4">
+          {mode === "agent" && <p className="m-0 text-sm text-ink-secondary">{t("trading.agent.limitsHint")}</p>}
           <div className="grid gap-4 sm:grid-cols-2">
             {LIMIT_FIELDS.map((f) => {
               const issue = limitErr[f.key];
@@ -242,11 +320,11 @@ export function NewStrategyWizard() {
               );
             })}
           </div>
-          {oversized.length > 0 && <p className="m-0 text-xs text-danger-text">{t("trading.wiz.err.oversized", { n: limitErr.maxOrder ? Math.floor(hard.maxOrder) : maxOrderNum })}</p>}
+          {tooBig && <p className="m-0 text-xs text-danger-text">{t("trading.wiz.err.oversized", { n: limitErr.maxOrder ? Math.floor(hard.maxOrder) : maxOrderNum })}</p>}
         </Card>
       )}
 
-      {step === 3 && (
+      {cur === "review" && (
         <Card className="flex flex-col gap-4" aria-labelledby="new-strategy-review">
           <CardHeader id="new-strategy-review" title={t("wiz.stepReview")} />
           <RulesView rules={ruleSet} {...(live ? { mids: midsOf(live) } : {})} />
@@ -264,7 +342,7 @@ export function NewStrategyWizard() {
         ) : (
           <Button onClick={() => navigate(TRADING_LIST_PATH)}>{t("common.cancel")}</Button>
         )}
-        {step < 3 ? (
+        {step < reviewIdx ? (
           <Button
             variant="primary"
             disabled={!stepOk}
@@ -277,7 +355,7 @@ export function NewStrategyWizard() {
           </Button>
         ) : (
           <Button variant="primary" disabled={signBlocked} loading={busy} onClick={() => void submit()}>
-            {t("trading.wiz.sign")}
+            {t(mode === "agent" ? "trading.agent.sign" : "trading.wiz.sign")}
           </Button>
         )}
       </div>

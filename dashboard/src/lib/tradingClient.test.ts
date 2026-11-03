@@ -1,7 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearSession, saveSession } from "./assistantClient";
 import { VAULT_ID, WORKER_URL } from "./config";
-import { confirmTradingRules, fetchTradingStatus, killBot, killTrading, recordStop, stoppedSince, parseKill, parseLog, parseTradingStatus, TradingHttpError, withOwnerSession } from "./tradingClient";
+import {
+  confirmTradingRules,
+  fetchTradingLog,
+  fetchTradingStatus,
+  killBot,
+  killTrading,
+  parseAgentAccess,
+  parseAgentToken,
+  parseBotDetail,
+  parseBotFill,
+  parseBotSummary,
+  parseKill,
+  parseLog,
+  parseProposedRules,
+  parseTradingRulesProposal,
+  parseTradingStatus,
+  recordStop,
+  revokeAgentToken,
+  stoppedSince,
+  TradingHttpError,
+  withOwnerSession,
+} from "./tradingClient";
 import { confirmationMessage, hashRuleSet, type RuleSetV1 } from "./tradingRules";
 
 const RULES: RuleSetV1 = {
@@ -77,6 +98,49 @@ describe("parsers", () => {
   });
   it("parses the kill result", () => {
     expect(parseKill({ state: "halted", cancelled_orders: 2, steps: { cancel_all: "ok", schedule_cancel: "failed" } })).toEqual({ state: "halted", cancelled_orders: 2, steps: { cancel_all: "ok", schedule_cancel: "failed" } });
+  });
+});
+
+describe("parsers, ADR-0007 fields", () => {
+  it("agent_trading: null on older workers, parsed when present", () => {
+    expect(parseTradingStatus(STATUS)).toMatchObject({ agent_trading: null });
+    expect(parseTradingStatus({ ...STATUS, agent_trading: { enabled: true, max_orders_per_day: 10, min_order_interval_sec: 10, token_ttl_hours: 72 } })).toMatchObject({ agent_trading: { enabled: true, max_orders_per_day: 10, token_ttl_hours: 72 } });
+    expect(parseTradingStatus({ ...STATUS, agent_trading: { enabled: "yes" } })).toMatchObject({ agent_trading: { enabled: false } });
+  });
+  it("log entries: source, code and note", () => {
+    const [e] = parseLog({ entries: [{ at_ms: 1, kind: "skip", detail: "MAX_ORDER: x", source: "agent", code: "MAX_ORDER", note: "n".repeat(300) }] });
+    expect(e).toMatchObject({ source: "agent", code: "MAX_ORDER" });
+    expect(e?.note).toHaveLength(200);
+    const [f] = parseLog({ entries: [{ at_ms: 1, kind: "skip", detail: "d", source: "x", code: "<b>", note: 5 }] });
+    expect(f?.source).toBeUndefined();
+    expect(f?.code).toBeUndefined();
+    expect(f?.note).toBeUndefined();
+  });
+  it("bot kind defaults to rules; agent access and fill note", () => {
+    expect(parseBotSummary({ id: "a", name: "A", state: "running" })?.kind).toBe("rules");
+    expect(parseBotSummary({ id: "a", name: "A", state: "running", kind: "agent" })?.kind).toBe("agent");
+    expect(parseBotSummary({ id: "a", name: "A", state: "running", kind: "weird" })?.kind).toBe("rules");
+    const d = parseBotDetail({ bot: { id: "a", state: "halted", kind: "agent" }, kind: "agent", agent: { connected: true, token_id: "0123abcd", issued_at_ms: 1, expires_at_ms: 2, last_used_ms: null } });
+    expect(d).toMatchObject({ kind: "agent", agent: { connected: true, token_id: "0123abcd", last_used_ms: null } });
+    expect(parseBotDetail({ bot: { id: "a", state: "running" } })).toMatchObject({ kind: "rules", agent: null });
+    expect(parseAgentAccess({ connected: "true", token_id: "nothex!!" })).toMatchObject({ connected: false, token_id: null });
+    expect(parseBotFill({ side: "buy", price: "1", size: "2", note: "why" })?.note).toBe("why");
+    expect(parseBotFill({ side: "buy", price: "1", size: "2" })?.note).toBeNull();
+  });
+  it("parseAgentToken checks the format and the bot", () => {
+    const tok = `atk1_b1_${"a-_Z".repeat(10)}xyz`;
+    expect(parseAgentToken({ token: tok, token_id: "deadbeef", issued_at_ms: 1, expires_at_ms: 2 }, "b1")).toMatchObject({ token: tok, token_id: "deadbeef" });
+    expect(parseAgentToken({ token: tok, issued_at_ms: 1, expires_at_ms: 2 }, "b2")).toBeNull();
+    expect(parseAgentToken({ token: tok }, "b1")).toBeNull();
+    expect(parseAgentToken(null, "b1")).toBeNull();
+  });
+  it("assistant proposals with a mode key are refused (AI may never create agent mode)", () => {
+    const base = { id: "p1", type: "TradingRules", title: "t", summary: "s", hash: "a".repeat(64), validation: { ok: true, errors: [], warnings: [] } };
+    expect(parseTradingRulesProposal({ ...base, rules: RULES })).not.toBeNull();
+    expect(parseTradingRulesProposal({ ...base, rules: { ...RULES, mode: "agent", rules: [] } })).toBeNull();
+    expect(parseTradingRulesProposal({ ...base, rules: { ...RULES, mode: "rules" } })).toBeNull();
+    expect(parseProposedRules({ rules: { ...RULES, mode: "agent" } })).toEqual([]);
+    expect(parseProposedRules({ rules: RULES })).toHaveLength(1);
   });
 });
 
@@ -250,6 +314,101 @@ describe("HTTP client (mocked fetch)", () => {
       signMessage.mockResolvedValueOnce({ accountId: "other.testnet", publicKey: "k", signature: "s" });
       await expect(confirmTradingRules(RULES, { accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "default", expectNew: false })).rejects.toThrow(/different account/);
       expect(calls.some((c) => c.path.endsWith("/confirm"))).toBe(false);
+    });
+  });
+
+  describe("confirmTradingRules, AI-agent mode (ADR-0007)", () => {
+    const nonce = btoa("n".repeat(32));
+    const AGENT: RuleSetV1 = { version: 1, mode: "agent", name: "PURR agent", pairs: ["PURR/USDC"], limits: { max_position_usdc: "25", max_order_usdc: "12", daily_loss_stop_usdc: "3", max_orders_per_day: 6 }, rules: [] };
+    const TOKEN = `atk1_purr-agent_${"A".repeat(43)}`;
+    const issued = { token: TOKEN, token_id: "0123abcd", issued_at_ms: 1000, expires_at_ms: 2000 };
+    const deps = (signMessage: ReturnType<typeof vi.fn>, over: Record<string, unknown> = {}) => ({ accountId: "owner.testnet", signMessage, vault: VAULT, trustedHlAccount: HL, botId: "purr-agent", botName: "PURR agent", expectNew: true, ...over }) as Parameters<typeof confirmTradingRules>[1];
+    const setup = async (over: { mode?: string | null; message?: string; agentToken?: unknown; rules?: RuleSetV1 } = {}) => {
+      const rules = over.rules ?? AGENT;
+      const hash = await hashRuleSet(rules);
+      const message = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash, botId: "purr-agent", ...(rules.mode ? { mode: "agent" as const } : {}) });
+      route({
+        "/trading/status": () => json({ ...STATUS, agent_trading: { enabled: true, max_orders_per_day: 10, min_order_interval_sec: 10, token_ttl_hours: 72 } }),
+        "/trading/rules/challenge": () => json({ nonce, message: over.message ?? message, recipient: VAULT, hash, expires_at: 1, bot_id: "purr-agent", is_new: true, ...(over.mode === null ? {} : { mode: over.mode ?? (rules.mode ? "agent" : "rules") }) }),
+        "/trading/rules/confirm": () =>
+          json({
+            bot: { id: "purr-agent", name: "PURR agent", state: "running", kind: rules.mode ? "agent" : "rules" },
+            active: { rules, hash, message, signature: "s", public_key: "p", account_id: "owner.testnet", nonce, callback_url: null, confirmed_at_ms: 9 },
+            state: "running",
+            agent_token: over.agentToken === undefined ? (rules.mode ? issued : null) : over.agentToken,
+          }),
+      });
+      const signMessage = vi.fn(() => Promise.resolve({ accountId: "owner.testnet", publicKey: "ed25519:pk", signature: "sig" }));
+      return { signMessage, message };
+    };
+
+    it("signs the v3 message and returns the agent token once", async () => {
+      const { signMessage, message } = await setup();
+      expect(message.split("\n")[0]).toBe("Agent Treasury: activate AI agent trading limits");
+      const r = await confirmTradingRules(AGENT, deps(signMessage));
+      expect(signMessage).toHaveBeenCalledWith(expect.objectContaining({ message }));
+      expect(r.agent_token).toEqual(issued);
+      expect(r.bot?.kind).toBe("agent");
+      const ch = JSON.parse(String(calls.find((c) => c.path.endsWith("/challenge"))?.init?.body)) as { rules: RuleSetV1 };
+      expect(ch.rules.mode).toBe("agent");
+    });
+    it("never writes the token to web storage", async () => {
+      const writes: string[] = [];
+      const fake = () => ({ getItem: () => null, setItem: (k: string, v: string) => void writes.push(`${k}=${v}`), removeItem: () => undefined, key: () => null, clear: () => undefined, length: 0 });
+      vi.stubGlobal("localStorage", fake());
+      vi.stubGlobal("sessionStorage", fake());
+      const { signMessage } = await setup();
+      const r = await confirmTradingRules(AGENT, deps(signMessage));
+      expect(r.agent_token?.token).toBe(TOKEN);
+      expect(writes.some((w) => w.includes(TOKEN))).toBe(false);
+    });
+    it("requires agent_token in agent mode (after signing, the limits are active but unusable without it)", async () => {
+      const { signMessage } = await setup({ agentToken: null });
+      await expect(confirmTradingRules(AGENT, deps(signMessage))).rejects.toThrow(/key/);
+    });
+    it("refuses a token for another bot or with a bad format", async () => {
+      for (const bad of [{ ...issued, token: `atk1_other_${"A".repeat(43)}` }, { ...issued, token: "atk1_purr-agent_short" }, { ...issued, expires_at_ms: 1 }]) {
+        const { signMessage } = await setup({ agentToken: bad });
+        await expect(confirmTradingRules(AGENT, deps(signMessage))).rejects.toThrow(/key/);
+      }
+    });
+    it("refuses (without asking the wallet) a challenge whose mode differs", async () => {
+      const { signMessage } = await setup({ mode: "rules" });
+      await expect(confirmTradingRules(AGENT, deps(signMessage))).rejects.toThrow(/different kind/);
+      expect(signMessage).not.toHaveBeenCalled();
+    });
+    it("refuses (without asking the wallet) a v2 message for an agent mandate", async () => {
+      const hash = await hashRuleSet(AGENT);
+      const v2 = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash, botId: "purr-agent" });
+      const { signMessage } = await setup({ message: v2 });
+      await expect(confirmTradingRules(AGENT, deps(signMessage))).rejects.toThrow(/does not match/);
+      expect(signMessage).not.toHaveBeenCalled();
+    });
+    it("refuses a v3 message for a rules bot, and returns agent_token null for rules bots", async () => {
+      const rules = { ...RULES, name: "PURR rules", pairs: ["PURR/USDC"], rules: RULES.rules.map((r) => ({ ...r, pair: "PURR/USDC" })) };
+      const hash = await hashRuleSet(rules);
+      const v3 = confirmationMessage({ vault: VAULT, agentId: "hl-trader", hlNetwork: "testnet", hlAccount: HL, rulesSha256: hash, botId: "purr-agent", mode: "agent" });
+      const bad = await setup({ rules, message: v3 });
+      await expect(confirmTradingRules(rules, deps(bad.signMessage))).rejects.toThrow(/does not match/);
+      expect(bad.signMessage).not.toHaveBeenCalled();
+      const ok = await setup({ rules, agentToken: issued });
+      const r = await confirmTradingRules(rules, deps(ok.signMessage));
+      expect(r.agent_token).toBeNull();
+    });
+    it("accepts a challenge without a mode field (the message check still binds the mode)", async () => {
+      const { signMessage } = await setup({ mode: null });
+      expect((await confirmTradingRules(AGENT, deps(signMessage))).agent_token?.token).toBe(TOKEN);
+    });
+    it("revokeAgentToken posts to the revoke route with the owner token", async () => {
+      route({ "/trading/bots/purr-agent/agent-token/revoke": () => json({ bot_id: "purr-agent", revoked: true }) });
+      expect(await revokeAgentToken("tok", "purr-agent")).toEqual({ bot_id: "purr-agent", revoked: true });
+      expect((calls[0]?.init?.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+      expect(calls[0]?.init?.method).toBe("POST");
+      await expect(revokeAgentToken("tok", "Bad_Id")).rejects.toThrow();
+    });
+    it("fetchTradingLog can filter by bot", async () => {
+      route({ "/trading/log?limit=20&bot=purr-agent": () => json({ entries: [] }) });
+      expect(await fetchTradingLog("tok", 20, undefined, "purr-agent")).toEqual([]);
     });
   });
 

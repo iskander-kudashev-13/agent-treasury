@@ -4,6 +4,7 @@ import { formatTime } from "@/lib/format";
 import type { BotFill } from "@/lib/tradingClient";
 import { fmtLocalTime, fmtMoney, fmtPrice, fmtSize } from "@/lib/tradingMetrics";
 import { PnlValue } from "../BotRows";
+import { AgentNote } from "./AgentActivity";
 
 /** Trades newest first, 50 per page ("Show more" loads the next cursor). */
 export function Trades({ fills, loading, more, loadingMore, loadMore, error }: { fills: readonly BotFill[]; loading: boolean; more: boolean; loadingMore: boolean; loadMore: () => void; error: string | null }) {
@@ -38,6 +39,7 @@ export function Trades({ fills, loading, more, loadingMore, loadMore, error }: {
                 <Td className="whitespace-nowrap text-ink-secondary"><span title={formatTime(f.time_ms)}>{fmtLocalTime(f.time_ms, loc)}</span></Td>
                 <Td>
                   <Pill accent={f.side === "buy" ? "ok" : "danger"}>{f.side === "buy" ? "▲ " : "▼ "}{t(f.side === "buy" ? "trading.bot.buy" : "trading.bot.sell")}</Pill>
+                  {f.note !== null && <AgentNote note={f.note} />}
                 </Td>
                 <Td mono>{f.pair}</Td>
                 <Td align="right" mono>{fmtPrice(f.price)}</Td>

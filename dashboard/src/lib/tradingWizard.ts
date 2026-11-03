@@ -206,9 +206,30 @@ export const toRuleLimits = (f: LimitsForm): RuleLimits => ({
   max_orders_per_day: Number(f.maxOrders.trim()),
 });
 
-/** The rule set to sign. Every rule trades the wizard's pair. */
-export function assembleRuleSet(p: { name: string; pair: string; limits: LimitsForm; rules: readonly DraftRule[] }): RuleSetV1 {
+/** How the new bot trades: by the owner's rules, or an AI agent chooses each order inside the signed limits (ADR-0007). */
+export type WizMode = "rules" | "agent";
+
+/**
+ * The rule set to sign. Every rule trades the wizard's pair. Agent mode: `mode: "agent"` and no rules at all (the drafted rules,
+ * if the owner switched modes, are dropped, never signed).
+ */
+export function assembleRuleSet(p: { name: string; pair: string; limits: LimitsForm; rules: readonly DraftRule[]; mode?: WizMode }): RuleSetV1 {
+  if (p.mode === "agent") return { version: 1, mode: "agent", name: p.name.trim(), pairs: [p.pair], limits: toRuleLimits(p.limits), rules: [] };
   return { version: 1, name: p.name.trim(), pairs: [p.pair], limits: toRuleLimits(p.limits), rules: p.rules.map((d) => ({ ...d.rule, pair: p.pair })) };
+}
+
+/**
+ * Hard limits for an AI-agent bot: the orders-a-day cap is also bounded by the worker's agent cap
+ * (`status.agent_trading.max_orders_per_day`, ADR-0007 §8). A missing or bad cap keeps the account cap (the worker re-checks).
+ */
+export function agentHardLimits(h: HardLimits, agentMaxOrders: number | null | undefined): HardLimits {
+  const cap = typeof agentMaxOrders === "number" && Number.isInteger(agentMaxOrders) && agentMaxOrders >= 1 ? agentMaxOrders : Infinity;
+  return { ...h, maxOrders: Math.min(h.maxOrders, cap) };
+}
+
+/** The wizard steps for a mode (labels are i18n keys). Agent mode has no Rules step and ends with Connect. */
+export function wizardSteps(mode: WizMode): readonly ("name" | "rules" | "limits" | "review" | "connect")[] {
+  return mode === "agent" ? ["name", "limits", "review", "connect"] : ["name", "rules", "limits", "review"];
 }
 
 /* ───────────── name and pair ───────────── */
@@ -274,6 +295,10 @@ export function signErrorText(e: unknown): string {
       return t("trading.wiz.err.busy");
     case "KILLED_SINCE_CHALLENGE":
       return t("as.rulesStopped");
+    case "AGENT_TRADING_DISABLED":
+      return t("trading.agent.err.disabled");
+    case "BOT_KIND_MISMATCH":
+      return t("trading.agent.err.kindMismatch");
     default:
       return e.message;
   }

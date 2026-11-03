@@ -7,7 +7,8 @@ import { WORKER_URL } from "@/lib/config";
 import type { HistoryPoint } from "@/lib/tradingClient";
 import { candleInterval, RANGES, type HistoryRange } from "@/lib/tradingMetrics";
 import type { PriceMode } from "@/features/trading/bot/Charts";
-import { BotStatePill, PnlValue } from "@/features/trading/BotRows";
+import { AgentPill, BotStatePill, PnlValue } from "@/features/trading/BotRows";
+import { AgentActivity } from "@/features/trading/bot/AgentActivity";
 import { BotManage } from "@/features/trading/bot/BotManage";
 import { Metrics } from "@/features/trading/bot/Metrics";
 import { Settings } from "@/features/trading/bot/Settings";
@@ -123,6 +124,7 @@ export function TradingBotPage() {
             <Pill accent="info">{t("trading.bots.kind")}</Pill>
             <span className="mono text-sm text-ink-secondary">{bot.pairs.join(", ") || "—"}</span>
             <BotStatePill state={bot.state} />
+            {detail.kind === "agent" && <AgentPill />}
           </div>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-ink-muted">
             <span>
@@ -173,6 +175,8 @@ export function TradingBotPage() {
       <Metrics metrics={metrics.metrics} loading={metrics.loading} total={bot.pnl_total_usdc} />
 
       <Settings detail={detail} status={ctx.status} signedIn={ctx.token !== null} signingIn={load.signingIn} signIn={() => void load.signIn()} error={load.authError} />
+
+      {detail.kind === "agent" && ctx.mode === "bots" && ctx.token && <AgentActivity token={ctx.token} botId={bot.id} />}
 
       <Trades fills={trades.fills} loading={trades.loading} more={trades.more} loadingMore={trades.loadingMore} loadMore={trades.loadMore} error={trades.error} />
     </Page>

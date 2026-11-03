@@ -82,3 +82,6 @@ export interface RuleSentence {
   segs: Seg[];
 }
 export const ruleSentences = (rs: RuleSetV1): RuleSentence[] => rs.rules.map((r, index) => ({ id: r.id, index: index + 1, segs: ruleSentence(r) }));
+
+/** ADR-0007: what an AI-agent bot does, in plain words (it has no rules; the limits follow in the "Always" line). */
+export const agentSentence = (rs: RuleSetV1): Seg[] => segs("trading.agent.sentence", { pairs: rs.pairs.join(", ") });

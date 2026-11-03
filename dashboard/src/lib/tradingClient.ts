@@ -75,6 +75,14 @@ export interface TradingStatus {
   last_tick_ms: number | null;
   next_tick_ms: number | null;
   warnings: string[];
+  /** ADR-0007: AI-agent bots. Null on workers without them (same as switched off). */
+  agent_trading: AgentTradingStatus | null;
+}
+export interface AgentTradingStatus {
+  enabled: boolean;
+  max_orders_per_day: number;
+  min_order_interval_sec: number;
+  token_ttl_hours: number;
 }
 export type TradingStatusResult = { enabled: false } | TradingStatus;
 
@@ -85,6 +93,11 @@ export interface LogEntry {
   detail: string;
   cloid?: string;
   oid?: number;
+  /** ADR-0007: set on decisions of an AI agent. */
+  source?: "agent";
+  code?: string;
+  /** The agent's own short note (untrusted, sanitised by the worker). Plain text only: never HTML, markdown or a link. */
+  note?: string;
 }
 export interface ConfirmedRules {
   rules: RuleSetV1;
@@ -204,7 +217,13 @@ export function parseTradingStatus(j: unknown): TradingStatusResult | null {
     last_tick_ms: numOrNull(j.last_tick_ms),
     next_tick_ms: numOrNull(j.next_tick_ms),
     warnings: arr(j.warnings, 20).flatMap((x) => (typeof x === "string" ? [x.slice(0, 300)] : [])),
+    agent_trading: parseAgentTrading(j.agent_trading),
   };
+}
+
+export function parseAgentTrading(v: unknown): AgentTradingStatus | null {
+  if (!isObj(v)) return null;
+  return { enabled: v.enabled === true, max_orders_per_day: num(v.max_orders_per_day), min_order_interval_sec: num(v.min_order_interval_sec), token_ttl_hours: num(v.token_ttl_hours) };
 }
 
 const KINDS: readonly string[] = ["order", "skip", "cancel", "topup", "state"];
@@ -216,6 +235,9 @@ export function parseLog(j: unknown): LogEntry[] {
     if (typeof x.rule_id === "string") e.rule_id = x.rule_id.slice(0, 32);
     if (typeof x.cloid === "string") e.cloid = x.cloid.slice(0, 40);
     if (typeof x.oid === "number") e.oid = x.oid;
+    if (x.source === "agent") e.source = "agent";
+    if (typeof x.code === "string" && /^[A-Z][A-Z0-9_]{0,47}$/.test(x.code)) e.code = x.code;
+    if (typeof x.note === "string" && x.note !== "") e.note = x.note.slice(0, 200);
     return [e];
   });
 }
@@ -269,6 +291,8 @@ export interface TradingRulesProposal {
 /** `{ id, type: "TradingRules", title, summary, rules, hash, validation, confirm }` -> typed proposal, or null when malformed. */
 export function parseTradingRulesProposal(raw: unknown): TradingRulesProposal | null {
   if (!isObj(raw) || raw.type !== "TradingRules") return null;
+  // ADR-0007 §1: AI-agent bots are created only in the wizard. A proposal carrying `mode` (any value) is never shown or signed.
+  if (isObj(raw.rules) && "mode" in raw.rules) return null;
   if (typeof raw.id !== "string" || raw.id === "" || raw.id.length > 32) return null;
   if (typeof raw.hash !== "string" || !/^[0-9a-f]{64}$/.test(raw.hash)) return null;
   const rules = parseRuleSet(raw.rules);
@@ -336,8 +360,13 @@ export async function fetchTradingStatus(signal?: AbortSignal): Promise<TradingS
   }
 }
 
-export async function fetchTradingLog(token: string, limit = 50, signal?: AbortSignal): Promise<LogEntry[]> {
-  return parseLog(await request(`/log?limit=${Math.min(200, Math.max(1, limit))}`, { token, ...(signal ? { signal } : {}) }));
+export async function fetchTradingLog(token: string, limit = 50, signal?: AbortSignal, botId?: string): Promise<LogEntry[]> {
+  const p = new URLSearchParams({ limit: String(Math.min(200, Math.max(1, limit))) });
+  if (botId !== undefined) {
+    if (!BOT_ID_RE.test(botId)) throw new Error(t("trading.err.badBotId"));
+    p.set("bot", botId);
+  }
+  return parseLog(await request(`/log?${p.toString()}`, { token, ...(signal ? { signal } : {}) }));
 }
 
 export async function fetchActiveRules(token: string, signal?: AbortSignal): Promise<ConfirmedRules | null> {
@@ -414,6 +443,7 @@ const LOOSE_LIMITS = { max_position_usdc: "1000000000", max_order_usdc: "1000000
  */
 export function parseProposedRules(raw: unknown): Rule[] {
   const rs = obj(obj(raw).rules);
+  if ("mode" in rs) return []; // ADR-0007: AI output never carries agent mode
   return arr(rs.rules, 20).flatMap((r) => {
     const pair = isObj(r) && typeof r.pair === "string" ? r.pair : "";
     const one = parseRuleSet({ version: 1, name: "x", pairs: [pair], limits: { ...LOOSE_LIMITS }, rules: [r] });
@@ -461,9 +491,43 @@ export interface ConfirmDeps {
  * The dashboard never signs a message it did not build itself: the worker's challenge must carry exactly the ADR message for
  * the hash the dashboard computed from the JSON it rendered. Any difference aborts before the wallet is asked.
  */
-export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): Promise<{ active: ConfirmedRules | null; state: string; bot: BotSummary | null }> {
+export interface ConfirmResult {
+  active: ConfirmedRules | null;
+  state: string;
+  bot: BotSummary | null;
+  /**
+   * ADR-0007: the AI agent's access token, returned ONCE by an agent-mode confirm (null for rules bots). The caller shows it
+   * once and keeps it in React state only: never in localStorage/sessionStorage, the query cache, a URL or a log line.
+   */
+  agent_token: AgentTokenIssued | null;
+}
+
+export interface AgentTokenIssued {
+  token: string;
+  token_id: string;
+  issued_at_ms: number;
+  expires_at_ms: number;
+}
+
+/** `atk1_<bot_id>_<43 base64url chars>` (ADR-0007 §3). */
+export const AGENT_TOKEN_RE = /^atk1_([a-z0-9][a-z0-9-]{0,15})_([A-Za-z0-9_-]{43})$/;
+
+/** The `agent_token` of a confirm response; null when absent or malformed, or when it is for another bot. */
+export function parseAgentToken(v: unknown, botId: string): AgentTokenIssued | null {
+  if (!isObj(v) || typeof v.token !== "string") return null;
+  const m = AGENT_TOKEN_RE.exec(v.token);
+  if (!m || m[1] !== botId) return null;
+  const issued = numOrNull(v.issued_at_ms);
+  const expires = numOrNull(v.expires_at_ms);
+  if (issued === null || expires === null || expires <= issued) return null;
+  return { token: v.token, token_id: typeof v.token_id === "string" && /^[0-9a-f]{8}$/.test(v.token_id) ? v.token_id : "", issued_at_ms: issued, expires_at_ms: expires };
+}
+
+export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): Promise<ConfirmResult> {
   const vault = deps.vault ?? VAULT_ID;
   if (!BOT_ID_RE.test(deps.botId)) throw new Error(t("trading.err.badBotId"));
+  // The mode comes from the rules the owner sees (and that are hashed), never from a worker field.
+  const agentMode = rules.mode === "agent";
   const localHash = await hashRuleSet(rules);
   const status = await fetchTradingStatus();
   if (!status.enabled) throw new Error(t("trading.err.off"));
@@ -491,6 +555,9 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
   if (ch.bot_id !== undefined && ch.bot_id !== deps.botId) throw new Error(t("trading.err.botDiffers", { got: str(ch.bot_id, "?", 40), want: deps.botId }));
   if (ch.bot_id === undefined && deps.botId !== "default") throw new Error(t("trading.err.botDiffers", { got: "-", want: deps.botId }));
   if (typeof ch.is_new !== "boolean" || ch.is_new !== deps.expectNew) throw new Error(t(deps.expectNew ? "trading.err.notNew" : "trading.err.isNew", { id: deps.botId }));
+  if (ch.mode !== undefined && ch.mode !== (agentMode ? "agent" : "rules")) throw new Error(t("trading.err.modeDiffers"));
+  // An agent-mode message always carries the bot line; a worker from before bots cannot confirm one.
+  if (agentMode && ch.bot_id === undefined) throw new Error(t("trading.err.modeDiffers"));
   const expected = confirmationMessage({
     vault: status.vault || vault,
     agentId: status.agent_id,
@@ -498,6 +565,7 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
     hlAccount: status.hl_account,
     rulesSha256: localHash,
     ...(ch.bot_id === undefined ? {} : { botId: deps.botId }),
+    ...(agentMode ? { mode: "agent" as const } : {}),
   });
   if (ch.message !== expected) throw new Error(t("trading.err.messageDiffers"));
 
@@ -512,7 +580,13 @@ export async function confirmTradingRules(rules: RuleSetV1, deps: ConfirmDeps): 
   if (!isObj(j)) throw new Error(t("trading.err.unexpectedConfirm"));
   const bot = parseBotSummary(j.bot);
   if (bot && bot.id !== deps.botId) throw new Error(t("trading.err.botDiffers", { got: bot.id, want: deps.botId }));
-  return { active: parseConfirmed(j.active), state: str(j.state), bot };
+  let agentToken: AgentTokenIssued | null = null;
+  if (agentMode) {
+    // The limits are signed and active now; without a usable token the agent simply cannot trade (safe), the owner re-signs.
+    agentToken = parseAgentToken(j.agent_token, deps.botId);
+    if (!agentToken) throw new Error(t("trading.err.noToken"));
+  }
+  return { active: parseConfirmed(j.active), state: str(j.state), bot, agent_token: agentToken };
 }
 
 /* ───────────── bots (ADR-0006 §8) ───────────── */
@@ -525,9 +599,13 @@ export const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,15}$/;
  * `GET /trading/bots`. The public view carries only id, name, state and pairs (owner default 4): the money fields are `null` and
  * `spark` is empty until the request is made with the owner session.
  */
+export type BotKind = "rules" | "agent";
+
 export interface BotSummary {
   id: string;
   name: string;
+  /** ADR-0007; "rules" on workers that do not report it. Display only: the worker enforces the kind. */
+  kind: BotKind;
   state: BotState;
   state_reason: string | null;
   pairs: string[];
@@ -569,6 +647,16 @@ export interface BotDetail {
   pairs: BotPair[];
   open_orders: TradingOrder[];
   hl_network: "mainnet" | "testnet";
+  kind: BotKind;
+  /** AI-agent bots only (null for rules bots). */
+  agent: BotAgentAccess | null;
+}
+export interface BotAgentAccess {
+  connected: boolean;
+  token_id: string | null;
+  issued_at_ms: number | null;
+  expires_at_ms: number | null;
+  last_used_ms: number | null;
 }
 export interface HistoryPoint {
   t: number;
@@ -597,6 +685,8 @@ export interface BotFill {
   fee_usdc: string;
   fee_token: string;
   realized_usdc: string | null;
+  /** ADR-0007: the AI agent's note for this order. Untrusted plain text. */
+  note: string | null;
 }
 export interface BotFills {
   fills: BotFill[];
@@ -634,6 +724,7 @@ export function parseBotSummary(j: unknown): BotSummary | null {
   return {
     id: j.id,
     name: str(j.name, j.id, 60),
+    kind: j.kind === "agent" ? "agent" : "rules",
     state: j.state as BotState,
     state_reason: strOrNull(j.state_reason, 100),
     pairs: arr(j.pairs, 10).flatMap((p) => (typeof p === "string" ? [p.slice(0, 40)] : [])),
@@ -683,7 +774,15 @@ export function parseBotDetail(j: unknown): BotDetail | null {
     pairs: arr(j.pairs, 10).flatMap((x) => (isObj(x) && typeof x.name === "string" ? [{ name: x.name.slice(0, 40), coin: str(x.coin, "", 40), sz_decimals: num(x.sz_decimals) }] : [])),
     open_orders: parseOrders(j.open_orders),
     hl_network: j.hl_network === "mainnet" ? "mainnet" : "testnet",
+    kind: j.kind === "agent" || bot.kind === "agent" ? "agent" : "rules",
+    agent: parseAgentAccess(j.agent),
   };
+}
+
+export function parseAgentAccess(v: unknown): BotAgentAccess | null {
+  if (!isObj(v)) return null;
+  const id = typeof v.token_id === "string" && /^[0-9a-f]{8}$/.test(v.token_id) ? v.token_id : null;
+  return { connected: v.connected === true, token_id: id, issued_at_ms: numOrNull(v.issued_at_ms), expires_at_ms: numOrNull(v.expires_at_ms), last_used_ms: numOrNull(v.last_used_ms) };
 }
 
 const RANGE_LIST: readonly string[] = ["1h", "1d", "1w", "1m", "all"];
@@ -716,6 +815,7 @@ export function parseBotFill(x: unknown): BotFill | null {
     fee_usdc: dec(x.fee_usdc),
     fee_token: str(x.fee_token, "USDC", 20),
     realized_usdc: decOrNull(x.realized_usdc),
+    note: typeof x.note === "string" && x.note !== "" ? x.note.slice(0, 200) : null,
   };
 }
 
@@ -797,6 +897,15 @@ export async function archiveBot(token: string, id: string): Promise<{ bot: BotS
   const b = isObj(j) ? parseBotSummary(j.bot) : null;
   if (!b || !isObj(j)) throw new Error(t("trading.err.unexpectedBots"));
   return { bot: b, cancelled_orders: num(j.cancelled_orders) };
+}
+/**
+ * Owner: cuts an AI agent off (its token stops working at once). Toward safety only; a new token needs a fresh signature.
+ * `revoked: false` = there was no token.
+ */
+export async function revokeAgentToken(token: string, id: string): Promise<{ bot_id: string; revoked: boolean }> {
+  const j = await request(`${botPath(id)}/agent-token/revoke`, { method: "POST", token, body: {} });
+  if (!isObj(j) || j.bot_id !== id) throw new Error(t("trading.err.unexpectedBots"));
+  return { bot_id: id, revoked: j.revoked === true };
 }
 /** Stops one bot: its orders are cancelled and it halts; the other bots keep running. */
 export async function killBot(token: string, id: string, reason?: string): Promise<BotKillResult> {
