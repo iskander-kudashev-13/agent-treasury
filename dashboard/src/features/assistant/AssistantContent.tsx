@@ -9,6 +9,10 @@ import { useNow } from "@/lib/useNow";
 import type { ScheduleInput } from "@/lib/types";
 import { useAgents, useContractInfo, useRecipients, useSchedules } from "@/lib/useVault";
 import { useOwner } from "@/features/owner/OwnerProvider";
+import { useAssistantPanel } from "@/features/layout/AssistantContext";
+import { useTradingStatus } from "@/features/trading/useTrading";
+import { NETWORK } from "@/lib/config";
+import { buildTemplates, DEFAULT_HARD, hardLimitsOf, pickPair } from "@/lib/tradingGuide";
 import { RecipientDrawer } from "@/features/payments/RecipientDrawer";
 import { ScheduleDrawer, type PendingRecipient } from "@/features/payments/ScheduleDrawer";
 import { useOwnerTx } from "@/features/payments/useOwnerTx";
@@ -36,6 +40,15 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
   const [review, setReview] = useState(false);
   const [editing, setEditing] = useState<Editing>(null);
   const { items } = assistant;
+  // A chat about a trading agent starts from trading templates (they fill the input; the owner edits the numbers), not payroll ones.
+  const { tradingBot, openWith } = useAssistantPanel();
+  const { status: tradingStatus } = useTradingStatus();
+  const tradingTemplates = useMemo(() => {
+    if (tradingBot === null) return null;
+    const live = tradingStatus?.enabled ? tradingStatus : null;
+    const network = live?.hl_network ?? (NETWORK === "mainnet" ? "mainnet" : "testnet");
+    return buildTemplates(pickPair({ status: live, network }), hardLimitsOf(live) ?? DEFAULT_HARD);
+  }, [tradingBot, tradingStatus]);
 
   const pending: PendingRecipient[] = useMemo(
     () =>
@@ -128,11 +141,17 @@ export function AssistantContent({ assistant, inputRef }: { assistant: Assistant
           <Link to="/trading/guide#rules">{t("as.tradingHelp")}</Link>
         </p>
         <div className="flex flex-wrap gap-2">
-          {SUGGESTION_KEYS.map((k) => (
-            <SuggestionChip key={k} onClick={() => void assistant.send(t(k))}>
-              {t(k)}
-            </SuggestionChip>
-          ))}
+          {tradingTemplates
+            ? tradingTemplates.map((x) => (
+                <SuggestionChip key={x.id} onClick={() => openWith(x.prompt, tradingBot ?? undefined)}>
+                  {x.label}
+                </SuggestionChip>
+              ))
+            : SUGGESTION_KEYS.map((k) => (
+                <SuggestionChip key={k} onClick={() => void assistant.send(t(k))}>
+                  {t(k)}
+                </SuggestionChip>
+              ))}
         </div>
       </div>
     );
