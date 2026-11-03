@@ -13,14 +13,16 @@ want() { if [ "$2" = "$3" ]; then ok "$1 = $3"; else bad "$1: got '$2', expected
 
 offline() {
   echo "== offline: contract (cargo fmt, clippy, test)"
-  if (cd contract && cargo fmt --check && cargo clippy --all-targets -q -- -D warnings && cargo test -q 2>&1 | tee /tmp/at-contract-test.log | grep -q 'test result: ok'); then
-    ok "contract: $(grep -E '^test result' /tmp/at-contract-test.log | awk '{s+=$4} END {print s}') tests passed"
-  else bad "contract checks"; fi
+  local log; log=$(mktemp)
+  if (cd contract && cargo fmt --check && cargo clippy --all-targets -q -- -D warnings && cargo test -q >"$log" 2>&1) && ! grep -qE 'test result: FAILED' "$log"; then
+    ok "contract: $(grep -E '^test result' "$log" | awk '{s+=$4} END {print s}') tests passed"
+  else bad "contract checks (see $log)"; fi
   for p in sdk mcp worker dashboard; do
     echo "== offline: $p (install, typecheck, lint, test, build)"
-    if (cd "$p" && pnpm install --frozen-lockfile --silent && pnpm -s typecheck && pnpm -s lint && pnpm -s test 2>&1 | tee "/tmp/at-$p-test.log" | grep -qE 'Tests +[0-9]+ passed' && pnpm -s build >/dev/null); then
-      ok "$p: $(grep -oE 'Tests +[0-9]+ passed' "/tmp/at-$p-test.log" | tail -1)"
-    else bad "$p checks"; fi
+    log=$(mktemp)
+    if (cd "$p" && pnpm install --frozen-lockfile --silent && pnpm -s typecheck && pnpm -s lint && pnpm -s test >"$log" 2>&1 && pnpm -s build >/dev/null); then
+      ok "$p: $(grep -oE 'Tests +[0-9]+ passed' "$log" | tail -1)"
+    else bad "$p checks (see $log)"; fi
   done
 }
 
