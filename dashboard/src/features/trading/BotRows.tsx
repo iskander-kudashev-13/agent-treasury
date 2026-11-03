@@ -6,6 +6,7 @@ import type { BotState, BotSummary } from "@/lib/tradingClient";
 import { fmtMoneySigned, sparkNumbers } from "@/lib/tradingMetrics";
 import { botPath, TRADING_CONNECT_PATH } from "@/lib/agentKind";
 import { useBots } from "./useBots";
+import { useTradingStatus } from "./useTrading";
 
 const PILL: Record<BotState, AgentState> = { running: "active", stopped_today: "paused", halted: "paused", blocked: "paused", draft: "waiting", archived: "ended" };
 
@@ -36,7 +37,12 @@ export function useTradingRows() {
   const load = useBots();
   const bots = (load.data?.bots ?? []).filter((b) => b.state !== "archived");
   const active = WORKER_URL !== "";
-  return { bots, loading: active && load.loading, showConnect: active && !load.loading && bots.length === 0, active, error: load.error };
+  const { status } = useTradingStatus();
+  // "Connect Hyperliquid" only while the account is not ready (no API wallet approved yet). With no bots but a ready
+  // account, the owner goes straight to the strategy wizard instead of the setup page.
+  const live = status?.enabled ? status : null;
+  const ready = live !== null && live.api_wallet.approved && live.state !== "not_configured" && live.state !== "awaiting_api_wallet";
+  return { bots, loading: active && load.loading, showConnect: active && !load.loading && bots.length === 0 && !ready, active, error: load.error };
 }
 
 /** One trading agent in the Agents list (list -> detail, ADR-0006 §9). */
