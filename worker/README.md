@@ -181,6 +181,26 @@ Sign-in (owner only, NEP-413; the dashboard does this with the wallet's `signMes
 
 Known limitations (v1): batches that depend on each other (new recipient + schedule + mandate change) are only linked within one assistant turn, because proposals are not part of the history the browser sends back; the NEAR AI attestation is fetched, not verified, by the worker; behind a proxy set `AI_TRUST_PROXY=true` or rate limits key on the socket address; sessions and challenges are in memory (a restart signs everyone out); unit tests use a scripted fake model; the live API was used on 2026-11-03 for the trading-rules chat on HL testnet (NEAR AI refused a tool schema with a `\p{}` regex, HTTP 400, so tool schemas are now provider-safe).
 
+## AI-agent trading bots (`/trading/agent/*`, optional, ADR-0007)
+
+A second kind of trading bot: an external AI agent (e.g. Claude Code over the MCP server in `../mcp`) decides spot orders, and every
+order goes through the SAME engine path as a rule-based order (`attempt()` in `src/trading/engine/tick.ts`), after every account
+gate of the same tick. Off by default (`TRADING_AGENT_ENABLED=false`); with it off the agent routes are not mounted and agent
+mandates are refused at challenge (`409 AGENT_TRADING_DISABLED`).
+
+- The owner signs the bot's limits once: a `RuleSetV1` with `mode: "agent"` and `rules: []`, NEP-413 message v3
+  ("Agent Treasury: activate AI agent trading limits", with a `mode: agent` line). The assistant can never produce this mode.
+- Each confirm of an agent mandate (create, Resume = re-sign the same hash, new limits) returns `agent_token` ONCE
+  (`atk1_<bot>_<43 base64url>`). Only sha256 is stored (`bots.json`), the previous token dies with that commit. Owner revoke:
+  `POST /trading/bots/:id/agent-token/revoke`; archive revokes too. Stop blocks orders (`BOT_HALTED`) until a re-sign.
+- `GET /trading/agent/state` (no HL call) and `POST /trading/agent/order` (`{pair, side, usdc | position_pct, reason, idempotency_key}`,
+  2 KB max, one request in flight per bot, `TRADING_AGENT_MIN_ORDER_INTERVAL_SEC` between requests, in-memory idempotency cache).
+  A gate refusal is a 200 `{status: "rejected", code, final}`; only `TRANSIENT` codes have `final: false`.
+- The agent's `reason` is sanitised to plain text for the owner (log, journal `note`); it is never returned to the agent and never
+  put into an LLM prompt. The worker never logs the Authorization header.
+- Env: `TRADING_AGENT_ENABLED`, `TRADING_AGENT_MAX_ORDERS_PER_DAY` (10), `TRADING_AGENT_MIN_ORDER_INTERVAL_SEC` (10),
+  `TRADING_AGENT_TOKEN_TTL_HOURS` (72). Drill and curl commands: `../docs/commands.md` ("AI-agent trading bot drill").
+
 ## Files
 
 | File | Purpose |
