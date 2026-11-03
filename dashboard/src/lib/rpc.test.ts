@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { backoffMs, isRetryable, view } from "./rpc";
+import { backoffMs, isRetryable, pickEndpoint, resetCooldowns, view } from "./rpc";
 
 const ok = (v: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: "x", result: { result: [...new TextEncoder().encode(JSON.stringify(v))] } }), { status: 200 });
 
@@ -16,6 +16,7 @@ describe("rpc view retries", () => {
   });
 
   it("moves to the next endpoint after a 429 and returns the value", async () => {
+    resetCooldowns();
     vi.useFakeTimers();
     const seen: string[] = [];
     const f = vi.fn(async (url: string) => {
@@ -37,5 +38,18 @@ describe("rpc view retries", () => {
     await expect(view("x", {}, "vault.near", ["https://a", "https://b"])).rejects.toThrow("panicked");
     expect(f).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
+  });
+
+  it("skips an endpoint that rate-limited us until its cooldown ends", async () => {
+    resetCooldowns();
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => (url === "https://a" ? new Response("rate", { status: 429 }) : ok(1))));
+    const p = view("x", {}, "vault.near", ["https://a", "https://b"]);
+    await vi.runAllTimersAsync();
+    await p;
+    expect(pickEndpoint(["https://a", "https://b"], 0)).toBe("https://b");
+    expect(pickEndpoint(["https://a", "https://b"], 0, Date.now() + 31_000)).toBe("https://a");
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 });

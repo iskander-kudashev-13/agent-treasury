@@ -29,6 +29,18 @@ async function slot<T>(fn: () => Promise<T>): Promise<T> {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ATTEMPTS = 4;
 
+/** An endpoint that rate-limited us is skipped for a while, so a page's views go to the fallback instead of hammering it. */
+const COOLDOWN_MS = 30_000;
+const coolUntil = new Map<string, number>();
+const markLimited = (url: string, now = Date.now()) => coolUntil.set(url, now + COOLDOWN_MS);
+/** The endpoint for attempt `n`: rotate, but prefer ones not cooling down (all cooling = plain rotation). */
+export function pickEndpoint(urls: readonly string[], attempt: number, now = Date.now()): string {
+  const ready = urls.filter((u) => (coolUntil.get(u) ?? 0) <= now);
+  const pool = ready.length > 0 ? ready : urls;
+  return pool[attempt % pool.length]!;
+}
+export const resetCooldowns = () => coolUntil.clear();
+
 /**
  * POST a JSON-RPC body with the same endpoint rotation, concurrency cap and backoff as `view`. Returns the parsed JSON of the
  * first non-retryable answer (callers interpret `result` / `error` themselves).
@@ -40,7 +52,9 @@ export async function rpcPost<T>(body: unknown, urls: readonly string[] = RPC_UR
     if (attempt > 0) await sleep(backoffMs(attempt));
     let res: Response;
     try {
-      res = await slot(() => fetch(urls[attempt % urls.length]!, { method: "POST", headers: { "content-type": "application/json" }, body: text }));
+      const url = pickEndpoint(urls, attempt);
+      res = await slot(() => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: text }));
+      if (res.status === 429) markLimited(url);
     } catch (e) {
       last = e instanceof Error ? e : new Error(String(e));
       continue;
@@ -71,10 +85,11 @@ export async function view<T>(method: string, args: Record<string, unknown> = {}
   let last: Error = new Error(t("net.rpcError"));
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(backoffMs(attempt));
-    const url = urls[attempt % urls.length]!;
+    const url = pickEndpoint(urls, attempt);
     let res: Response;
     try {
       res = await slot(() => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body }));
+      if (res.status === 429) markLimited(url);
     } catch (e) {
       last = e instanceof Error ? e : new Error(String(e));
       continue;
@@ -87,7 +102,10 @@ export async function view<T>(method: string, args: Record<string, unknown> = {}
     const json = (await res.json()) as { result?: { result?: number[]; error?: string }; error?: { code?: number; data?: unknown; message?: string } };
     if (json.error) {
       last = new Error(String(json.error.data ?? json.error.message ?? t("net.rpcError")));
-      if (isRetryable(200, json.error.code)) continue;
+      if (isRetryable(200, json.error.code)) {
+        markLimited(url);
+        continue;
+      }
       throw last;
     }
     if (json.result?.error) throw new Error(json.result.error);
