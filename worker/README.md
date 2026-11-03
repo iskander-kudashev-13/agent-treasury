@@ -159,7 +159,8 @@ Inference runs on NEAR AI Cloud (OpenAI-compatible, `NEARAI_BASE_URL`), the key 
 # worker/.env
 NEARAI_API_KEY=...                 # from https://cloud.near.ai (never commit)
 AI_SESSION_SECRET=$(openssl rand -hex 32)   # required: without it the /ai routes are NOT mounted (a warning is logged)
-NEARAI_MODEL=z-ai/glm-5.3-flash    # default; must support tools. owned_by "nearai" in GET /v1/models = confidential TEE
+NEARAI_MODEL=Qwen/Qwen3.6-35B-A3B-FP8   # default; must support tools. owned_by "nearai" in GET /v1/models = confidential TEE
+                                   # ~10 s per tool call vs ~85 s for z-ai/glm-5.3-flash (measured 2026-11-03)
 pnpm dev
 curl -s localhost:3000/ai/info     # -> { model, provider: "NEAR AI Cloud", private, tier, attestation }
 ```
@@ -178,7 +179,7 @@ Sign-in (owner only, NEP-413; the dashboard does this with the wallet's `signMes
 - Addresses in `AddRecipient` must appear in the owner's own messages; text from chain data (names, memos, rejection details) reaches the model only as `untrusted_*` fields.
 - `/ai/info` fetches the NEAR AI attestation report (needs the key) but does NOT verify the TDX/NVIDIA evidence: `attestation.status` is `fetched_unverified`; verify at https://cloud.near.ai/verify.
 
-Known limitations (v1): batches that depend on each other (new recipient + schedule + mandate change) are only linked within one assistant turn, because proposals are not part of the history the browser sends back; the NEAR AI attestation is fetched, not verified, by the worker; behind a proxy set `AI_TRUST_PROXY=true` or rate limits key on the socket address; sessions and challenges are in memory (a restart signs everyone out); model behaviour with real tool calls has only been tested against a scripted fake.
+Known limitations (v1): batches that depend on each other (new recipient + schedule + mandate change) are only linked within one assistant turn, because proposals are not part of the history the browser sends back; the NEAR AI attestation is fetched, not verified, by the worker; behind a proxy set `AI_TRUST_PROXY=true` or rate limits key on the socket address; sessions and challenges are in memory (a restart signs everyone out); unit tests use a scripted fake model; the live API was used on 2026-11-03 for the trading-rules chat on HL testnet (NEAR AI refused a tool schema with a `\p{}` regex, HTTP 400, so tool schemas are now provider-safe).
 
 ## Files
 

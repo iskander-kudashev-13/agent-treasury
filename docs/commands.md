@@ -34,9 +34,9 @@ cargo test                            # unit tests on host (stable rustc)
 ```bash
 cd dashboard
 pnpm install                       # pnpm 11; pnpm-workspace.yaml sets allowBuilds: unrs-resolver: false
-cp .env.example .env.local         # set VITE_VAULT_CONTRACT_ID
+cp .env.example .env.local         # set VITE_VAULT_CONTRACT (legacy name VITE_VAULT_CONTRACT_ID still read)
 pnpm typecheck && pnpm lint && pnpm test
-VITE_VAULT_CONTRACT_ID=vault.example.testnet pnpm build
+VITE_VAULT_CONTRACT=vault.example.testnet pnpm build
 pnpm dev                           # http://localhost:5173
 ```
 
@@ -199,53 +199,88 @@ pnpm exec vitest run test/trading          # trading tests only: fake HL, fake S
 curl -s https://api.hyperliquid.xyz/info -H 'Content-Type: application/json' -d '{"type":"extraAgents","user":"<HL_MASTER_0x>"}'
 curl -s https://api.hyperliquid.xyz/info -H 'Content-Type: application/json' -d '{"type":"spotClearinghouseState","user":"<HL_MASTER_0x>"}'
 curl -s https://api.hyperliquid.xyz/info -H 'Content-Type: application/json' -d '{"type":"openOrders","user":"<HL_MASTER_0x>"}'
-curl -s localhost:3000/trading/status | jq '{state, state_reason, api_wallet, pnl, vault: .limits.vault, dead_man}'
+curl -s localhost:3000/trading/status | jq '{state, state_reason, api_wallet, pnl, vault: .limits.vault, dead_man, bots}'
+curl -s localhost:3000/trading/bots | jq                 # public bot list: id, name, state (P&L needs the owner token)
 ```
 
-## Trading testnet drills (ADR-0005 test plan §2, audit 2026-11-03 M4)
+Operator reset of the fill sums (ADR-0005 H4, after a long downtime left `COST_BASIS_PARTIAL`): stop the worker, then set
+`account.fillCursor` to `null` in `TRADING_STATE_DIR/engine-state.json` (state v2; there is no `fills` key any more) and
+start it again; the next tick rebuilds the sums from scratch.
+
+```bash
+jq '.account.fillCursor = null' worker/.trading-testnet/engine-state.json > /tmp/es.json && mv /tmp/es.json worker/.trading-testnet/engine-state.json
+```
+
+## Trading testnet drills (ADR-0005 test plan §2, ADR-0006 test plan §11, audit 2026-11-03 M4 / multi-bot MM3)
 
 Run these before the mainnet session, or write down here why they were skipped. Nothing here touches mainnet.
 
 Known limits of HL testnet (from `docs/research/hyperliquid-trading.md`):
 - The faucet (https://app.hyperliquid-testnet.xyz/drip, 1,000 mock USDC) pays only an address that has already deposited
   on **mainnet**. So the HL master needs its mainnet activation deposit first.
-- Testnet HYPE/USDC (`@1035`) had mid 9777.5, bid 8200, ask 11355 when tested: the spread gate skips every tick. To see
-  orders, put a testnet pair with a sane book in `TRADING_ALLOWED_PAIRS` and lower `TRADING_MIN_PAIR_VOLUME_USDC`. Which
-  pair works was not checked. The kill, pause, `kill -9` and perp drills also work without fills.
+- Testnet HYPE/USDC (`@1035`) had mid 9777.5, bid 8200, ask 11355 when tested: the spread gate skips every tick.
+  PURR/USDC (index 0, `szDecimals 0`) filled on 2026-11-03; its 24 h volume was about 21,600 USDC, so lower
+  `TRADING_MIN_PAIR_VOLUME_USDC` (default 1,000,000) below that.
+- PURR sizes round to whole coins: 12 USDC at ≈ 4.6 is 2 PURR = 9.25 USDC, below HL's 10 USDC minimum. The rules card
+  warns `ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE`; use 14 USDC or more.
+- A fresh account has no dead-man switch: `scheduleCancel` needs $1M traded volume. Expect
+  `dead_man: {"cancel_at_ms": null, "available": false, "reason": "DEADMAN_VOLUME_GATED"}` and IOC-only orders.
 - `ONECLICK_MODE=simulated`: top-ups move testnet USDC on NEAR only. Nothing reaches HL testnet.
 
-Setup (sends testnet transactions from your own accounts):
+Setup (sends testnet transactions from your own accounts). The author used the trading vault
+`at-trade-11030006.testnet` (section "Testnet trading vault" below), never the judging vault `at-vault-11012309.testnet`:
 
 ```bash
-# 1. hl-trader key agent on the testnet vault. Copy sdk/examples/mandate.hl-trader.json to /tmp and put the HL master in allowlist[0].address
+# 1. hl-trader key agent on the trading vault. Copy sdk/examples/mandate.hl-trader.json to /tmp and put the HL master in allowlist[0].address
 cd sdk
 OWNER_PRIVATE_KEY=$(jq -r .private_key ~/.near-credentials/testnet/at-owner-11012309.testnet.json) \
-  pnpm setup-key-agent --owner at-owner-11012309.testnet --vault at-vault-11012309.testnet \
+  pnpm setup-key-agent --owner at-owner-11012309.testnet --vault at-trade-11030006.testnet \
   --name hl-trader --mandate /tmp/mandate.hl-trader.testnet.json
 # → prints TREASURY_AGENT_ACCOUNT=hl-trader.at-owner-11012309.testnet and TREASURY_AGENT_PRIVATE_KEY=ed25519:… (once)
 
-# 2. worker/.env (on top of the payroll testnet settings in "Testnet e2e run, part 1"):
-#   NEAR_NETWORK=testnet  VAULT_CONTRACT_ID=at-vault-11012309.testnet  RUN_MODE=local  ONECLICK_MODE=simulated  DRY_RUN=true
+# 2. worker/.env:
+#   NEAR_NETWORK=testnet  VAULT_CONTRACT_ID=at-trade-11030006.testnet  RUN_MODE=local  ONECLICK_MODE=simulated  DRY_RUN=true
 #   AI_SESSION_SECRET=<openssl rand -hex 32>  NEARAI_API_KEY=<key>  DASHBOARD_ORIGIN=http://localhost:5173
+#   (NEARAI_MODEL defaults to Qwen/Qwen3.6-35B-A3B-FP8: ~10 s per tool call; z-ai/glm-5.3-flash took ~85 s, 2026-11-03)
 #   TRADING_ENABLED=true  HL_NETWORK=testnet  HL_MASTER_ADDRESS=<HL_MASTER_0x>  TRADING_STATE_DIR=./.trading-testnet
 #   TRADER_NEAR_ACCOUNT_ID=hl-trader.at-owner-11012309.testnet  TRADER_NEAR_PRIVATE_KEY=<TREASURY_AGENT_PRIVATE_KEY from step 1>
+#   TRADING_ALLOWED_PAIRS=PURR/USDC  TRADING_MIN_PAIR_VOLUME_USDC=1000  TRADING_MAX_BOTS=2
 cd ../worker && pnpm build && node dist/index.js
 # → "TRADING ENABLED: hl=testnet account=<HL_MASTER_0x> agent=hl-trader api-wallet=0x…"
 
 # 3. approve that api-wallet address on https://app.hyperliquid-testnet.xyz → API, name "agent-treasury valid_until <ms>"
-# 4. dashboard (path C of README.md) with VITE_WORKER_URL=http://localhost:3000 VITE_AI_ENABLED=true → #/trading
-# 5. chat: an "interval 1h" DCA of 10–12 USDC plus one price_change rule → card → Review & sign rules → wallet
+#    (typed exactly; otherwise HL uses 180 days)
+# 4. dashboard (path C of README.md) with VITE_VAULT_CONTRACT=at-trade-11030006.testnet VITE_WORKER_URL=http://localhost:3000
+#    VITE_AI_ENABLED=true → #/trading/connect shows the account; bots are listed in Agents (#/agents?kind=trading)
+# 5. Agents → New strategy → chat: an "interval 1h" DCA of 14 USDC plus one price_change rule → card → "Create new agent"
+#    → Review & sign rules → wallet. Create the second bot only after the first appears in the list (reload it).
+
+# Owner-session reads (detail, fills, metrics need the token). In the dashboard tab, browser console:
+#   JSON.parse(sessionStorage.getItem("at.ai.session")).token   → TOKEN (valid 1 h)
+curl -s localhost:3000/trading/bots | jq                                        # public: id, name, state
+curl -s localhost:3000/trading/bots/<BOT_ID> -H "Authorization: Bearer $TOKEN" | jq '{state: .bot.state, hash: .rules.hash, open_orders}'
+curl -s https://api.hyperliquid-testnet.xyz/info -H 'Content-Type: application/json' -d '{"type":"openOrders","user":"<HL_MASTER_0x>"}' | jq '[.[].cloid]'
 ```
+
+Session procedure (multi-bot audit MM1/MM2 workaround, `docs/security/audit-2026-11-03-multibot.md`). The code fixes are in
+`7b8bc51` (confirm refuses `BOT_ID_TAKEN` and `KILLED_SINCE_CHALLENGE`; the dashboard disables cards created before a
+Stop); they are unit-tested but not exercised live, so keep the procedure:
+- create bots one at a time and reload the bot list after each confirm; never keep two unsigned "new strategy" cards open
+  (MM1: before the fix, a second "new" confirm for the same id replaced the first bot's rules);
+- after any Stop (one bot or all), discard every open rules card, do not sign it, and restart the worker before resuming
+  (MM2: before the fix, a confirm that landed after a kill resumed trading; a restart drops pending challenges).
 
 Drills (expected results; fill in the "observed" column when run):
 
 | # | Drill | Command / action | Expected | Observed |
 |---|---|---|---|---|
-| 1 | 12 h run | leave the worker running | `/trading/status` `state: "running"`, `last_tick_ms` advances every `TRADING_TICK_SEC`, `dead_man.cancel_at_ms` ≈ now + 180 s, `log.jsonl` has `order` or `skip` entries | not run yet |
-| 2 | Kill switch | dashboard → Trading → Stop trading | `POST /trading/kill` → `{"state":"halted",…,"steps":{"cancel_all":"ok","schedule_cancel":"ok"}}`; then the wallet asks for `pause_agent`; `openOrders` = `[]` within one tick; no new orders | not run yet |
-| 3 | `pause_agent` | `near contract call-function as-transaction at-vault-11012309.testnet pause_agent json-args '{"agent_id":"hl-trader"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as at-owner-11012309.testnet network-config testnet sign-with-legacy-keychain send` | next tick: `state: "paused_onchain"`, orders cancelled; after `resume_agent` (1 yoctoNEAR) the state returns to `running` | not run yet |
-| 4 | `kill -9` | `kill -9 $(pgrep -f 'node dist/index.js')` | resting orders gone within `TRADING_DEADMAN_SEC` (`openOrders` = `[]`); after restart the state, rules and log are reloaded from `TRADING_STATE_DIR` | not run yet |
-| 5 | Manual perp | open a tiny perp on the master in the HL testnet UI | next tick: `state: "halted"`, `state_reason: "PERP_POSITION_DETECTED"`, spot orders cancelled; the perp stays open (close it by hand); halted stays after a restart | not run yet |
+| 1 | 12 h run | leave the worker running | `/trading/status` `state: "running"`, `last_tick_ms` advances every `TRADING_TICK_SEC`; on a fresh account `dead_man.available: false` (IOC-only); `log.jsonl` has `order` or `skip` entries | partial, 2026-11-03 on `at-trade-11030006.testnet`: IOC buy 3 PURR @ 4.5795 (`cloid 0xbb49a14c0945f933…0001`), later sell 4 @ 4.5342 and buy 3 @ 4.5795 by bot `default`; `scheduleCancel` refused for volume → IOC-only. 12 h duration not recorded |
+| 2 | Kill all | dashboard `#/trading/connect` → **Stop trading** | `POST /trading/kill` → `{"state":"halted",…,"steps":{"cancel_all":"ok","schedule_cancel":"ok" or "failed",…}}` (`failed` is expected and harmless on a volume-gated account); every bot `halted`; then the wallet asks for `pause_agent`; `openOrders` = `[]`; no new orders | not run yet |
+| 3 | Per-bot stop | bot A page `#/trading/bots/<A>` → **Stop** (needs two running bots, drill 6) | `POST /trading/bots/A/kill` → `{"bot_id":"A","state":"halted",…}`; A `halted`, B still `running` and still places orders; `openOrders` shows no cloid with A's prefix; no `pause_agent` prompt (top-ups stay allowed) | not run yet |
+| 4 | `pause_agent` | `near contract call-function as-transaction at-trade-11030006.testnet pause_agent json-args '{"agent_id":"hl-trader"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as at-owner-11012309.testnet network-config testnet sign-with-legacy-keychain send` | next tick: `state: "paused_onchain"`, every bot blocked, orders cancelled; after `resume_agent` (1 yoctoNEAR) the state returns to `running` | not run yet |
+| 5 | `kill -9` | `kill -9 $(pgrep -f 'node dist/index.js')` | IOC-only: no bot order rests, `openOrders` = `[]` already; with a working dead-man switch resting orders are gone within `TRADING_DEADMAN_SEC`. After restart the state, bots, rules and log are reloaded from `TRADING_STATE_DIR` | not run yet |
+| 6 | Two bots ≥ 6 h (ADR-0006 §11) | two bots on PURR/USDC (e.g. DCA + dip buyer), created one at a time | both `running`; each bot's fills only under its own prefix; a bot never sells more than its own fills bought (`INSUFFICIENT_BOT_BASE` otherwise); account caps bind on the sum; `bots/<id>/fills.jsonl` matches HL `userFillsByTime` for that prefix | not run yet |
+| 7 | Manual perp | open a tiny perp on the master in the HL testnet UI | next tick: account and every bot `halted`, `state_reason: "PERP_POSITION_DETECTED"`, spot orders cancelled; the perp stays open (close it by hand); halted stays after a restart | not run yet |
 
 ## [MAINNET] Trading session runbook
 
@@ -253,7 +288,16 @@ Every command below uses mainnet. **Nothing here has been run yet.** Steps marke
 transaction or spend money: run each one only after the owner has confirmed that exact command. Limits come from the
 session decision in `docs/adr/0005-hyperliquid-trading-agent.md` (audit 2026-11-03 H1): vault funded with ≤ 26 USDC,
 vault and mandate daily limit 25, one top-up per day, `approval_threshold` 0, agent expiry and API-wallet `valid_until`
-≤ 48 h, everything revoked afterwards. Worst case: about 26 USDC.
+≤ 48 h, at most 2 bots (multi-bot audit MM3), everything revoked afterwards. Worst case: about 26 USDC; more bots do not
+raise it, because the `TRADING_HARD_*` caps are account totals.
+
+Session procedure (multi-bot audit MM1/MM2 workaround, `docs/security/audit-2026-11-03-multibot.md`). The code fixes are in
+`7b8bc51` (confirm refuses `BOT_ID_TAKEN` and `KILLED_SINCE_CHALLENGE`; the dashboard disables cards created before a
+Stop); they are unit-tested but not exercised live, so keep the procedure:
+- create bots one at a time; after each confirm reload the bot list and check it shows exactly the bots you meant;
+  never keep two unsigned "new strategy" cards open;
+- after any Stop (one bot or kill all), discard every open rules card, do not sign it, and restart the worker (step 8)
+  before resuming.
 
 Placeholders: `<OWNER>.near` (owner account), `<VAULT>.near` (vault account; a sub-account of the owner such as
 `vault.<OWNER>.near` can be created by the owner with `fund-myself`), `<HL_MASTER_0x>` (the dedicated HL master,
@@ -390,6 +434,7 @@ TRADER_AGENT_ID=hl-trader
 TRADER_NEAR_ACCOUNT_ID=hl-trader.<OWNER>.near
 TRADER_NEAR_PRIVATE_KEY=<TREASURY_AGENT_PRIVATE_KEY from step 6>
 TRADING_ALLOWED_PAIRS=HYPE/USDC
+TRADING_MAX_BOTS=2                   # default 3; this session plans one or two bots (audit MM3)
 TRADING_HARD_MAX_POSITION_USDC=25
 TRADING_HARD_MAX_ORDER_USDC=12
 TRADING_HARD_DAILY_LOSS_USDC=5
@@ -412,7 +457,12 @@ pgrep -fl 'node dist/index.js'                 # exactly one process on this sta
 lsof -nP -iTCP:3000 -sTCP:LISTEN               # expect 127.0.0.1:3000 (default HOST=127.0.0.1, audit L5); if it shows *:3000, HOST is set wrong
 ```
 Dashboard against mainnet (new terminal): `cd dashboard && VITE_NEAR_NETWORK=mainnet VITE_VAULT_CONTRACT=<VAULT>.near VITE_USDC_CONTRACT=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1 VITE_WORKER_URL=http://localhost:3000 VITE_AI_ENABLED=true pnpm dev`
-(leave `VITE_ONECLICK_MODE` unset) → http://localhost:5173/#/trading, connect the owner wallet.
+(leave `VITE_ONECLICK_MODE` unset) → http://localhost:5173/#/trading/connect ("Connect Hyperliquid"), connect the owner
+wallet. Bots appear in Agents (`#/agents?kind=trading`); each bot has its page `#/trading/bots/<id>`.
+
+Owner-session token for the `curl` checks below (detail, fills and metrics need it): in the dashboard tab, after signing in
+to the assistant, run `JSON.parse(sessionStorage.getItem("at.ai.session")).token` in the browser console and
+`export TOKEN=<value>` (valid 1 h).
 
 **9. Approve the API wallet on Hyperliquid.** ⚠ needs owner OK (the master EVM key signs `approveAgent`).
 - Compute the expiry: `echo $(( ($(date +%s) + 47*3600) * 1000 ))`. Use min(mandate `expires_at`, now + 47 h): the API wallet must not outlive the agent mandate nor exceed 47 h.
@@ -451,16 +501,29 @@ Dashboard against mainnet (new terminal): `cd dashboard && VITE_NEAR_NETWORK=mai
 - `get_payout` for that payout → `Confirmed`.
 
 **12. Confirm rules in chat.** ⚠ needs owner OK (NEP-413 signature that lets the bot trade real money).
-- Assistant panel, for example: "Buy HYPE for 12 USDC every 4 hours. Never hold more than 25 USDC. Stop if I lose
-  5 USDC today. At most 2 orders a day." Every USDC order size must be ≥ 11: HL needs 10 and sizes round down.
-- Check the card: it is rendered by the dashboard, with a hash computed in the dashboard. Then Review & sign rules,
-  and the wallet signs.
-- Expect `/trading/status` → `state: "running"` and `active_rules.confirmed_by: "<OWNER>.near"`.
+- Agents → **New strategy** (or `#/trading/connect` once connected). In the assistant panel, for example: "Buy HYPE for
+  12 USDC every 4 hours. Never hold more than 25 USDC. Stop if I lose 5 USDC today. At most 2 orders a day." Every USDC
+  order size must be ≥ 11: HL needs 10 and sizes round down to the pair's lot size. If the card shows the warning
+  `ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE`, raise the size before signing.
+- Check the card: it is rendered by the dashboard, with a hash computed in the dashboard, and names the target. Pick
+  **Create new agent** (a fresh state dir has no bot yet). Then Review & sign rules, and the wallet signs the v2 message
+  (`bot: <id>` line).
+- Expect, with `<BOT_ID>` the id shown in the bot list (a slug of the name, not `default`):
+  - `curl -s localhost:3000/trading/bots | jq` → that bot with `"state": "running"`;
+  - `curl -s localhost:3000/trading/bots/<BOT_ID> -H "Authorization: Bearer $TOKEN" | jq '{state: .bot.state, hash: .rules.hash, by: .rules.account_id}'`
+    → `running`, the card's hash, `<OWNER>.near`.
+  - Do **not** use `/trading/status` `active_rules` for this check: it is filled only for a bot with id `default` and
+    stays `null` on a fresh state dir (deprecated field, ADR-0006).
+- `/trading/status` → `dead_man.available` is `false` with `reason: "DEADMAN_VOLUME_GATED"` on an account with less than
+  $1M traded volume: the engine places IOC orders only. That is expected.
+- A second bot, if planned: only after the first shows in the list (session procedure above).
 
 **13. Observe one trade.** An `interval` rule fires at confirm time.
-- `/trading/status` → `limits.today.orders: 1` and a position in `balances.positions`.
+- `curl -s localhost:3000/trading/bots/<BOT_ID> -H "Authorization: Bearer $TOKEN" | jq '{today, positions}'` →
+  `today.orders: 1` and a position.
 - `curl -s https://api.hyperliquid.xyz/info -H 'Content-Type: application/json' -d '{"type":"userFills","user":"<HL_MASTER_0x>"}' | jq '.[0] | {coin, side, px, sz, cloid}'`
-  → `coin: "@107"`. `cloid` starts with `0x` + the first 16 hex characters of `active_rules.hash`.
+  → `coin: "@107"`. `cloid` starts with `0x` + the first 16 hex characters of that bot's `rules.hash` (step 12).
+- The bot page shows the fill in the trades table and a buy marker on the price chart.
 
 **14. Drills** (order chosen so the kill switch comes last, right before teardown):
 1. `pause_agent`. Needs no deposit, but signs a mainnet tx: ⚠ needs owner OK.
@@ -469,17 +532,23 @@ Dashboard against mainnet (new terminal): `cd dashboard && VITE_NEAR_NETWORK=mai
    `near contract call-function as-transaction $VAULT resume_agent json-args '{"agent_id":"hl-trader"}' prepaid-gas '30.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $OWNER network-config mainnet sign-with-legacy-keychain send`
    → `state: "running"`.
 2. `kill -9` and restart.
-   - `kill -9 $(pgrep -f 'node dist/index.js')`, wait `TRADING_DEADMAN_SEC` (180 s).
-   - `openOrders` for the master → `[]`. Positions stay.
-   - Restart with `node dist/index.js` (step 8). State, rules and log reload from `./.trading-mainnet`.
-3. Kill switch. Dashboard → Trading → Stop trading.
-   - Expect `{"state":"halted",…,"steps":{"cancel_all":"ok","schedule_cancel":"ok"}}`.
+   - `kill -9 $(pgrep -f 'node dist/index.js')`. In IOC-only mode (step 12) no bot order rests, so `openOrders` for the
+     master is already `[]`; with a working dead-man switch wait `TRADING_DEADMAN_SEC` (180 s) first. Positions stay.
+   - Restart with `node dist/index.js` (step 8). State, bots, rules and log reload from `./.trading-mainnet`.
+3. Per-bot stop (only with two bots). Bot A page `#/trading/bots/<A>` → **Stop** → Stop now.
+   - Expect `{"bot_id":"<A>","state":"halted",…}`; bot A `halted`, bot B still `running`; `openOrders` shows no cloid with
+     A's prefix. There is no `pause_agent` prompt: this stops one bot only, and top-ups stay allowed.
+   - Then follow the session procedure: discard open rules cards, restart the worker before resuming anything.
+4. Kill all. `#/trading/connect` → **Stop trading** (the account kill switch; the **Stop** on a bot page is not enough).
+   - Expect `{"state":"halted",…,"steps":{"cancel_all":"ok","schedule_cancel":…,"state_saved":"ok",…}}`.
+     `schedule_cancel` is `"failed"` on a volume-gated account; that is harmless because every order was cancelled directly.
+   - Every bot `halted` in the list.
    - Then the wallet asks for `pause_agent`: ⚠ needs owner OK.
    - Within one tick: no new orders, `openOrders` = `[]`.
 
 **15. Teardown.**
 0. Stop the worker (Ctrl-C or `kill $(pgrep -f 'node dist/index.js')`; it releases the state-dir lock on SIGINT/SIGTERM) before deleting `api-wallet.json` or the trader key lines in `worker/.env`.
-1. Kill switch (done in drill 3; run it now if it was skipped).
+1. Kill all on `#/trading/connect` (done in drill 4; run it now if it was skipped).
 2. Revoke `hl-trader`: `revoke_agent` (1 yoctoNEAR), then delete its function-call key. ⚠ needs owner OK.
    `cd sdk && OWNER_PRIVATE_KEY=$(jq -r .private_key ~/.near-credentials/mainnet/$OWNER.json) pnpm revoke-key-agent --owner $OWNER --vault $VAULT --agent-id hl-trader --public-key <TRADER_PUBLIC_KEY> --network mainnet --confirm-mainnet`
    (`<TRADER_PUBLIC_KEY>`: the `ed25519:` key the real run of step 6 printed on stderr, also the agent's `public_key` in `get_agents`; add `--dry-run` first)
@@ -532,3 +601,14 @@ near contract deploy at-trade-11030006.testnet use-file contract/target-wasm/nea
 cd sdk && pnpm setup-key-agent --owner at-owner-11012309.testnet --vault at-trade-11030006.testnet --name hl-trader \
   --agent-id hl-trader --display-name "HL trader" --mandate <mandate.json> --dry-run   # then without --dry-run, OWNER_PRIVATE_KEY set
 ```
+
+Live HL testnet session on this vault (2026-11-03, HL testnet account `0x072994…ab0d`, `TRADING_ALLOWED_PAIRS=PURR/USDC`,
+simulated 1Click, HL USDC from the HL faucet, rules typed in the assistant with the live NEAR AI API):
+- first bot order: IOC buy 3 PURR, limit 4.6252, filled at 4.5795; `cloid 0xbb49a14c0945f9330000000000000001`;
+  buy fee 0.0021 PURR (fee in the base token) → position 2.9979 PURR;
+- `scheduleCancel` refused: "Cannot set scheduled cancel time until enough volume traded. Required: $1000000" → IOC-only;
+- 12 USDC of PURR rounds to 2 PURR = 9.25 USDC < 10 USDC minimum → `ORDER_BELOW_HL_MIN_AT_CURRENT_PRICE` warning added;
+- after the multi-bot upgrade (state v1 → v2 migrated in place, checked on a copy first) bot `default` sold 4 PURR at
+  4.5342 and bought 3 PURR at 4.5795, both in `bots/default/fills.jsonl` with the rules-hash `cloid`;
+- a strategy typed in a plain chat replaced the `default` bot's rules → the card now requires "Update agent X" or
+  "Create new agent" (`ae64345`).

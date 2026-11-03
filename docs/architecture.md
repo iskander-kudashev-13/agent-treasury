@@ -1,7 +1,8 @@
 # Architecture
 
-Sources of truth: `docs/adr/0001`–`0005` (decisions and the exact contract interface; 0005 = Hyperliquid trading agent),
-`docs/security/audit-2026-11-01.md` and `docs/security/audit-2026-11-03-trading.md` (trust boundaries), `contract/src/payment.rs` (`evaluate_payment`, the check order below). This file summarises them.
+Sources of truth: `docs/adr/0001`–`0006` (decisions and the exact contract interface; 0005 = Hyperliquid trading agent,
+0006 = several trading bots on one HL account and per-bot dashboards), `docs/security/audit-2026-11-01.md`,
+`docs/security/audit-2026-11-03-trading.md` and `docs/security/audit-2026-11-03-multibot.md` (trust boundaries), `contract/src/payment.rs` (`evaluate_payment`, the check order below). This file summarises them.
 
 ## Components
 
@@ -19,11 +20,12 @@ flowchart LR
   vault[Vault contract\nNEAR, Rust] -- storage_deposit + ft_transfer --> usdc[USDC NEP-141]
   usdc --> deposit[1Click deposit account\n64-hex implicit]
   deposit -- NEAR Intents --> dest[Recipient on Base / Arb / Sol / NEAR]
-  trader[Trading module\nworker/src/trading, key agent hl-trader] -- request_payment hypercore + HL master\nfunction-call key --> vault
+  trader[Trading module\nworker/src/trading, key agent hl-trader\nbots 1..5, one HL account] -- request_payment hypercore + HL master\nfunction-call key --> vault
   trader -- quote, deposit/submit, status --> oneclick
   deposit -. NEAR Intents, hip1 USDC .-> hlmaster[Owner's HL master account]
-  trader -- order / cancel / scheduleCancel\nHL API wallet --> hlmaster
-  dash -- /trading/status, rules, kill --> trader
+  trader -- IOC order / cancel / scheduleCancel\nHL API wallet --> hlmaster
+  dash -- /trading/status, /trading/bots, rules, kill one / kill all --> trader
+  dash -. candleSnapshot, extraAgents: public HL info .-> hlmaster
   owner -. approveAgent / revoke, master EVM key .-> hlmaster
 ```
 
@@ -33,10 +35,10 @@ flowchart LR
 | Payroll worker | `worker/` | TEE agent `payroll` with a `Fixed` mandate. Every N minutes: `get_due` → 1Click quote → quote check → `request_payout` → `deposit/submit` → poll `/v0/status` → `report_payout_status`. HTTP API `/status`, `/runs`, optional `/ai/*` | Agent key generated inside the TEE (tee mode) or derived from `SPONSOR_PRIVATE_KEY` (local mode, insecure) |
 | SDK | `sdk/` | `getBudget`, `listAllowedRecipients`, `quotePayment`, `requestPayment`, `getPaymentStatus`; key-agent setup and revoke scripts | Uses the agent's function-call key passed in by the caller |
 | MCP server | `mcp/` | Five `treasury_*` tools over stdio, wraps the SDK | Function-call key in the MCP client's env |
-| Dashboard | `dashboard/` | Owner UI. Reads views over RPC; owner calls through wallet-selector; quote check before Approve | None; the wallet signs |
-| Trading module | `worker/src/trading/` (same process as the worker, off unless `TRADING_ENABLED=true`, local mode only) | Key agent `hl-trader` with an `Allowlist` mandate (`hypercore` + the owner's HL master). Tops up the master through 1Click when free HL USDC is below the floor. Runs owner-signed (NEP-413) `RuleSetV1` rules in a deterministic tick: perp alarm, dead-man `scheduleCancel`, loss stop, risk guard, at most 2 spot orders per tick. HTTP `/trading/*` (ADR-0005) | `hl-trader` function-call key in `worker/.env`; HL API-wallet key in `TRADING_STATE_DIR/api-wallet.json` (0600). Both plain files on the operator's host |
+| Dashboard | `dashboard/` | Owner UI, 4 tabs (Overview, Agents, Payments, Settings), onboarding, en/ru/uk. Reads views over RPC; owner calls through wallet-selector; quote check before Approve. Trading: bots in Agents, `#/trading/connect` (one-time HL setup, kill all), `#/trading/bots/:id` (P&L and price charts, metrics, rules, trades, Stop) | None; the wallet signs |
+| Trading module | `worker/src/trading/` (same process as the worker, off unless `TRADING_ENABLED=true`, local mode only) | Key agent `hl-trader` with an `Allowlist` mandate (`hypercore` + the owner's HL master). Tops up the master through 1Click when free HL USDC is below the floor. Runs 1..`TRADING_MAX_BOTS` (default 3, max 5) bots on the same HL account; each bot has its own owner-signed (NEP-413 v2 message with a `bot:` line) `RuleSetV1` and limits. One deterministic tick per account: account gates (perp alarm, freshness, API wallet, on-chain pause), `scheduleCancel` (IOC-only while HL volume-gates it below $1M traded), account loss stop and equity backstop, then each bot: own loss stop, own limits, then account caps (`TRADING_HARD_*` = totals), at most 2 spot orders per tick for the account. Bot attribution by permanent `cloid` prefix; a bot sells only coins its own fills bought. Per-bot P&L history, fills journal and metrics under `TRADING_STATE_DIR/bots/<id>/`. HTTP `/trading/*` (ADR-0005, ADR-0006 §8) | `hl-trader` function-call key in `worker/.env`; HL API-wallet key in `TRADING_STATE_DIR/api-wallet.json` (0600). Both plain files on the operator's host |
 | Hyperliquid | external | HL master account (owned by the owner's EVM key) holds the trading USDC and positions; the API wallet signs orders for it | — |
-| NEAR AI Cloud | external | Assistant inference for `/ai/chat`; output is proposals the owner signs | NEAR AI key in worker env only |
+| NEAR AI Cloud | external | Assistant inference for `/ai/chat`; output is proposals the owner signs. Default model `Qwen/Qwen3.6-35B-A3B-FP8` (NEAR-run TEE model; ~10 s per tool call vs ~85 s for `z-ai/glm-5.3-flash`, measured 2026-11-03) | NEAR AI key in worker env only |
 | 1Click | external, mainnet only | Quotes, deposit addresses, cross-chain delivery, refunds | — |
 
 Agent kinds (ADR-0003):
@@ -83,7 +85,7 @@ nothing is delivered cross-chain. The simulation refuses to run unless the RPC r
 
 Status reporting for Key agents' approved payouts: an MCP process usually exits after `pending_approval`, so an approved
 payout can stay `Sent`. An ADR-0002 amendment dated 2026-11-02 lets an attested TEE agent report Key agents' payouts;
-it is in the working tree and not deployed to the testnet vault.
+it is committed (`8d6c70a`) but not deployed to `at-vault-11012309.testnet`, which keeps the older wasm for judging.
 
 ## Check order in `request_payment`
 
@@ -132,6 +134,7 @@ From ADR-0002, ADR-0003 §11, ADR-0005 and the trust tables of both audits (2026
 | 1Click | return a deposit address that pays elsewhere; keep funds; mis-report status | pull funds from the vault | the payer's mandate; refunds go to `refundTo = vault` |
 | `hl-trader` NEAR key (leaked from `worker/.env` or the dashboard during setup) | send up to its limits to **any** NEAR account: the vault checks only the declared `hypercore` destination, and the deposit address can be any 64-hex account (audit 2026-11-03 H1) | call other methods, exceed the mandate, approve | per-tx, daily amount and count, expiry, vault daily limit. With `approval_threshold` 0 (first mainnet session), every top-up waits for the owner's approval, which comes after the dashboard's 1Click quote check |
 | HL API-wallet key (leak, or the local host) | lose or route away **everything on the HL master**: trade at any price (wash trades on thin books), leveraged perps incl. HIP-3 (not detected), spot↔perp moves, possibly `vaultTransfer` to an attacker's HL vault (not verified), deploy / priority-bid burns (audit H2) | `withdraw3`, `usdSend`, `spotSend`, `approveAgent` (user-signed, master key only) | only the amount the vault sent to HL; `valid_until`; owner revokes it on HL with the master key |
+| One bot's rules or the owner-intent flow (bad rule set, stale card) | trade inside its own limits; stale cards: the MM1/MM2 races (swap a bot's rules, undo a kill) are refused since `7b8bc51` (`BOT_ID_TAKEN`, `KILLED_SINCE_CHALLENGE`) | sell another bot's or hand-held coins, cancel another bot's orders, exceed the account caps | per-bot isolation inside one HL account: our code (cloid prefix map, fill-derived positions), not the HL protocol; account-wide `TRADING_HARD_*` totals |
 | Trading module host (local mode) | both of the above; skip its own hard limits, perp alarm and loss stop; replay older signed rule sets from the state dir | owner actions on NEAR or HL | vault mandate; HL balance |
 | Trading worker / `VITE_WORKER_URL` (wrong or stale) | show an attacker's API-wallet address for the owner to approve, or a wrong HL account (audit M7) | sign anything | owner compares the address with the worker console before approving |
 | NEAR AI model (trading) | propose aggressive rules inside the env hard limits | widen hard limits, change the funding size or destination, place orders | owner reviews the dashboard-rendered card and signs its hash |
@@ -147,7 +150,15 @@ Key facts behind the table:
   owner actions (`revoke_agent`, `unbind_agent`, `withdraw`, `approve_payout`, `update_contract`, …) need 1 yoctoNEAR.
 - The owner is never locked out: `withdraw` ignores pause and agent state; `force_settle_transfer` settles a payout whose
   callback never ran (after 1 h).
-- Trading kill switch: `POST /trading/kill` halts the bot (sticky until new rules are signed), cancels all orders and
-  sets the dead-man to now + 6 s. It works while NEAR RPC is down, if the owner session is still valid. Then the
-  dashboard calls `pause_agent`, which needs RPC and the wallet. Positions stay open. The authoritative stop is revoking
-  the API wallet on Hyperliquid. Full list of what the vault does not protect: `README.md`.
+- Trading kill switches:
+  - per bot, `POST /trading/bots/:id/kill` (bot page **Stop**): halts that bot and cancels only its orders; other bots
+    keep trading and top-ups stay allowed;
+  - kill all, `POST /trading/kill` (`#/trading/connect` **Stop trading**): halts the account and every bot (sticky until
+    each bot's rules are signed again), cancels all orders and sets the dead-man to now + 6 s. On a volume-gated account
+    that last step reports `failed`, which is harmless (IOC-only, everything cancelled directly). It works while NEAR RPC
+    is down, if the owner session is still valid. Then the dashboard calls `pause_agent`, which needs RPC and the wallet.
+  Positions stay open. The authoritative stop is revoking the API wallet on Hyperliquid.
+- IOC-only mode: HL refuses `scheduleCancel` until an account has traded $1M. The engine then places IOC orders only
+  (limit rules skipped with `LIMIT_NEEDS_DEADMAN`), so nothing rests and a crashed worker leaves no bot order open; it
+  retries `scheduleCancel` hourly.
+- Full list of what the vault does not protect: `README.md`.
