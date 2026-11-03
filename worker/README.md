@@ -192,10 +192,13 @@ mandates are refused at challenge (`409 AGENT_TRADING_DISABLED`).
   ("Agent Treasury: activate AI agent trading limits", with a `mode: agent` line). The assistant can never produce this mode.
 - Each confirm of an agent mandate (create, Resume = re-sign the same hash, new limits) returns `agent_token` ONCE
   (`atk1_<bot>_<43 base64url>`). Only sha256 is stored (`bots.json`), the previous token dies with that commit. Owner revoke:
-  `POST /trading/bots/:id/agent-token/revoke`; archive revokes too. Stop blocks orders (`BOT_HALTED`) until a re-sign.
+  `POST /trading/bots/:id/agent-token/revoke`; archive revokes too. Stop (one bot or kill all) halts the bot AND revokes its token
+  (owner decision "Stop = full cut-off"); only a re-sign mints a new one. The token is re-checked after the wait for the slot.
 - `GET /trading/agent/state` (no HL call) and `POST /trading/agent/order` (`{pair, side, usdc | position_pct, reason, idempotency_key}`,
   2 KB max, one request in flight per bot, `TRADING_AGENT_MIN_ORDER_INTERVAL_SEC` between requests, in-memory idempotency cache).
-  A gate refusal is a 200 `{status: "rejected", code, final}`; only `TRANSIENT` codes have `final: false`.
+  A gate refusal is a 200 `{status: "rejected", code, final}`; only `TRANSIENT` codes have `final: false` (and are not cached).
+  A same-key same-body request that arrives while the first runs waits for its answer. An order sent without a clean answer is
+  `OUTCOME_UNKNOWN` (final): the agent must read the state first.
 - The agent's `reason` is sanitised to plain text for the owner (log, journal `note`); it is never returned to the agent and never
   put into an LLM prompt. The worker never logs the Authorization header.
 - Env: `TRADING_AGENT_ENABLED`, `TRADING_AGENT_MAX_ORDERS_PER_DAY` (10), `TRADING_AGENT_MIN_ORDER_INTERVAL_SEC` (10),
