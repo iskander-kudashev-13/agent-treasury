@@ -1874,7 +1874,7 @@ export const en = {
   "trading.agent.connectTarget": "Where to add it",
   "trading.agent.tabJson": "Other apps (JSON)",
   "trading.agent.configAria": "Config with the access key (focus to reveal)",
-  "trading.agent.pathHint": "Replace the path with where the agent-treasury folder is on your computer.",
+  "trading.agent.pathHint": "Run the command in a terminal from the agent-treasury folder. In the JSON, replace the path with that folder's path.",
   "trading.agent.urlNotSafe": "The agent needs the worker address with https, or a worker on this computer.",
   "trading.agent.savedDone": "I saved it → Open the bot",
   "trading.agent.done": "I saved it → Done",

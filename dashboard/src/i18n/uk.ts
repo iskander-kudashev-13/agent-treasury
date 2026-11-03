@@ -1876,7 +1876,7 @@ export const uk: Messages = {
   "trading.agent.connectTarget": "Куди додати",
   "trading.agent.tabJson": "Інші застосунки (JSON)",
   "trading.agent.configAria": "Налаштування з ключем доступу (наведіть фокус, щоб показати)",
-  "trading.agent.pathHint": "Замініть шлях на місце теки agent-treasury на вашому комп'ютері.",
+  "trading.agent.pathHint": "Виконайте команду в терміналі з теки agent-treasury. У JSON замініть шлях на шлях до цієї теки.",
   "trading.agent.urlNotSafe": "Агенту потрібна адреса воркера з https або воркер на цьому комп'ютері.",
   "trading.agent.savedDone": "Зберіг → Відкрити бота",
   "trading.agent.done": "Зберіг → Готово",

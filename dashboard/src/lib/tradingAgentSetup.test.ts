@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AgentNote } from "@/features/trading/bot/AgentActivity";
-import { claudeCodeCommand, MCP_ENTRY, mcpJson, workerUrlUsable } from "./tradingAgentSetup";
+import { claudeCodeCommand, MCP_ENTRY, MCP_ENTRY_SHELL, mcpJson, workerUrlUsable } from "./tradingAgentSetup";
 import type { LogEntry } from "./tradingClient";
 import { AGENT_CODES, agentCodeText, agentDecisions, TRANSIENT_CODES } from "./tradingSkips";
 
@@ -11,7 +11,7 @@ const TOKEN = `atk1_purr-agent_${"aB3-_".repeat(8)}xyz`;
 describe("connect snippets (ADR-0007 §7)", () => {
   it("Claude Code command is the ADR text", () => {
     expect(claudeCodeCommand({ workerUrl: "http://127.0.0.1:3000/", token: TOKEN })).toBe(
-      `claude mcp add agent-treasury-trading -e TRADING_WORKER_URL=http://127.0.0.1:3000 -e TRADING_AGENT_TOKEN=${TOKEN} -- node ${MCP_ENTRY}`,
+      ` claude mcp remove agent-treasury-trading -s local 2>/dev/null; claude mcp add agent-treasury-trading -e TRADING_WORKER_URL=http://127.0.0.1:3000 -e TRADING_AGENT_TOKEN=${TOKEN} -- node ${MCP_ENTRY_SHELL}`,
     );
   });
   it("quotes a worker URL with shell characters", () => {

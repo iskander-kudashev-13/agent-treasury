@@ -36,7 +36,7 @@ export function ConnectStep({ agentName, connect, onDone }: { agentName: string;
     target === "env"
       ? envSnippet(connect)
       : target === "code"
-        ? `# .mcp.json (do not commit it), or:\nclaude mcp add agent-treasury -e TREASURY_VAULT=${connect.vault} -e TREASURY_NETWORK=${connect.network} -e TREASURY_AGENT_ACCOUNT=${connect.account} -e TREASURY_AGENT_PRIVATE_KEY=${connect.privateKey} -- node /ABSOLUTE/PATH/TO/agent-treasury/mcp/dist/index.js\n\n${mcpConfig(connect, connect.privateKey)}`
+        ? `# .mcp.json (do not commit it), or:\nclaude mcp add agent-treasury -e TREASURY_VAULT=${connect.vault} -e TREASURY_NETWORK=${connect.network} -e TREASURY_AGENT_ACCOUNT=${connect.account} -e TREASURY_AGENT_PRIVATE_KEY=${connect.privateKey} -- node "$(pwd)/mcp/dist/index.js"   # run from the agent-treasury folder\n\n${mcpConfig(connect, connect.privateKey)}`
         : mcpConfig(connect, connect.privateKey);
 
   return (
