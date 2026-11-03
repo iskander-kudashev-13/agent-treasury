@@ -14,6 +14,16 @@ export const RPC_URL =
   env.VITE_NEAR_RPC ||
   env.VITE_NEAR_RPC_URL ||
   (NETWORK === "mainnet" ? "https://free.rpc.fastnear.com" : "https://test.rpc.fastnear.com");
+/**
+ * Read endpoints in order: the configured one, then the public ones of the same network. Free public RPCs rate-limit a
+ * dashboard page (dozens of views at load; 25 of 29 got HTTP 429 on 2026-11-03), so views retry on the next endpoint.
+ */
+export const RPC_URLS: readonly string[] = [
+  ...new Set([
+    RPC_URL,
+    ...(NETWORK === "mainnet" ? ["https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"] : ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"]),
+  ]),
+];
 
 export const WORKER_URL = (env.VITE_WORKER_URL ?? "").replace(/\/$/, "");
 /** NEAR Intents 1Click API (read-only /v0/status used by the "Quote check" before approving a payout). */
